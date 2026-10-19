@@ -101,7 +101,7 @@ export function importArtworksCsv(text: string): ImportResult {
       year: get('year') || '—',
       medium: get('medium') || '—',
       dimensions: height && width ? `${height} × ${width}${depth !== undefined ? ` × ${depth}` : ''} ${unitRaw || ''}`.trim() : '—',
-      price: priceAmount !== undefined ? `${priceCurrency} ${priceAmount}` : 'no price',
+      price: priceAmount !== undefined ? (Number.isFinite(priceAmount) ? `${priceCurrency} ${priceAmount}` : `price “${priceAmountRaw}” not a number`) : 'no price',
     };
 
     const row: ImportRow = { line: i + 1, problems, preview };

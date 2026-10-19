@@ -5,14 +5,15 @@ Format from the starter guide §06: working / mocked / blocked / known risk / ne
 ## What is actually running
 
 - Full app in **mock mode** on web, iOS (WebView) and Android (WebView): gallery + filters, artwork and artist pages, artist studio (profile, works with image intake, visibility per record and per price, vault, consent, export, withdraw, inquiry inbox), curator desk (verification request, shortlists, introduction requests), Kofi admin (review queue, curator verification, inquiry forwarding, append-only activity log).
-- Field-level visibility enforced in the data layer, with 116 automated tests (domain + screens) and an end-to-end browser run of the guide's 10-minute demo.
+- Field-level visibility enforced in the data layer, with 126 automated tests (domain + screens + hardening against spoofed sessions) and an end-to-end browser run of the guide's 10-minute demo.
+- Reviewable CSV import (`/studio/import`): every row is shown with its problems before anything is written; imports land as "Only me" drafts.
 - Supabase schema, RLS, redaction views, storage policies and RPCs — executed against a real PostgreSQL 16 with 100 passing assertions (`supabase/tests/LAST_RUN.log`).
 - Capacitor projects for iOS and Android generated and synced (`ios/`, `android/`).
 
 ## What is still a mock
 
 - **Accounts.** Mock mode has demo identities, not real sign-in. Supabase mode has email/password demo users (`docs/SUPABASE.md`) but has **not been run against a live Supabase project**.
-- **Storage.** Mock mode keeps images and vault files on-device (localStorage, ~5 MB practical limit — fine for a demo, not for a real catalog). Supabase mode uploads to private buckets with signed URLs; untested live.
+- **Storage.** Mock mode keeps images and vault files on-device (localStorage, ~5 MB practical limit on WebViews — fine for a demo, not for a real catalog). When the device store is full a save now fails loudly and rolls back instead of looking saved. Supabase mode uploads to private buckets with signed URLs; untested live.
 - **Realtime.** The Supabase data source subscribes to `postgres_changes`; untested live.
 - **Fonts** are bundled (fontsource), so the app works offline.
 
@@ -28,11 +29,12 @@ Account tab → pick an identity. Or open `dist-single/index.html` (one self-con
 | Check | Result |
 |---|---|
 | `npm run typecheck` | clean |
-| `npm test` | 116 / 116 |
+| `npm test` | 126 / 126 |
 | `npm run build` | clean, 447 kB JS gz 136 kB |
-| Browser smoke: 6 identities × every route × 375 px and 1024 px | 126 / 126 — no console errors, no horizontal overflow, axe serious/critical 0, every input labelled |
+| Browser smoke: 6 identities × every route × (375 px light, 1024 px light, 375 px dark), each screen must render for its role | 195 / 195 — no console errors, no horizontal overflow, axe serious/critical 0, every input labelled |
 | 10-minute demo flow (filter → open → artist hides price → curator sees "Price on request" → shortlist → intro request → Kofi forwards → artist accepts → export → curator verified by record, not client flag) | 18 / 18 |
 | RLS + RPC suite on PostgreSQL 16 | 100 assertions pass |
+| Independent review (fresh agent, adversarial: spoofed sessions, forged JWT claims, cross-artist access, quota exhaustion) | pass 1 found 4 blockers → all fixed with tests → pass 2 see `docs/REVIEW.md` |
 | `npx cap sync` | ios + android copied |
 | Cross-product contamination scan | 0 hits |
 

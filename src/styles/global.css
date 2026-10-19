@@ -1298,6 +1298,7 @@ ol {
   box-shadow: 3px 3px 0 var(--accent);
 }
 .dropzone {
+  display: block;
   border: 2px dashed var(--line);
   border-radius: var(--radius-sm);
   padding: var(--space-4);
@@ -1443,4 +1444,60 @@ code,
 .mono {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.9em;
+}
+
+/* ---------- wide screens: the tab bar becomes a left rail ---------- */
+@media (min-width: 900px) {
+  .tabbar {
+    inset: 0 auto 0 0;
+    width: 96px;
+    border-top: 0;
+    border-right: 2px solid var(--line);
+    padding-bottom: 0;
+  }
+  .tabbar__inner {
+    flex-direction: column;
+    height: auto;
+    max-width: none;
+    padding-top: calc(var(--safe-top) + 12px);
+    gap: 2px;
+  }
+  .tabbar__inner::before {
+    content: 'Kofi';
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: var(--fs-lg);
+    letter-spacing: -0.03em;
+    text-align: center;
+    padding: 10px 0 18px;
+    color: var(--text);
+  }
+  .tab {
+    flex: none;
+    height: 72px;
+  }
+  .tab[aria-current='page']::before {
+    top: 14%;
+    bottom: 14%;
+    left: -2px;
+    right: auto;
+    width: 4px;
+    height: auto;
+  }
+  .screen {
+    padding-left: 96px;
+    padding-bottom: var(--space-8);
+  }
+  .toasts {
+    left: calc(96px + var(--gutter));
+    bottom: 24px;
+  }
+  .sticky-actions {
+    bottom: 16px;
+  }
+  .sheet {
+    margin-left: calc(96px + (100vw - 96px - 560px) / 2);
+    margin-right: 0;
+  }
 }
