@@ -74,13 +74,13 @@ export function Button({ tone = 'primary', size = 'md', block, icon, loading, cl
     <button
       type="button"
       className={cls}
-      disabled={loading || rest.disabled}
       aria-busy={loading || undefined}
       onClick={(e) => {
         void tap();
         onClick?.(e);
       }}
       {...rest}
+      disabled={loading || rest.disabled}
     >
       {icon}
       {loading ? 'Working…' : children}
@@ -132,7 +132,7 @@ export function VisibilityBadge({ level, prefix }: { level: Visibility; prefix?:
   );
 }
 
-export function VisibilityPicker({ value, onChange, label, options = VISIBILITIES }: { value: Visibility; onChange: (v: Visibility) => void; label: string; options?: Visibility[] }) {
+export function VisibilityPicker({ value, onChange, label, options = VISIBILITIES, captions }: { value: Visibility; onChange: (v: Visibility) => void; label: string; options?: Visibility[]; captions?: Partial<Record<Visibility, string>> }) {
   const id = useId();
   return (
     <div className="field" role="radiogroup" aria-labelledby={id}>
@@ -144,9 +144,9 @@ export function VisibilityPicker({ value, onChange, label, options = VISIBILITIE
           <button key={v} type="button" role="radio" aria-checked={value === v} className="vis-option" onClick={() => onChange(v)}>
             <span className="vis-option__dot" aria-hidden="true" />
             <span>
-              <span className="vis-option__title">{VISIBILITY_LABEL[v]}</span>
+              <span className="vis-option__title">{captions?.[v] ?? VISIBILITY_LABEL[v]}</span>
               <span className="vis-option__help" style={{ display: 'block' }}>
-                {VISIBILITY_HELP[v]}
+                {captions?.[v] ? VISIBILITY_HELP[v] : VISIBILITY_HELP[v]}
               </span>
             </span>
           </button>
@@ -243,13 +243,22 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
 }
 
 /* ---------- structure ---------- */
+/**
+ * `back` may be `true` (go back, or to `/` when the app was opened on a deep link)
+ * or a path string (always go there — use when there is no sensible history).
+ */
 export function TopBar({ title, back, right }: { title: string; back?: boolean | string; right?: ReactNode }) {
   const nav = useNavigate();
+  const goBack = () => {
+    if (typeof back === 'string') return nav(back);
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    return idx > 0 ? nav(-1) : nav('/');
+  };
   return (
     <header className="topbar">
       <div className="container container--wide topbar__inner">
         {back && (
-          <button type="button" className="topbar__back" aria-label="Back" onClick={() => (typeof back === 'string' ? nav(back) : nav(-1))}>
+          <button type="button" className="topbar__back" aria-label="Back" onClick={goBack}>
             <Icon.Back />
           </button>
         )}
@@ -339,10 +348,23 @@ export function Avatar({ name, color, size = 'md' }: { name: string; color: stri
     .map((s) => s[0]?.toUpperCase() ?? '')
     .join('');
   return (
-    <span className={`avatar ${size === 'lg' ? 'avatar--lg' : ''}`} style={{ background: color }} aria-hidden="true">
+    <span className={`avatar ${size === 'lg' ? 'avatar--lg' : ''}`} style={{ background: color, color: inkFor(color), textShadow: 'none' }} aria-hidden="true">
       {initials}
     </span>
   );
+}
+
+/** White or ink text, whichever has the higher contrast on a hex background. */
+export function inkFor(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return '#fff';
+  const n = parseInt(m[1]!, 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? '#16122B' : '#fff';
 }
 
 export function StatusDot({ status }: { status: string }) {

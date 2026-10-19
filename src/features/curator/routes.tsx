@@ -1,13 +1,13 @@
 import type { RouteObject } from 'react-router-dom';
-import { TopBar } from '@/ui';
+import { CuratorHome } from './CuratorHome';
+import { ShortlistScreen } from './ShortlistScreen';
+import { VerifyScreen } from './VerifyScreen';
+import { CuratorInquiries } from './CuratorInquiries';
 
-function Placeholder() {
-  return (
-    <div className="screen">
-      <TopBar title="curator" />
-      <main className="container"><p>Coming soon.</p></main>
-    </div>
-  );
-}
-
-export const curatorRoutes: RouteObject[] = [{ index: true, element: <Placeholder /> }];
+/** Relative children of `/curator`. The role gate lives in the spine. */
+export const curatorRoutes: RouteObject[] = [
+  { index: true, element: <CuratorHome /> },
+  { path: 'shortlists/:id', element: <ShortlistScreen /> },
+  { path: 'verify', element: <VerifyScreen /> },
+  { path: 'inquiries', element: <CuratorInquiries /> },
+];

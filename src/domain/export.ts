@@ -6,7 +6,8 @@ export interface ArtistExportBundle {
   format: 'kofi-collections-export';
   version: 1;
   notice: string;
-  artist: Artist;
+  /** The artist's own record. Kofi's internal staff notes are never part of an artist export. */
+  artist: Omit<Artist, 'kofiNotes'>;
   artworks: Artwork[];
   documents: Omit<ArtDocument, 'fileRef'>[];
 }
@@ -22,12 +23,13 @@ export function buildArtistExport(
   documents: ArtDocument[],
   now = new Date(),
 ): ArtistExportBundle {
+  const { kofiNotes: _staffOnly, ...ownRecord } = artist;
   return {
     exportedAt: now.toISOString(),
     format: 'kofi-collections-export',
     version: 1,
     notice: EXPORT_NOTICE,
-    artist,
+    artist: ownRecord,
     artworks: artworks.map((a) => ({
       ...a,
       // Images are included inline in mock mode (data URLs) — the artist owns them.

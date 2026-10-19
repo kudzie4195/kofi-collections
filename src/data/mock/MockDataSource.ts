@@ -67,7 +67,11 @@ export class MockDataSource implements DataSource {
     return () => this.listeners.delete(listener);
   }
 
-  private commit(): void {
+  /**
+   * Persist and notify. `silent` persists without notifying subscribers — used for
+   * audit rows written during reads, so a read never re-triggers itself.
+   */
+  private commit(silent = false): void {
     if (this.persist) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
@@ -75,6 +79,7 @@ export class MockDataSource implements DataSource {
         /* storage full or unavailable — in-memory state still works */
       }
     }
+    if (silent) return;
     for (const l of this.listeners) l();
   }
 
@@ -149,8 +154,8 @@ export class MockDataSource implements DataSource {
   }
 
   private requireMyCurator(viewer: Viewer) {
-    if (viewer.role !== 'curator' || !viewer.curatorId) throw new ForbiddenError('Sign in as a curator to do this.');
-    const c = this.state.curators.find((x) => x.id === viewer.curatorId);
+    if (viewer.role !== 'curator') throw new ForbiddenError('Sign in as a curator to do this.');
+    const c = this.state.curators.find((x) => x.id === viewer.curatorId || (!!viewer.userId && x.userId === viewer.userId));
     if (!c) throw new NotFoundError('Curator record not found.');
     return c;
   }
@@ -198,7 +203,7 @@ export class MockDataSource implements DataSource {
     const view = projectArtwork(aw, this.artistById(aw.artistId), v);
     if (view && v.role === 'admin' && aw.visibility === 'private') {
       this.audit(v, 'private.view', 'artwork', aw.id);
-      this.commit();
+      this.commit(true);
     }
     return view;
   }
@@ -271,7 +276,7 @@ export class MockDataSource implements DataSource {
 
   async submitForReview(viewer: Viewer): Promise<ArtistView> {
     const a = this.requireMyArtist(viewer);
-    if (!a.consentVersion) throw new ValidationError('Accept the consent terms before submitting.', 'consent');
+    if (a.consentVersion !== CONSENT_VERSION) throw new ValidationError('Accept the current consent terms before submitting.', 'consent');
     if (a.status === 'approved') return projectArtist(a, this.resolve(viewer))!;
     a.status = 'pending';
     a.updatedAt = this.iso();
@@ -328,7 +333,7 @@ export class MockDataSource implements DataSource {
       docs = this.state.documents.filter((d) => d.visibility === 'kofi' || d.visibility === 'private');
       if (artworkId) {
         this.audit(v, 'private.view', 'artwork', artworkId, { what: 'documents' });
-        this.commit();
+        this.commit(true);
       }
     } else {
       const a = this.requireMyArtist(v);
@@ -404,8 +409,9 @@ export class MockDataSource implements DataSource {
   }
 
   async getMyCurator(viewer: Viewer): Promise<CuratorRow | undefined> {
-    if (viewer.role !== 'curator' || !viewer.curatorId) return undefined;
-    return this.curatorRow(viewer.curatorId);
+    if (viewer.role !== 'curator') return undefined;
+    const c = this.state.curators.find((x) => x.id === viewer.curatorId || (!!viewer.userId && x.userId === viewer.userId));
+    return c ? this.curatorRow(c.id) : undefined;
   }
 
   async requestVerification(viewer: Viewer, input: CuratorRequestInput): Promise<CuratorRow> {
@@ -584,7 +590,10 @@ export class MockDataSource implements DataSource {
     inq.status = status;
     inq.decidedAt = this.iso();
     inq.decidedBy = v.userId ?? v.role;
-    if (note?.trim()) inq.staffNote = note.trim();
+    if (note?.trim()) {
+      if (v.role === 'admin') inq.staffNote = note.trim();
+      else inq.artistNote = note.trim();
+    }
     this.audit(v, 'inquiry.status', 'inquiry', inq.id, { status });
     this.commit();
     return this.inquiryRow(inq);

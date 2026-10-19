@@ -176,6 +176,8 @@ describe('MockDataSource — server-equivalent enforcement', () => {
     const out = await d.exportMyData(owner);
     const bundle = JSON.parse(out.json) as { artist: { contact: { email: string } }; artworks: unknown[]; documents: { fileRef?: string }[] };
     expect(bundle.artist.contact.email).toBe('mara@example.com');
+    expect(JSON.stringify(bundle)).not.toContain('Onboarded Sept'); // kofiNotes are staff-only
+    expect(JSON.stringify(bundle)).not.toContain('kofiNotes');
     expect(bundle.artworks).toHaveLength(3);
     expect(bundle.documents.every((doc) => doc.fileRef === undefined)).toBe(true);
     expect(out.csv.split('\r\n')[0]).toContain('title,year,medium');

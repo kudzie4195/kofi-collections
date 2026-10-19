@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kofi Collections</string>
+    <string name="title_activity_main">Kofi Collections</string>
+    <string name="package_name">org.kofi.collections</string>
+    <string name="custom_url_scheme">org.kofi.collections</string>
+</resources>

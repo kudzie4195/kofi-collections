@@ -123,13 +123,13 @@
 /* Medium → accent mapping. Used by wall labels and chips so every medium has a color. */
 [data-medium='painting'] { --m: var(--cobalt); --m-ink: #fff; }
 [data-medium='drawing'] { --m: var(--ink); --m-ink: #fff; }
-[data-medium='printmaking'] { --m: var(--violet); --m-ink: #fff; }
-[data-medium='sculpture'] { --m: var(--coral); --m-ink: #fff; }
+[data-medium='printmaking'] { --m: #5b41e6; --m-ink: #fff; }
+[data-medium='sculpture'] { --m: var(--coral); --m-ink: var(--ink); }
 [data-medium='ceramics'] { --m: var(--butter); --m-ink: var(--ink); }
 [data-medium='textile'] { --m: var(--lime); --m-ink: var(--ink); }
-[data-medium='photography'] { --m: #0fa3b1; --m-ink: #fff; }
-[data-medium='video'] { --m: #0fa3b1; --m-ink: #fff; }
-[data-medium='installation'] { --m: var(--coral-deep); --m-ink: #fff; }
-[data-medium='mixed media'] { --m: var(--violet); --m-ink: #fff; }
+[data-medium='photography'] { --m: #0fa3b1; --m-ink: var(--ink); }
+[data-medium='video'] { --m: #0fa3b1; --m-ink: var(--ink); }
+[data-medium='installation'] { --m: #c43a17; --m-ink: #fff; }
+[data-medium='mixed media'] { --m: #5b41e6; --m-ink: #fff; }
 [data-medium='digital'] { --m: var(--cobalt-deep); --m-ink: #fff; }
 [data-medium='performance'] { --m: var(--butter-deep); --m-ink: var(--ink); }

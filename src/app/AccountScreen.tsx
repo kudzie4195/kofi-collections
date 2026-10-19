@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button, Notice, TopBar, Icon, FictionalFooter } from '@/ui';
 import { useSession } from '@/state/session';
-import { useToast } from '@/state/toast';
+import { errorMessage, useToast } from '@/state/toast';
 import type { DemoIdentity, Role } from '@/domain/types';
 
 const ROLE_COLOR: Record<Role, string> = { public: '#6b6684', artist: '#2436F5', curator: '#FF5C39', admin: '#16122B' };
@@ -22,8 +22,19 @@ export function AccountScreen() {
   const toast = useToast();
   const state = loc.state as { from?: string; needs?: Role[] } | null;
 
-  const choose = (id: DemoIdentity) => {
-    signInAs(id);
+  const choose = async (id: DemoIdentity) => {
+    if (data.mode === 'supabase') {
+      try {
+        const { signInDemo } = await import('@/data/supabase/SupabaseDataSource');
+        const viewer = await signInDemo(data, id.id);
+        signInAs({ ...id, viewer });
+      } catch (e) {
+        toast.push(errorMessage(e), 'error');
+        return;
+      }
+    } else {
+      signInAs(id);
+    }
     toast.push(`Signed in as ${id.label}`, 'success');
     const target = state?.from && state.needs?.includes(id.viewer.role) ? state.from : homeFor(id.viewer.role);
     nav(target, { replace: true });
@@ -72,19 +83,25 @@ export function AccountScreen() {
           </div>
         </section>
 
+        {(data.mode === 'mock' || viewer.role === 'admin') && (
         <section className="stack">
           <h2 className="h2">Demo data</h2>
           <p className="muted small">Running in {data.mode} mode. Resetting restores the original fictional sample content.</p>
           <Button
             tone="secondary"
             onClick={async () => {
-              await data.resetDemoData();
-              toast.push('Demo data reset', 'success');
+              try {
+                await data.resetDemoData();
+                toast.push('Demo data reset', 'success');
+              } catch (e) {
+                toast.push(errorMessage(e), 'error');
+              }
             }}
           >
             Reset demo data
           </Button>
         </section>
+        )}
         <FictionalFooter />
       </main>
     </div>

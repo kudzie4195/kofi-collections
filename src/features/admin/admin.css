@@ -1,0 +1,201 @@
+/* Kofi admin console — local styles, built from global tokens only. */
+
+.tiles.admin-tiles {
+  gap: 14px;
+}
+@media (min-width: 640px) {
+  .tiles.admin-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.tile.admin-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 132px;
+  box-shadow: 5px 5px 0 var(--ink);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+  position: relative;
+  overflow: hidden;
+}
+:root[data-theme='dark'] .admin-tile {
+  box-shadow: 5px 5px 0 var(--paper);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .admin-tile {
+    box-shadow: 5px 5px 0 var(--paper);
+  }
+}
+.admin-tile:active {
+  transform: translate(3px, 3px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.admin-tile .tile__num {
+  font-size: clamp(2.6rem, 14vw, 3.6rem);
+}
+.tile.admin-tile--clear {
+  background: var(--surface);
+  color: var(--text);
+}
+.admin-tile--clear .tile__num {
+  color: var(--text-3);
+}
+.admin-tile__hint {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  margin-top: 6px;
+  opacity: 0.85;
+}
+.admin-tile__corner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  opacity: 0.8;
+}
+
+/* Segmented filters can hold five short labels; on very narrow phones they scroll inside, never the page. */
+.seg-wrap {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.seg-wrap::-webkit-scrollbar {
+  display: none;
+}
+.seg-wrap .segmented {
+  min-width: max-content;
+}
+.seg-wrap .segmented__btn {
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+/* dense operations cards */
+.ops {
+  padding: var(--space-4) 0;
+}
+.ops + .ops {
+  border-top: 1.5px solid var(--line-soft);
+}
+.ops__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.ops__title {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.ops__sub {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.ops__quote {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+  overflow-wrap: anywhere;
+}
+.ops__actions {
+  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.ops__meta {
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.group-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-lg);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.group-title__count {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.row-chev {
+  opacity: 0.5;
+  transform: rotate(180deg);
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.panel.private-panel {
+  border-style: dashed;
+  border-color: var(--coral-deep);
+}
+.private-panel .panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.private-panel .panel__title svg {
+  width: 18px;
+  height: 18px;
+}
+
+.work-row__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.list-row.work-row {
+  align-items: flex-start;
+}
+.work-row__side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+@media (max-width: 420px) {
+  .list-row.work-row {
+    flex-wrap: wrap;
+  }
+  .work-row__side {
+    width: 100%;
+    align-items: flex-start;
+    padding-left: 68px;
+  }
+}
+
+.ghost-flat.btn--ghost {
+  box-shadow: none;
+}

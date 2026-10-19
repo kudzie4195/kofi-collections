@@ -251,8 +251,10 @@ export interface Inquiry {
   createdAt: string;
   decidedAt?: string;
   decidedBy?: string;
-  /** Optional note from Kofi staff when forwarding. */
+  /** Optional note from Kofi staff when forwarding or declining. */
   staffNote?: string;
+  /** Optional note from the artist when declining. Not shown to the curator. */
+  artistNote?: string;
 }
 
 export type DocumentType =

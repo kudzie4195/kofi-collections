@@ -281,7 +281,7 @@ ol {
   padding-inline: 5px;
   border-radius: var(--radius-pill);
   background: var(--coral);
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   line-height: 18px;
   text-align: center;
@@ -329,7 +329,7 @@ ol {
 }
 .btn--coral {
   --btn-bg: var(--coral);
-  --btn-ink: #fff;
+  --btn-ink: var(--ink);
 }
 .btn--lime {
   --btn-bg: var(--lime);
@@ -361,6 +361,9 @@ ol {
   padding-inline: var(--space-3);
   font-size: var(--fs-sm);
   box-shadow: 3px 3px 0 var(--line);
+}
+.btn--ghost.btn--sm {
+  box-shadow: none;
 }
 .btn--block {
   width: 100%;
@@ -462,6 +465,24 @@ ol {
 :root[data-theme='dark'] .vis--private {
   color: var(--butter);
 }
+:root[data-theme='dark'] .vis--institutions {
+  color: #9aa3ff;
+}
+:root[data-theme='dark'] .vis--public {
+  color: #6fe3a1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .vis--kofi,
+  :root:not([data-theme='light']) .vis--private {
+    color: var(--butter);
+  }
+  :root:not([data-theme='light']) .vis--institutions {
+    color: #9aa3ff;
+  }
+  :root:not([data-theme='light']) .vis--public {
+    color: #6fe3a1;
+  }
+}
 .vis svg {
   width: 12px;
   height: 12px;
@@ -552,7 +573,7 @@ ol {
 }
 .label-card__status--sold {
   background: var(--coral);
-  color: #fff;
+  color: var(--ink);
 }
 .label-card__status--hold {
   background: var(--butter);
@@ -660,7 +681,12 @@ ol {
 .avatar--lg {
   width: 72px;
   height: 72px;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
+  letter-spacing: -0.04em;
+}
+.avatar {
+  letter-spacing: -0.03em;
+  overflow: hidden;
 }
 
 /* ---------- forms ---------- */
@@ -990,7 +1016,7 @@ ol {
 }
 .notice--coral {
   background: var(--coral);
-  color: #fff;
+  color: var(--ink);
 }
 .notice--plain {
   background: var(--surface);
@@ -1035,7 +1061,7 @@ ol {
 }
 .toast--error {
   background: var(--coral);
-  color: #fff;
+  color: var(--ink);
   box-shadow: 4px 4px 0 var(--ink);
 }
 .toast--info {
@@ -1081,6 +1107,11 @@ ol {
 }
 .identity[aria-current='true'] {
   box-shadow: var(--shadow-pin-accent);
+}
+.identity > svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 .identity__label {
   font-weight: 700;
@@ -1194,7 +1225,7 @@ ol {
 }
 .tile--coral {
   background: var(--coral);
-  color: #fff;
+  color: var(--ink);
 }
 .tile--lime {
   background: var(--lime);
@@ -1269,7 +1300,18 @@ ol {
   cursor: pointer;
 }
 .dropzone input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.dropzone {
+  position: relative;
+}
+.dropzone:focus-within {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 2px;
 }
 .upload-grid {
   display: grid;

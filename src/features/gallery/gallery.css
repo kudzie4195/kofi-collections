@@ -1,0 +1,284 @@
+/* Public discovery screens (gallery, artwork, artists). Scoped with the kg- prefix;
+   uses only tokens from src/styles/tokens.css. This file loads before global.css,
+   so overrides of kit classes use two-class selectors to win on specificity. */
+
+/* ---------- hero ---------- */
+.kg-hero .band__inner {
+  padding-block: var(--space-7) var(--space-6);
+}
+.kg-hero__title {
+  max-width: 13ch;
+}
+.kg-hero__line {
+  background: var(--surface);
+  padding: 0 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.kg-hero__line--offset {
+  background: var(--text);
+  color: var(--bg);
+}
+.kg-hero__lede {
+  display: inline-block;
+  margin-top: var(--space-5);
+  max-width: 42ch;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 4px 4px 0 var(--cobalt);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+/* ---------- sticky search + chips ---------- */
+.kg-toolbar {
+  position: sticky;
+  top: calc(var(--safe-top) + var(--topbar-h) + 2px);
+  z-index: 15;
+  background: var(--bg);
+  border-bottom: 2px solid var(--line);
+  padding-block: 10px;
+}
+.kg-toolbar--flush {
+  margin-inline: calc(-1 * var(--gutter));
+  padding-inline: var(--gutter);
+  border-top: 2px solid var(--line);
+}
+.kg-search {
+  position: relative;
+}
+.kg-search__icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.kg-search .kg-search__input {
+  padding-left: 44px;
+  padding-right: 44px;
+}
+.kg-search__input::-webkit-search-cancel-button {
+  display: none;
+}
+.kg-search__clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+}
+.kg-search__clear svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- gallery controls ---------- */
+.kg-gallery {
+  padding-top: var(--space-4);
+}
+.kg-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.kg-sort {
+  position: relative;
+  flex: 1 1 150px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.kg-sort svg {
+  position: absolute;
+  left: 10px;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+.kg-sort .kg-sort__select {
+  min-height: 40px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-left: 36px;
+  text-overflow: ellipsis;
+}
+.kg-unit {
+  flex: none;
+  width: 96px;
+}
+.kg-unit .segmented__btn {
+  min-height: 36px;
+}
+.kg-count {
+  margin-block: var(--space-3);
+  min-height: 36px;
+}
+
+/* ---------- filter sheet ---------- */
+.kg-range {
+  align-items: end;
+}
+.kg-range__to {
+  padding-bottom: 13px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+.kg-num {
+  position: relative;
+}
+.kg-num .input {
+  padding-right: 36px;
+  min-width: 0;
+}
+.kg-num__suffix {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+.kg-inline-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  margin-top: var(--space-3);
+}
+.kg-inline-add > .btn {
+  margin-top: 27px;
+}
+
+/* ---------- artwork + artist detail ---------- */
+.kg-detail {
+  padding-top: var(--space-5);
+}
+.kg-title {
+  overflow-wrap: break-word;
+}
+.kg-profile .kg-title {
+  font-size: clamp(1.4rem, 6.5vw, var(--fs-2xl));
+}
+.kg-byline {
+  font-size: var(--fs-md);
+}
+.kg-price {
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+.kg-price--withheld {
+  color: var(--text-3);
+  font-weight: 500;
+}
+.kg-block {
+  display: block;
+}
+.kg-detail .spec dd {
+  overflow-wrap: anywhere;
+}
+.kg-noimg {
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+.kg-thumb {
+  flex: none;
+  border-radius: var(--radius-sm);
+}
+.kg-actions > .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  padding-inline: var(--space-3);
+}
+.kg-actions--inline > .btn {
+  flex: 0 1 auto;
+}
+.kg-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 44%);
+  gap: 14px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding: 2px var(--gutter) 10px;
+  margin-inline: calc(-1 * var(--gutter));
+}
+.kg-rail::-webkit-scrollbar {
+  display: none;
+}
+.kg-rail > li {
+  scroll-snap-align: start;
+  min-width: 0;
+}
+@media (min-width: 560px) {
+  .kg-rail {
+    grid-auto-columns: minmax(160px, 30%);
+  }
+}
+
+/* ---------- artists ---------- */
+.kg-artist-row {
+  align-items: flex-start;
+}
+.kg-artist-row__name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.kg-artist-row__name .list-row__title {
+  min-width: 0;
+}
+.kg-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 6px 6px 0 var(--m, var(--ink));
+}
+.kg-profile__top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.kg-profile__top .avatar {
+  box-shadow: 4px 4px 0 var(--m, var(--ink));
+}
+.kg-profile__id {
+  min-width: 0;
+  flex: 1;
+}
+.kg-statement {
+  margin: 0;
+  border-left: 6px solid var(--m, var(--accent));
+  padding: 4px 0 4px 14px;
+}
+.kg-statement blockquote {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-lg);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}

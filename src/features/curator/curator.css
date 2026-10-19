@@ -1,0 +1,282 @@
+/* Curator workspace — local styles. Built only from global tokens. */
+
+/* ---------- institutional pass (the memorable moment on the desk) ---------- */
+.pass {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 6px 6px 0 var(--pass-shadow, var(--cobalt));
+  overflow: hidden;
+}
+.pass--verified {
+  --pass-band: var(--lime);
+  --pass-shadow: var(--cobalt);
+}
+.pass--pending {
+  --pass-band: var(--butter);
+  --pass-shadow: var(--ink);
+}
+.pass--rejected,
+.pass--none {
+  --pass-band: var(--coral);
+  --pass-shadow: var(--ink);
+}
+:root[data-theme='dark'] .pass--pending,
+:root[data-theme='dark'] .pass--rejected,
+:root[data-theme='dark'] .pass--none {
+  --pass-shadow: var(--lime);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pass--pending,
+  :root:not([data-theme='light']) .pass--rejected,
+  :root:not([data-theme='light']) .pass--none {
+    --pass-shadow: var(--lime);
+  }
+}
+.pass__band {
+  background: var(--pass-band);
+  border-right: 2px solid var(--line);
+  background-image: repeating-linear-gradient(-45deg, transparent 0 6px, rgba(22, 18, 43, 0.18) 6px 8px);
+}
+.pass__body {
+  padding: var(--space-4);
+  min-width: 0;
+}
+.pass__kicker {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-3);
+}
+.pass__name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.6rem, 8vw, 2.2rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-top: 4px;
+  overflow-wrap: break-word;
+}
+.pass__title {
+  margin-top: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.pass__inst {
+  margin-top: var(--space-3);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 600;
+}
+.pass__inst svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 2px;
+}
+.pass__stamp {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 3px double var(--line);
+  background: var(--pass-band);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  transform: rotate(-12deg);
+  padding: 6px;
+}
+.pass__status {
+  margin-top: var(--space-3);
+  min-height: 78px;
+  padding-right: 100px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* ---------- shortlist rows ---------- */
+.sl-count {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--butter);
+  color: var(--ink);
+  box-shadow: 3px 3px 0 var(--line);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-xl);
+  line-height: 1;
+}
+.sl-row-chev {
+  opacity: 0.5;
+  transform: rotate(180deg);
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+/* ---------- shortlist items (wall label + desk actions) ---------- */
+.sl-items {
+  display: grid;
+  gap: var(--space-5);
+}
+@media (min-width: 680px) {
+  .sl-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.sl-item {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+.sl-item__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.sl-item__actions .btn {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  padding-block: 6px;
+}
+.sl-item__note {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  border-left: 3px solid var(--m, var(--accent));
+  padding-left: 8px;
+  overflow-wrap: anywhere;
+}
+.sl-num {
+  display: inline-block;
+  min-width: 30px;
+  padding: 2px 6px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 12px;
+  text-align: center;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.sl-gone {
+  border: 2px dashed var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  color: var(--text-3);
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.sl-gone__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.toolbar__unit {
+  width: 120px;
+}
+
+/* ---------- inquiry progress track ---------- */
+.inq {
+  padding: var(--space-4) 0;
+}
+.inq + .inq {
+  border-top: 1.5px solid var(--line-soft);
+}
+.inq__head {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.inq__artist {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-lg);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.inq__msg {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.inq-track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: var(--space-3);
+}
+.inq-track__step {
+  height: 8px;
+  border: 1.5px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+}
+.inq-track__step--on {
+  background: var(--cobalt);
+}
+.inq-track--accepted .inq-track__step--on {
+  background: var(--lime);
+}
+.inq-track--declined .inq-track__step {
+  background: var(--coral);
+}
+.inq__status {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The kit's .btn--sm shadow wins over .btn--ghost; keep ghost buttons flat here. */
+.ghost-flat.btn--ghost {
+  box-shadow: none;
+}
+.sl-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
