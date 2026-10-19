@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-single
+.env
+.env.local
+ios/App/Pods
+ios/App/App.xcworkspace/xcuserdata
+android/.gradle
+android/app/build
+android/build
+android/local.properties
+*.log

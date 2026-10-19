@@ -1,0 +1,135 @@
+/* Kofi Collections — design tokens
+   Palette: cobalt / coral / lime / butter on lilac-white, ink for text.
+   Shadows are hard, two-tone offsets (a wall-label pinned to a wall), never soft grey. */
+
+:root {
+  --cobalt: #2436f5;
+  --cobalt-deep: #1623b8;
+  --coral: #ff5c39;
+  --coral-deep: #d8421f;
+  --lime: #cfff4a;
+  --lime-deep: #a8d61b;
+  --butter: #ffd23f;
+  --butter-deep: #e0b000;
+  --violet: #7b61ff;
+  --ink: #16122b;
+  --ink-2: #3a3550;
+  --ink-3: #6b6684;
+  --paper: #f4f2fa;
+  --paper-2: #ffffff;
+  --paper-3: #e9e6f4;
+  --line: #16122b;
+  --line-soft: rgba(22, 18, 43, 0.14);
+  --danger: #d8421f;
+  --ok: #1a7f4b;
+
+  --accent: var(--cobalt);
+  --accent-ink: #ffffff;
+  --accent-2: var(--coral);
+
+  --bg: var(--paper);
+  --surface: var(--paper-2);
+  --surface-2: var(--paper-3);
+  --text: var(--ink);
+  --text-2: var(--ink-2);
+  --text-3: var(--ink-3);
+
+  --font-display: 'Syne', 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Instrument Sans', -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+
+  /* type scale — 1.25 ratio from 16 */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5625rem;
+  --fs-2xl: 1.953rem;
+  --fs-3xl: 2.441rem;
+  --fs-4xl: 3.052rem;
+
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --gutter: 16px;
+  --content-max: 720px;
+  --wide-max: 1120px;
+
+  --shadow-pin: 4px 4px 0 var(--ink);
+  --shadow-pin-accent: 4px 4px 0 var(--accent);
+  --shadow-pin-lg: 8px 8px 0 var(--ink);
+  --shadow-float: 0 12px 32px -12px rgba(22, 18, 43, 0.35);
+
+  --tabbar-h: 64px;
+  --topbar-h: 56px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med: 240ms;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #110e22;
+    --surface: #1b1731;
+    --surface-2: #262040;
+    --text: #f4f2fa;
+    --text-2: #cfcbe3;
+    --text-3: #9a95b8;
+    --line: #f4f2fa;
+    --line-soft: rgba(244, 242, 250, 0.16);
+    --accent: var(--lime);
+    --accent-ink: var(--ink);
+    --accent-2: var(--coral);
+    --shadow-pin: 4px 4px 0 var(--lime);
+    --shadow-pin-accent: 4px 4px 0 var(--coral);
+    --shadow-pin-lg: 8px 8px 0 var(--lime);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #110e22;
+  --surface: #1b1731;
+  --surface-2: #262040;
+  --text: #f4f2fa;
+  --text-2: #cfcbe3;
+  --text-3: #9a95b8;
+  --line: #f4f2fa;
+  --line-soft: rgba(244, 242, 250, 0.16);
+  --accent: var(--lime);
+  --accent-ink: var(--ink);
+  --accent-2: var(--coral);
+  --shadow-pin: 4px 4px 0 var(--lime);
+  --shadow-pin-accent: 4px 4px 0 var(--coral);
+  --shadow-pin-lg: 8px 8px 0 var(--lime);
+  color-scheme: dark;
+}
+
+/* Medium → accent mapping. Used by wall labels and chips so every medium has a color. */
+[data-medium='painting'] { --m: var(--cobalt); --m-ink: #fff; }
+[data-medium='drawing'] { --m: var(--ink); --m-ink: #fff; }
+[data-medium='printmaking'] { --m: var(--violet); --m-ink: #fff; }
+[data-medium='sculpture'] { --m: var(--coral); --m-ink: #fff; }
+[data-medium='ceramics'] { --m: var(--butter); --m-ink: var(--ink); }
+[data-medium='textile'] { --m: var(--lime); --m-ink: var(--ink); }
+[data-medium='photography'] { --m: #0fa3b1; --m-ink: #fff; }
+[data-medium='video'] { --m: #0fa3b1; --m-ink: #fff; }
+[data-medium='installation'] { --m: var(--coral-deep); --m-ink: #fff; }
+[data-medium='mixed media'] { --m: var(--violet); --m-ink: #fff; }
+[data-medium='digital'] { --m: var(--cobalt-deep); --m-ink: #fff; }
+[data-medium='performance'] { --m: var(--butter-deep); --m-ink: var(--ink); }
