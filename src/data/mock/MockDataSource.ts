@@ -21,6 +21,7 @@ import { artworkVisibleTo, canEdit, projectArtist, projectArtwork } from '@/doma
 import {
   ForbiddenError,
   NotFoundError,
+  StorageFullError,
   ValidationError,
   type AdminArtistRow,
   type ArtistPatch,
@@ -48,6 +49,8 @@ export interface MockOptions {
 export class MockDataSource implements DataSource {
   readonly mode = 'mock' as const;
   private state: MockState;
+  /** Serialized copy of the last state known to be durable; the rollback target when storage fails. */
+  private lastPersisted: string;
   private listeners = new Set<() => void>();
   private readonly persist: boolean;
   private readonly now: () => Date;
@@ -58,6 +61,7 @@ export class MockDataSource implements DataSource {
     this.now = opts.now ?? (() => new Date());
     this.makeId = opts.idFactory ?? ((p) => `${p}_${Math.random().toString(36).slice(2, 10)}`);
     this.state = this.load() ?? buildSeed();
+    this.lastPersisted = JSON.stringify(this.state);
   }
 
   /* ---------- infrastructure ---------- */
@@ -72,13 +76,24 @@ export class MockDataSource implements DataSource {
    * audit rows written during reads, so a read never re-triggers itself.
    */
   private commit(silent = false): void {
+    const serialized = JSON.stringify(this.state);
     if (this.persist) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-      } catch {
-        /* storage full or unavailable — in-memory state still works */
+        localStorage.setItem(STORAGE_KEY, serialized);
+      } catch (e) {
+        // Storage is full (or unavailable). Never let a save look successful when it
+        // will not survive a reload: roll back to the last durable state and fail loudly.
+        this.state = JSON.parse(this.lastPersisted) as MockState;
+        for (const l of this.listeners) l();
+        const quota = e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
+        throw new StorageFullError(
+          quota
+            ? 'On-device storage is full, so this change was not saved. Remove an image or document, or switch to Supabase mode for a real catalog.'
+            : 'This device is not allowing the app to store data, so this change was not saved.',
+        );
       }
     }
+    this.lastPersisted = serialized;
     if (silent) return;
     for (const l of this.listeners) l();
   }
@@ -98,6 +113,13 @@ export class MockDataSource implements DataSource {
 
   async resetDemoData(): Promise<void> {
     this.state = buildSeed();
+    if (this.persist) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
     this.commit();
   }
 
@@ -111,7 +133,9 @@ export class MockDataSource implements DataSource {
    */
   private resolve(viewer: Viewer): Viewer {
     if (viewer.role === 'curator') {
-      const c = this.state.curators.find((x) => x.id === viewer.curatorId);
+      // Like artists, a curator claim must match both the record id and the user that owns it.
+      const c = this.state.curators.find((x) => x.id === viewer.curatorId && x.userId === viewer.userId);
+      if (!c && viewer.curatorId) return { role: 'public', displayName: viewer.displayName };
       return { ...viewer, curatorVerified: c?.status === 'verified' };
     }
     if (viewer.role === 'artist') {
@@ -155,7 +179,7 @@ export class MockDataSource implements DataSource {
 
   private requireMyCurator(viewer: Viewer) {
     if (viewer.role !== 'curator') throw new ForbiddenError('Sign in as a curator to do this.');
-    const c = this.state.curators.find((x) => x.id === viewer.curatorId || (!!viewer.userId && x.userId === viewer.userId));
+    const c = this.state.curators.find((x) => !!viewer.userId && x.userId === viewer.userId && (!viewer.curatorId || x.id === viewer.curatorId));
     if (!c) throw new NotFoundError('Curator record not found.');
     return c;
   }
@@ -222,7 +246,13 @@ export class MockDataSource implements DataSource {
   async getArtist(viewer: Viewer, id: string): Promise<ArtistView | undefined> {
     const a = this.artistById(id);
     if (!a) return undefined;
-    return projectArtist(a, this.resolve(viewer));
+    const v = this.resolve(viewer);
+    const view = projectArtist(a, v);
+    if (view && v.role === 'admin' && (a.visibility === 'private' || a.status !== 'approved')) {
+      this.audit(v, 'private.view', 'artist', a.id);
+      this.commit(true);
+    }
+    return view;
   }
 
   async listArtistArtworks(viewer: Viewer, artistId: string): Promise<ArtworkView[]> {
@@ -253,7 +283,10 @@ export class MockDataSource implements DataSource {
       if (!/^https?:\/\//i.test(link.url)) throw new ValidationError(`Link "${link.label || link.url}" must start with http:// or https://`, 'links');
     }
     const prevVisibility = a.visibility;
-    Object.assign(a, patch, { updatedAt: this.iso() });
+    // Runtime whitelist: status, kofiNotes, consent and identity fields can never arrive through a patch.
+    const safe: ArtistPatch = {};
+    for (const key of ARTIST_PATCH_KEYS) if (key in patch) (safe as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+    Object.assign(a, safe, { updatedAt: this.iso() });
     // An approved artist who hides their profile is paused, not deleted; re-publishing needs no re-review.
     if (patch.visibility && patch.visibility !== prevVisibility) {
       this.audit(viewer, 'artist.update', 'artist', a.id, { visibility: patch.visibility });
@@ -294,7 +327,9 @@ export class MockDataSource implements DataSource {
       if (!existing) throw new NotFoundError('Artwork not found.');
       if (existing.artistId !== a.id) throw new ForbiddenError('You can only edit your own work.');
       const visibilityChanged = existing.visibility !== input.visibility || existing.priceVisibility !== input.priceVisibility;
-      const { id: _id, ...rest } = input;
+      const { id: _id, ...rest } = input as ArtworkInput & { artistId?: string; reviewedAt?: string };
+      delete rest.artistId;
+      delete rest.reviewedAt;
       Object.assign(existing, rest, { updatedAt: now });
       if (visibilityChanged) {
         this.audit(viewer, 'artwork.visibility', 'artwork', existing.id, {
@@ -305,7 +340,9 @@ export class MockDataSource implements DataSource {
       this.commit();
       return projectArtwork(existing, a, this.resolve(viewer))!;
     }
-    const { id: _ignored, ...rest } = input;
+    const { id: _ignored, ...rest } = input as ArtworkInput & { artistId?: string; reviewedAt?: string };
+    delete rest.artistId;
+    delete rest.reviewedAt;
     const created: Artwork = { ...rest, id: this.makeId('aw'), artistId: a.id, createdAt: now, updatedAt: now };
     this.state.artworks.push(created);
     this.audit(viewer, 'artwork.create', 'artwork', created.id);
@@ -410,7 +447,7 @@ export class MockDataSource implements DataSource {
 
   async getMyCurator(viewer: Viewer): Promise<CuratorRow | undefined> {
     if (viewer.role !== 'curator') return undefined;
-    const c = this.state.curators.find((x) => x.id === viewer.curatorId || (!!viewer.userId && x.userId === viewer.userId));
+    const c = this.state.curators.find((x) => !!viewer.userId && x.userId === viewer.userId && (!viewer.curatorId || x.id === viewer.curatorId));
     return c ? this.curatorRow(c.id) : undefined;
   }
 
@@ -676,6 +713,23 @@ export class MockDataSource implements DataSource {
     return this.state;
   }
 }
+
+const ARTIST_PATCH_KEYS = [
+  'workingName',
+  'legalName',
+  'pronouns',
+  'bio',
+  'statement',
+  'region',
+  'mediums',
+  'careerStage',
+  'experience',
+  'availability',
+  'links',
+  'contact',
+  'visibility',
+  'avatarColor',
+] as const satisfies readonly (keyof ArtistPatch)[];
 
 function cloneShortlist(s: Shortlist): Shortlist {
   return { ...s, items: s.items.map((i) => ({ ...i })) };

@@ -7,6 +7,7 @@ import { Vault } from './Vault';
 import { ExportScreen } from './ExportScreen';
 import { Inquiries } from './Inquiries';
 import { Consent } from './Consent';
+import { ImportScreen } from './ImportScreen';
 
 /** Relative children of /studio. The artist-only role gate lives in the spine. */
 export const studioRoutes: RouteObject[] = [
@@ -16,6 +17,7 @@ export const studioRoutes: RouteObject[] = [
   { path: 'work/:id', element: <WorkEditorRoute /> },
   { path: 'vault', element: <Vault /> },
   { path: 'export', element: <ExportScreen /> },
+  { path: 'import', element: <ImportScreen /> },
   { path: 'inquiries', element: <Inquiries /> },
   { path: 'consent', element: <Consent /> },
 ];

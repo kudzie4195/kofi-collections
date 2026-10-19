@@ -159,7 +159,7 @@ export function buildSeed(): MockState {
       status: 'pending',
       consentVersion: CONSENT_VERSION,
       consentAcceptedAt: d(6),
-      avatarColor: '#7B61FF',
+      avatarColor: '#5b41e6',
       createdAt: d(7),
       updatedAt: d(1),
     },

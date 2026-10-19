@@ -33,6 +33,7 @@ const K = {
   publicArt: 'publicart',
   budgetMin: 'bmin',
   budgetMax: 'bmax',
+  budgetCurrency: 'bcur',
   undisclosed: 'undisclosed',
   yearFrom: 'yfrom',
   yearTo: 'yto',
@@ -80,6 +81,8 @@ export function filtersFromParams(sp: URLSearchParams): ArtworkFilters {
   if (bmin !== undefined) f.budgetMin = bmin;
   const bmax = num(sp.get(K.budgetMax));
   if (bmax !== undefined) f.budgetMax = bmax;
+  const bcur = sp.get(K.budgetCurrency);
+  if (bcur && /^[A-Z]{3}$/.test(bcur)) f.budgetCurrency = bcur;
   if (sp.get(K.undisclosed) === '1') f.includeUndisclosedPrice = true;
   const yfrom = num(sp.get(K.yearFrom));
   const yto = num(sp.get(K.yearTo));
@@ -108,6 +111,7 @@ export function paramsFromFilters(f: ArtworkFilters): URLSearchParams {
   if (f.publicArtExperience) sp.set(K.publicArt, '1');
   if (f.budgetMin !== undefined) sp.set(K.budgetMin, String(f.budgetMin));
   if (f.budgetMax !== undefined) sp.set(K.budgetMax, String(f.budgetMax));
+  if (f.budgetCurrency && f.budgetCurrency !== 'USD') sp.set(K.budgetCurrency, f.budgetCurrency);
   if (f.includeUndisclosedPrice) sp.set(K.undisclosed, '1');
   if (f.years?.from !== undefined) sp.set(K.yearFrom, String(f.years.from));
   if (f.years?.to !== undefined) sp.set(K.yearTo, String(f.years.to));

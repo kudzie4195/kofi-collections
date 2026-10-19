@@ -18,9 +18,11 @@ export interface ArtworkFilters {
   region?: string;
   commissionsExperience?: boolean;
   publicArtExperience?: boolean;
-  /** Budget in the viewer's currency. Only applies to works whose price is visible. */
+  /** Budget bounds. Only applies to works whose price is visible and in `budgetCurrency`. */
   budgetMax?: number;
   budgetMin?: number;
+  /** ISO 4217. Works priced in another currency count as undisclosed for the budget filter. Default USD. */
+  budgetCurrency?: string;
   /** When true, works whose price is withheld/undisclosed stay in results even with a budget set. */
   includeUndisclosedPrice?: boolean;
   years?: { from?: number; to?: number };
@@ -94,7 +96,8 @@ export function matchesFilters(a: ArtworkView, f: ArtworkFilters): boolean {
   if (f.publicArtExperience && !a.artistExperience.publicArt) return false;
 
   if (f.budgetMax !== undefined || f.budgetMin !== undefined) {
-    if (!a.price) {
+    const cur = (f.budgetCurrency ?? 'USD').toUpperCase();
+    if (!a.price || a.price.currency.toUpperCase() !== cur) {
       if (!f.includeUndisclosedPrice) return false;
     } else {
       if (f.budgetMax !== undefined && a.price.amount > f.budgetMax) return false;

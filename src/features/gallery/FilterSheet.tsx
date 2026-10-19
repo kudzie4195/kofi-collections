@@ -227,9 +227,18 @@ export function FilterSheet({ open, onClose, filters, works, onApply }: FilterSh
       <div className="filter-section">
         <h3 className="filter-section__title">Budget</h3>
         <p className="small muted" style={{ marginBottom: 8 }}>
-          Compared against prices you can see, in the artist’s listed currency.
+          Compared against prices you can see. Works listed in another currency count as “price on request”.
         </p>
-        <div className="range-row kg-range">
+        <Segmented
+          label="Budget currency"
+          value={(draft.budgetCurrency ?? 'USD') as 'USD' | 'CAD'}
+          onChange={(v) => set({ budgetCurrency: v === 'USD' ? undefined : v })}
+          options={[
+            { value: 'USD', label: 'USD' },
+            { value: 'CAD', label: 'CAD' },
+          ]}
+        />
+        <div className="range-row kg-range" style={{ marginTop: 8 }}>
           <NumberField label="Minimum price" value={draft.budgetMin} onChange={(v) => set({ budgetMin: v })} />
           <span className="kg-range__to" aria-hidden="true">
             to

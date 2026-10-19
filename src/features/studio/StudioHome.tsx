@@ -191,6 +191,7 @@ export function StudioHome() {
             <ToolRow to="vault" icon={<Icon.Lock />} title="Private vault" sub="Invoices, condition reports, provenance, appraisals" />
             <ToolRow to="inquiries" icon={<Icon.Inbox />} title="Introductions" sub={awaiting ? `${awaiting} waiting for your answer` : 'Requests from verified curators'} />
             <ToolRow to="export" icon={<Icon.Download />} title="Export or withdraw" sub="Download everything, or hide it all in one step" />
+            <ToolRow to="import" icon={<Icon.Doc />} title="Import from a spreadsheet" sub="Review every row, then add works as drafts" />
             <ToolRow to="consent" icon={<Icon.Doc />} title="Artist terms" sub={consentCurrent ? `Agreed to ${CONSENT_VERSION}` : 'Needs your agreement'} />
           </ul>
         </nav>

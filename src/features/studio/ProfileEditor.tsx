@@ -58,7 +58,7 @@ const SWATCHES: { color: string; name: string }[] = [
   { color: '#FF5C39', name: 'Coral' },
   { color: '#CFFF4A', name: 'Lime' },
   { color: '#FFD23F', name: 'Butter' },
-  { color: '#7B61FF', name: 'Violet' },
+  { color: '#5B41E6', name: 'Violet' },
   { color: '#0FA3B1', name: 'Teal' },
   { color: '#16122B', name: 'Ink' },
 ];

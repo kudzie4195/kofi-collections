@@ -1,0 +1,53 @@
+# BUILD_STATUS — Kofi Collections
+
+Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-19.
+
+## What is actually running
+
+- Full app in **mock mode** on web, iOS (WebView) and Android (WebView): gallery + filters, artwork and artist pages, artist studio (profile, works with image intake, visibility per record and per price, vault, consent, export, withdraw, inquiry inbox), curator desk (verification request, shortlists, introduction requests), Kofi admin (review queue, curator verification, inquiry forwarding, append-only activity log).
+- Field-level visibility enforced in the data layer, with 116 automated tests (domain + screens) and an end-to-end browser run of the guide's 10-minute demo.
+- Supabase schema, RLS, redaction views, storage policies and RPCs — executed against a real PostgreSQL 16 with 100 passing assertions (`supabase/tests/LAST_RUN.log`).
+- Capacitor projects for iOS and Android generated and synced (`ios/`, `android/`).
+
+## What is still a mock
+
+- **Accounts.** Mock mode has demo identities, not real sign-in. Supabase mode has email/password demo users (`docs/SUPABASE.md`) but has **not been run against a live Supabase project**.
+- **Storage.** Mock mode keeps images and vault files on-device (localStorage, ~5 MB practical limit — fine for a demo, not for a real catalog). Supabase mode uploads to private buckets with signed URLs; untested live.
+- **Realtime.** The Supabase data source subscribes to `postgres_changes`; untested live.
+- **Fonts** are bundled (fontsource), so the app works offline.
+
+## Local demo path
+
+```
+npm ci && npm run dev   →  http://localhost:5173
+```
+Account tab → pick an identity. Or open `dist-single/index.html` (one self-contained file) in any browser.
+
+## What was tested, with results
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm test` | 116 / 116 |
+| `npm run build` | clean, 447 kB JS gz 136 kB |
+| Browser smoke: 6 identities × every route × 375 px and 1024 px | 126 / 126 — no console errors, no horizontal overflow, axe serious/critical 0, every input labelled |
+| 10-minute demo flow (filter → open → artist hides price → curator sees "Price on request" → shortlist → intro request → Kofi forwards → artist accepts → export → curator verified by record, not client flag) | 18 / 18 |
+| RLS + RPC suite on PostgreSQL 16 | 100 assertions pass |
+| `npx cap sync` | ios + android copied |
+| Cross-product contamination scan | 0 hits |
+
+## Known risks
+
+1. Supabase code paths are verified against local Postgres with a shim for `auth`/`storage`, not against Supabase itself. Expect small fixes on first live run (sign-in of seeded `auth.users`, storage policy behaviour for signed URLs, realtime filtering).
+2. iOS project needs `pod install` on a Mac; Android needs Android Studio. Neither was built here (no Xcode / SDK in this environment).
+3. Mock-mode `private.view` audit events are written by the client; the Supabase vault path audits server-side. Anything that must be tamper-proof belongs in Supabase mode.
+4. Google-free fonts, but the display face (Syne) is wide — very long artist names wrap to three lines on 375 px. Acceptable, not pretty.
+5. Deleting a work keeps its vault documents (detached) and removes it from shortlists; the UI explains this. Audit rows are never deleted.
+
+## Biggest blocker / decision needed
+
+Guide §03 "decisions before stage 2": who approves artists and verifies curators, whether artists approve every listing Kofi enters, pricing/commission policy, and which entity is the legal data steward. The app has a place for each answer (admin status actions, consent text, price visibility, export) but the policy text in `Consent.tsx` and the verification criteria are placeholders written as real copy — they need a human owner.
+
+## Next user story
+
+"As Kofi staff I create a Supabase project, apply the migrations and seed, and run the same 10-minute demo against it." That is the first live-service step and the one most likely to surface integration bugs.

@@ -33,6 +33,15 @@ export class NotFoundError extends Error {
   }
 }
 
+/** Thrown when a change could not be persisted (on-device storage full or blocked). The change was rolled back. */
+export class StorageFullError extends Error {
+  readonly code = 'storage_full';
+  constructor(message: string) {
+    super(message);
+    this.name = 'StorageFullError';
+  }
+}
+
 export class ValidationError extends Error {
   readonly code = 'validation';
   constructor(

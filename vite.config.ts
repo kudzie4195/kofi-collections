@@ -9,7 +9,7 @@ const single = process.env.SINGLE_FILE === '1';
 export default defineConfig({
   plugins: [react(), ...(single ? [viteSingleFile()] : [])],
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
-  build: { target: 'es2020', sourcemap: false },
+  build: { target: 'es2020', sourcemap: false, ...(single ? { assetsInlineLimit: 100_000_000, cssCodeSplit: false } : {}) },
   server: { port: 5173, host: true },
   test: {
     environment: 'jsdom',
