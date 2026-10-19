@@ -1,6 +1,10 @@
 -- =============================================================================
 -- Kofi Collections — 0006 realtime
 --
+-- Adds the kofi.* tables below to the shared supabase_realtime publication
+-- (the client subscribes with schema: 'kofi'). `drop schema kofi cascade`
+-- removes them from the publication again.
+--
 -- The client subscribes to postgres_changes on these tables only as a
 -- "something changed, refetch" signal; it never renders event payloads.
 -- Supabase Realtime applies the subscriber's RLS to each event. (Assumed, not
@@ -22,9 +26,9 @@ begin
   ] loop
     if not exists (
       select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+      where pubname = 'supabase_realtime' and schemaname = 'kofi' and tablename = t
     ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
+      execute format('alter publication supabase_realtime add table kofi.%I', t);
     end if;
   end loop;
 end $$;

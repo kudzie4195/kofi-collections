@@ -3,7 +3,7 @@ import { buildSeed, DEMO_IDENTITIES } from '@/data/mock/seed';
 import { NEVER_LEAK_ARTIST_KEYS } from '@/domain/visibility';
 import { ForbiddenError, NotFoundError, ValidationError } from '../DataSource';
 import { DEMO_UUIDS, SUPABASE_DEMO_IDENTITIES, demoEmailForUserUuid, demoUuid } from './demo';
-import { mapPgError, SESSION_ENDED_MESSAGE, NETWORK_MESSAGE } from './errors';
+import { mapPgError, SESSION_ENDED_MESSAGE, NETWORK_MESSAGE, SCHEMA_NOT_EXPOSED_MESSAGE } from './errors';
 import { blobToDataUrl, dataUrlToBlob, newUuid, parseDataUrl } from './files';
 import {
   artistPatchToRow,
@@ -62,6 +62,13 @@ describe('mapPgError', () => {
     const net = mapPgError({ message: 'TypeError: Failed to fetch' });
     expect(net).not.toBeInstanceOf(ForbiddenError);
     expect(net.message).toBe(NETWORK_MESSAGE);
+  });
+
+  it('names the setup step when the project does not expose the kofi schema (PGRST106)', () => {
+    const e = mapPgError({ code: 'PGRST106', message: 'Invalid schema: kofi', hint: 'Only the following schemas are exposed: public, graphql_public' });
+    expect(e).not.toBeInstanceOf(ForbiddenError);
+    expect(e.message).toBe(SCHEMA_NOT_EXPOSED_MESSAGE);
+    expect(mapPgError({ message: 'The schema must be one of the following: public' }).message).toBe(SCHEMA_NOT_EXPOSED_MESSAGE);
   });
 
   it('passes app errors through unchanged', () => {
@@ -338,5 +345,52 @@ describe('SupabaseDataSource (offline)', () => {
 
   it('refuses a demo reset without a staff session', async () => {
     await expect(make().resetDemoData()).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  /** A fetch stand-in that records each request and answers with a canned PostgREST response. */
+  function recordingFetch(respond: (url: string) => { status: number; body: unknown }) {
+    const calls: { url: string; method: string; headers: Headers }[] = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      calls.push({ url, method: (init?.method ?? 'GET').toUpperCase(), headers: new Headers(init?.headers) });
+      const r = respond(url);
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { calls, fetchImpl };
+  }
+  const makeWith = (fetchImpl: typeof fetch) =>
+    createSupabaseDataSource('http://127.0.0.1:1', 'test-anon-key', {
+      demoAutoSignIn: false,
+      clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl } },
+    });
+  const visitor = SUPABASE_DEMO_IDENTITIES.find((d) => d.viewer.role === 'public')!.viewer;
+
+  it('reads tables and views from the kofi schema (Accept-Profile: kofi), not public', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => ({ status: 200, body: [] }));
+    const ds = makeWith(fetchImpl as typeof fetch);
+    expect(await ds.listArtists(visitor)).toEqual([]);
+    expect(await ds.listArtworks(visitor)).toEqual([]);
+    const rest = calls.filter((c) => c.url.includes('/rest/v1/'));
+    expect(rest.map((c) => new URL(c.url).pathname)).toEqual(['/rest/v1/artists_visible', '/rest/v1/artworks_visible']);
+    for (const c of rest) expect(c.headers.get('Accept-Profile')).toBe('kofi');
+  });
+
+  it('calls RPCs in the kofi schema (Content-Profile: kofi)', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => ({ status: 200, body: [] }));
+    const ds = makeWith(fetchImpl as typeof fetch);
+    // rpc() is private; drive it directly so the request shape is checked without a live session.
+    const internals = ds as unknown as { rpc: (db: unknown, fn: string, args?: Record<string, unknown>) => Promise<unknown>; anonClient: unknown };
+    await internals.rpc(internals.anonClient, 'whoami');
+    const rpc = calls.find((c) => c.url.includes('/rest/v1/rpc/whoami'));
+    expect(rpc?.method).toBe('POST');
+    expect(rpc?.headers.get('Content-Profile')).toBe('kofi');
+  });
+
+  it('turns a "schema not exposed" response into the setup instruction', async () => {
+    const { fetchImpl } = recordingFetch(() => ({
+      status: 406,
+      body: { code: 'PGRST106', details: null, hint: 'Only the following schemas are exposed: public, graphql_public', message: 'Invalid schema: kofi' },
+    }));
+    await expect(makeWith(fetchImpl as typeof fetch).listArtists(visitor)).rejects.toThrow(SCHEMA_NOT_EXPOSED_MESSAGE);
   });
 });

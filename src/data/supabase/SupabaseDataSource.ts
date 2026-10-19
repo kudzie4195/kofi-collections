@@ -37,6 +37,7 @@ import { blobToDataUrl, dataUrlToBlob, newUuid, parseDataUrl, UPLOADABLE_IMAGE_E
 import {
   artistPatchToRow,
   artworkInputToJson,
+  DB_SCHEMA,
   IMAGE_BUCKET,
   isUuid,
   normalizeImageSrc,
@@ -71,10 +72,10 @@ const IMAGE_URL_TTL_S = 3600;
 const VAULT_URL_TTL_S = 60;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** Tables whose changes the app reacts to (published in supabase/migrations/0006_realtime.sql). */
+/** Tables whose changes the app reacts to (published in schema `kofi` by supabase/migrations/0006_realtime.sql). */
 const REALTIME_TABLES = ['artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents'] as const;
 
-/** Who the server says the caller is (public.whoami()). Never taken from the client's Viewer. */
+/** Who the server says the caller is (kofi.whoami()). Never taken from the client's Viewer. */
 interface Me {
   userId?: string;
   role: Role;
@@ -106,6 +107,15 @@ export interface SupabaseDataSourceOptions {
   demoAutoSignIn?: boolean;
   /** Passed through to createClient (tests use this to disable session persistence). */
   clientOptions?: SupabaseClientOptions<'public'>;
+}
+
+/**
+ * Every table, view and RPC lives in the `kofi` Postgres schema (see
+ * supabase/migrations/0000_schema.sql), so the backend can share a Supabase
+ * project with other products. Storage buckets are not schema-scoped.
+ */
+function kofi(db: SupabaseClient) {
+  return db.schema(DB_SCHEMA);
 }
 
 const SCHEMA_ARTWORKS = 'artworks_visible';
@@ -159,7 +169,7 @@ export class SupabaseDataSource implements DataSource {
   private startRealtime(): void {
     let ch = this.client.channel('db-changes');
     for (const table of REALTIME_TABLES) {
-      ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+      ch = ch.on('postgres_changes', { event: '*', schema: DB_SCHEMA, table }, () => {
         this.meCache.clear();
         this.emit();
       });
@@ -193,7 +203,7 @@ export class SupabaseDataSource implements DataSource {
   }
 
   private async rpc<T>(db: SupabaseClient, fn: string, args?: Record<string, unknown>): Promise<T> {
-    return this.run<T>(db.rpc(fn, args) as unknown as PromiseLike<Result<T>>);
+    return this.run<T>(kofi(db).rpc(fn, args) as unknown as PromiseLike<Result<T>>);
   }
 
   /**
@@ -333,14 +343,14 @@ export class SupabaseDataSource implements DataSource {
 
   private async fetchArtwork(db: SupabaseClient, id: string): Promise<ArtworkView | undefined> {
     if (!isUuid(id)) return undefined;
-    const row = await this.run<ArtworkViewRow | null>(db.from(SCHEMA_ARTWORKS).select('*').eq('id', id).maybeSingle());
+    const row = await this.run<ArtworkViewRow | null>(kofi(db).from(SCHEMA_ARTWORKS).select('*').eq('id', id).maybeSingle());
     if (!row) return undefined;
     return (await this.projectArtworks(db, [row]))[0];
   }
 
   private async fetchArtist(db: SupabaseClient, id: string): Promise<ArtistView | undefined> {
     if (!isUuid(id)) return undefined;
-    const row = await this.run<ArtistViewRow | null>(db.from(SCHEMA_ARTISTS).select('*').eq('id', id).maybeSingle());
+    const row = await this.run<ArtistViewRow | null>(kofi(db).from(SCHEMA_ARTISTS).select('*').eq('id', id).maybeSingle());
     return row ? toArtistView(row) : undefined;
   }
 
@@ -363,7 +373,7 @@ export class SupabaseDataSource implements DataSource {
 
   async listArtworks(viewer: Viewer, filters: ArtworkFilters = {}): Promise<ArtworkView[]> {
     const { db, me } = await this.ctx(viewer);
-    let q = db.from(SCHEMA_ARTWORKS).select('*').neq('visibility', 'private');
+    let q = kofi(db).from(SCHEMA_ARTWORKS).select('*').neq('visibility', 'private');
     if (filters.mediums?.length) q = q.in('medium', filters.mediums);
     const rows = await this.run<ArtworkViewRow[]>(q);
     // Discovery never includes drafts; Kofi-only records only for staff; only approved artists unless staff.
@@ -383,7 +393,7 @@ export class SupabaseDataSource implements DataSource {
 
   async listArtists(viewer: Viewer): Promise<ArtistView[]> {
     const { db, me } = await this.ctx(viewer);
-    const rows = await this.run<ArtistViewRow[]>(db.from(SCHEMA_ARTISTS).select('*'));
+    const rows = await this.run<ArtistViewRow[]>(kofi(db).from(SCHEMA_ARTISTS).select('*'));
     return rows
       .filter((r) => r.status === 'approved' || me.role === 'admin')
       .map(toArtistView)
@@ -399,7 +409,7 @@ export class SupabaseDataSource implements DataSource {
     const { db, me } = await this.ctx(viewer);
     if (!isUuid(artistId)) return [];
     const owner = me.role === 'admin' || (me.role === 'artist' && me.artistId === artistId);
-    const rows = await this.run<ArtworkViewRow[]>(db.from(SCHEMA_ARTWORKS).select('*').eq('artist_id', artistId));
+    const rows = await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').eq('artist_id', artistId));
     const visible = rows.filter((r) => owner || (r.visibility !== 'private' && r.visibility !== 'kofi'));
     return (await this.projectArtworks(db, visible)).sort((x, y) => y.year - x.year || y.createdAt.localeCompare(x.createdAt));
   }
@@ -423,7 +433,7 @@ export class SupabaseDataSource implements DataSource {
       if (!/^https?:\/\//i.test(link.url)) throw new ValidationError(`Link "${link.label || link.url}" must start with http:// or https://`, 'links');
     }
     const row = artistPatchToRow(patch);
-    if (Object.keys(row).length) await this.run(db.from('artists').update(row).eq('id', artistId));
+    if (Object.keys(row).length) await this.run(kofi(db).from('artists').update(row).eq('id', artistId));
     this.emit();
     const view = await this.fetchArtist(db, artistId);
     if (!view) throw new NotFoundError('Artist profile not found.');
@@ -461,7 +471,7 @@ export class SupabaseDataSource implements DataSource {
       const access = await this.access(db, 'artwork', input.id);
       if (access === 'not_found') throw new NotFoundError('Artwork not found.');
       if (access !== 'owner') throw new ForbiddenError('You can only edit your own work.');
-      const rows = await this.run<{ id: string; src: string }[]>(db.from('artwork_images').select('id, src').eq('artwork_id', input.id));
+      const rows = await this.run<{ id: string; src: string }[]>(kofi(db).from('artwork_images').select('id, src').eq('artwork_id', input.id));
       for (const r of rows) existing.set(r.id, r.src);
     }
 
@@ -508,16 +518,16 @@ export class SupabaseDataSource implements DataSource {
     const access = await this.access(db, 'artwork', id);
     if (access === 'not_found') throw new NotFoundError('Artwork not found.');
     if (access !== 'owner') throw new ForbiddenError('You can only delete your own work.');
-    const imgs = await this.run<{ src: string }[]>(db.from('artwork_images').select('src').eq('artwork_id', id));
+    const imgs = await this.run<{ src: string }[]>(kofi(db).from('artwork_images').select('src').eq('artwork_id', id));
     // Shortlist items cascade; vault documents are kept and detached (FK ON DELETE SET NULL).
-    await this.run(db.from('artworks').delete().eq('id', id));
+    await this.run(kofi(db).from('artworks').delete().eq('id', id));
     await this.removeObjects(db, IMAGE_BUCKET, imgs.map((i) => storagePathOf(i.src)).filter((p): p is string => !!p));
     this.emit();
   }
 
   async listMyDocuments(viewer: Viewer, artworkId?: string): Promise<ArtDocument[]> {
     const { db, me } = await this.ctx(viewer);
-    let q = db.from('documents').select('*');
+    let q = kofi(db).from('documents').select('*');
     if (me.role === 'admin') {
       if (artworkId) {
         await this.rpc(db, 'log_audit', { p_action: 'private.view', p_entity_type: 'artwork', p_entity_id: artworkId, p_meta: { what: 'documents' } });
@@ -550,7 +560,7 @@ export class SupabaseDataSource implements DataSource {
     if (up.error) throw mapPgError(up.error, 'Could not upload the document. Try again.');
     try {
       const row = await this.run<DocumentRow>(
-        db
+        kofi(db)
           .from('documents')
           .insert({
             id,
@@ -582,8 +592,8 @@ export class SupabaseDataSource implements DataSource {
     const access = await this.access(db, 'document', id);
     if (access === 'not_found') throw new NotFoundError('Document not found.');
     if (access !== 'owner') throw new ForbiddenError('You can only remove your own documents.');
-    const row = await this.run<{ file_ref: string } | null>(db.from('documents').select('file_ref').eq('id', id).maybeSingle());
-    await this.run(db.from('documents').delete().eq('id', id));
+    const row = await this.run<{ file_ref: string } | null>(kofi(db).from('documents').select('file_ref').eq('id', id).maybeSingle());
+    await this.run(kofi(db).from('documents').delete().eq('id', id));
     if (row?.file_ref) await this.removeObjects(db, VAULT_BUCKET, [row.file_ref]);
     this.emit();
   }
@@ -641,7 +651,7 @@ export class SupabaseDataSource implements DataSource {
   /* -------------------------------------------------------------- curator -- */
 
   private async fetchCurator(db: SupabaseClient, id: string): Promise<CuratorRow | undefined> {
-    const row = await this.run<CuratorRowDb | null>(db.from('curators').select('*, institution:institutions(*)').eq('id', id).maybeSingle());
+    const row = await this.run<CuratorRowDb | null>(kofi(db).from('curators').select('*, institution:institutions(*)').eq('id', id).maybeSingle());
     return row ? toCuratorRow(row) : undefined;
   }
 
@@ -674,7 +684,7 @@ export class SupabaseDataSource implements DataSource {
   }
 
   private async fetchShortlist(db: SupabaseClient, id: string): Promise<Shortlist> {
-    const row = await this.run<ShortlistRowDb | null>(db.from('shortlists').select('*, shortlist_items(*)').eq('id', id).maybeSingle());
+    const row = await this.run<ShortlistRowDb | null>(kofi(db).from('shortlists').select('*, shortlist_items(*)').eq('id', id).maybeSingle());
     if (!row) throw new NotFoundError('Shortlist not found.');
     return toShortlist(row);
   }
@@ -692,7 +702,7 @@ export class SupabaseDataSource implements DataSource {
     const { db, me } = await this.ctx(viewer);
     const curatorId = this.requireMyCurator(me);
     const rows = await this.run<ShortlistRowDb[]>(
-      db.from('shortlists').select('*, shortlist_items(*)').eq('curator_id', curatorId).order('updated_at', { ascending: false }),
+      kofi(db).from('shortlists').select('*, shortlist_items(*)').eq('curator_id', curatorId).order('updated_at', { ascending: false }),
     );
     return rows.map(toShortlist).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
   }
@@ -701,7 +711,7 @@ export class SupabaseDataSource implements DataSource {
     const { db, me } = await this.ctx(viewer);
     const curatorId = this.requireMyCurator(me);
     if (!name.trim()) throw new ValidationError('Name the shortlist.', 'name');
-    const row = await this.run<ShortlistRowDb>(db.from('shortlists').insert({ curator_id: curatorId, name: name.trim() }).select('*').single());
+    const row = await this.run<ShortlistRowDb>(kofi(db).from('shortlists').insert({ curator_id: curatorId, name: name.trim() }).select('*').single());
     this.emit();
     return toShortlist({ ...row, shortlist_items: [] });
   }
@@ -709,14 +719,14 @@ export class SupabaseDataSource implements DataSource {
   async renameShortlist(viewer: Viewer, id: string, name: string): Promise<Shortlist> {
     const { db } = await this.myShortlist(viewer, id);
     if (!name.trim()) throw new ValidationError('Name the shortlist.', 'name');
-    await this.run(db.from('shortlists').update({ name: name.trim() }).eq('id', id));
+    await this.run(kofi(db).from('shortlists').update({ name: name.trim() }).eq('id', id));
     this.emit();
     return this.fetchShortlist(db, id);
   }
 
   async deleteShortlist(viewer: Viewer, id: string): Promise<void> {
     const { db } = await this.myShortlist(viewer, id);
-    await this.run(db.from('shortlists').delete().eq('id', id));
+    await this.run(kofi(db).from('shortlists').delete().eq('id', id));
     this.emit();
   }
 
@@ -724,7 +734,7 @@ export class SupabaseDataSource implements DataSource {
     const { db } = await this.myShortlist(viewer, shortlistId);
     const denied = new ForbiddenError('You can only shortlist work you are authorized to see.');
     const aw = isUuid(artworkId)
-      ? await this.run<{ id: string; visibility: string } | null>(db.from(SCHEMA_ARTWORKS).select('id, visibility').eq('id', artworkId).maybeSingle())
+      ? await this.run<{ id: string; visibility: string } | null>(kofi(db).from(SCHEMA_ARTWORKS).select('id, visibility').eq('id', artworkId).maybeSingle())
       : null;
     if (!aw || aw.visibility === 'private' || aw.visibility === 'kofi') throw denied;
     const current = await this.fetchShortlist(db, shortlistId);
@@ -732,7 +742,7 @@ export class SupabaseDataSource implements DataSource {
     const item: Record<string, unknown> = { shortlist_id: shortlistId, artwork_id: artworkId };
     if (note?.trim()) item.note = note.trim();
     try {
-      await this.run(db.from('shortlist_items').insert(item));
+      await this.run(kofi(db).from('shortlist_items').insert(item));
     } catch (e) {
       if (e instanceof ForbiddenError) throw denied;
       throw e;
@@ -743,7 +753,7 @@ export class SupabaseDataSource implements DataSource {
 
   async removeFromShortlist(viewer: Viewer, shortlistId: string, artworkId: string): Promise<Shortlist> {
     const { db } = await this.myShortlist(viewer, shortlistId);
-    if (isUuid(artworkId)) await this.run(db.from('shortlist_items').delete().eq('shortlist_id', shortlistId).eq('artwork_id', artworkId));
+    if (isUuid(artworkId)) await this.run(kofi(db).from('shortlist_items').delete().eq('shortlist_id', shortlistId).eq('artwork_id', artworkId));
     this.emit();
     return this.fetchShortlist(db, shortlistId);
   }
@@ -754,7 +764,7 @@ export class SupabaseDataSource implements DataSource {
     if (!me.curatorVerified) throw new ForbiddenError('Your institution has not been verified yet.');
     const artist = isUuid(input.artistId)
       ? await this.run<{ id: string; status: string; visibility: string } | null>(
-          db.from(SCHEMA_ARTISTS).select('id, status, visibility').eq('id', input.artistId).maybeSingle(),
+          kofi(db).from(SCHEMA_ARTISTS).select('id, status, visibility').eq('id', input.artistId).maybeSingle(),
         )
       : null;
     if (!artist || artist.status !== 'approved' || artist.visibility !== 'public') throw new NotFoundError('Artist not found.');
@@ -763,7 +773,7 @@ export class SupabaseDataSource implements DataSource {
     if (input.artworkId) {
       const aw = isUuid(input.artworkId)
         ? await this.run<{ artist_id: string; visibility: string } | null>(
-            db.from(SCHEMA_ARTWORKS).select('artist_id, visibility').eq('id', input.artworkId).maybeSingle(),
+            kofi(db).from(SCHEMA_ARTWORKS).select('artist_id, visibility').eq('id', input.artworkId).maybeSingle(),
           )
         : null;
       if (!aw || aw.artist_id !== artist.id || aw.visibility !== 'public') throw denied;
@@ -772,7 +782,7 @@ export class SupabaseDataSource implements DataSource {
     if (input.artworkId) insert.artwork_id = input.artworkId;
     let row: InquiryViewRow;
     try {
-      row = await this.run<InquiryViewRow>(db.from('inquiries').insert(insert).select('*').single());
+      row = await this.run<InquiryViewRow>(kofi(db).from('inquiries').insert(insert).select('*').single());
     } catch (e) {
       if (e instanceof ForbiddenError && input.artworkId) throw denied;
       throw e;
@@ -783,7 +793,7 @@ export class SupabaseDataSource implements DataSource {
 
   async listInquiries(viewer: Viewer): Promise<InquiryRow[]> {
     const { db, me } = await this.ctx(viewer);
-    let q = db.from(SCHEMA_INQUIRIES).select('*');
+    let q = kofi(db).from(SCHEMA_INQUIRIES).select('*');
     if (me.role === 'admin') {
       /* all */
     } else if (me.role === 'curator') {
@@ -803,7 +813,7 @@ export class SupabaseDataSource implements DataSource {
     else if (me.role !== 'admin') throw new ForbiddenError();
     await this.rpc(db, 'set_inquiry_status', { p_inquiry_id: id, p_status: status, p_note: note ?? null });
     this.emit();
-    const row = await this.run<InquiryViewRow | null>(db.from(SCHEMA_INQUIRIES).select('*').eq('id', id).maybeSingle());
+    const row = await this.run<InquiryViewRow | null>(kofi(db).from(SCHEMA_INQUIRIES).select('*').eq('id', id).maybeSingle());
     if (!row) throw new NotFoundError('Inquiry not found.');
     return toInquiryRow(row);
   }
@@ -814,8 +824,8 @@ export class SupabaseDataSource implements DataSource {
     const { db, me } = await this.ctx(viewer);
     this.requireAdmin(me);
     const [rows, works] = await Promise.all([
-      this.run<ArtistViewRow[]>(db.from(SCHEMA_ARTISTS).select('*')),
-      this.run<{ artist_id: string }[]>(db.from('artworks').select('artist_id')),
+      this.run<ArtistViewRow[]>(kofi(db).from(SCHEMA_ARTISTS).select('*')),
+      this.run<{ artist_id: string }[]>(kofi(db).from('artworks').select('artist_id')),
     ]);
     const counts = new Map<string, number>();
     for (const w of works) counts.set(w.artist_id, (counts.get(w.artist_id) ?? 0) + 1);
@@ -860,7 +870,7 @@ export class SupabaseDataSource implements DataSource {
   async listCurators(viewer: Viewer): Promise<CuratorRow[]> {
     const { db, me } = await this.ctx(viewer);
     this.requireAdmin(me);
-    const rows = await this.run<CuratorRowDb[]>(db.from('curators').select('*, institution:institutions(*)'));
+    const rows = await this.run<CuratorRowDb[]>(kofi(db).from('curators').select('*, institution:institutions(*)'));
     return rows
       .map(toCuratorRow)
       .filter((c): c is CuratorRow => !!c)
@@ -882,22 +892,22 @@ export class SupabaseDataSource implements DataSource {
   async listAudit(viewer: Viewer, limit = 200): Promise<AuditEvent[]> {
     const { db, me } = await this.ctx(viewer);
     this.requireAdmin(me);
-    const rows = await this.run<AuditRow[]>(db.from('audit_events').select('*').order('at', { ascending: false }).limit(limit));
+    const rows = await this.run<AuditRow[]>(kofi(db).from('audit_events').select('*').order('at', { ascending: false }).limit(limit));
     return rows.map(toAuditEvent);
   }
 
   async listInstitutions(viewer: Viewer): Promise<Institution[]> {
     const { db, me } = await this.ctx(viewer);
     if (me.role !== 'admin' && me.role !== 'curator') throw new ForbiddenError();
-    const rows = await this.run<InstitutionRow[]>(db.from('institutions').select('*').order('created_at', { ascending: true }));
+    const rows = await this.run<InstitutionRow[]>(kofi(db).from('institutions').select('*').order('created_at', { ascending: true }));
     return rows.map(toInstitution);
   }
 
   /* ---------------------------------------------------------- demo helpers -- */
 
   /**
-   * Restores the fictional seed via public.kofi_demo_reset() (defined by
-   * supabase/seed.sql). Kofi staff only, using the current session.
+   * Restores the fictional seed via kofi.kofi_demo_reset() (defined by
+   * supabase/seed_content.sql). Kofi staff only, using the current session.
    */
   async resetDemoData(): Promise<void> {
     const session = (await this.client.auth.getSession()).data.session;
@@ -906,7 +916,7 @@ export class SupabaseDataSource implements DataSource {
       await this.rpc(this.client, 'kofi_demo_reset');
     } catch (e) {
       if (e instanceof Error && /could not find the function|kofi_demo_reset/i.test(e.message) && !(e instanceof ForbiddenError)) {
-        throw new Error('Demo data is not installed on this project. Run supabase/seed.sql first.');
+        throw new Error('Demo data is not installed on this project. Run supabase/seed_auth.sql and supabase/seed_content.sql first.');
       }
       throw e;
     }

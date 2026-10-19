@@ -2,8 +2,9 @@ import { DEMO_IDENTITIES } from '@/data/mock/seed';
 import type { DemoIdentity, Viewer } from '@/domain/types';
 
 /**
- * Fixed UUIDs for the fictional seed (src/data/mock/seed.ts). supabase/seed.sql
- * is generated from the same table (supabase/scripts/generate-seed.mjs), so mock
+ * Fixed UUIDs for the fictional seed (src/data/mock/seed.ts). supabase/seed_auth.sql
+ * and supabase/seed_content.sql are generated from the same table
+ * (supabase/scripts/generate-seed.mjs), so mock
  * and Supabase modes share identities and records.
  *
  * Scheme: <type prefix>0000000-0000-4000-8000-<suffix>

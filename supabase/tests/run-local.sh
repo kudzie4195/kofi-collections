@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Runs the migrations, the seed (twice, to prove it is re-runnable) and the RLS
-# assertions against a THROWAWAY plain-Postgres database, with
-# supabase/tests/shim.sql standing in for the Supabase platform schemas.
+# Runs the migrations, the seed (auth once, content twice to prove it is
+# re-runnable) and the RLS / RPC / schema-isolation assertions against a
+# THROWAWAY plain-Postgres database, with supabase/tests/shim.sql standing in
+# for the Supabase platform schemas AND for the other product that owns
+# `public` on the shared project.
 #
 #   PGHOST=... PGPORT=... PGUSER=postgres supabase/tests/run-local.sh [dbname]
 #
@@ -31,20 +33,26 @@ set +e
     echo "== migrations/$(basename "$f")"
     run -q -f "$f"
   done
-  echo "== seed.sql (first run)"
-  run -q -f "$root/seed.sql"
-  echo "== seed.sql (second run — must be idempotent)"
-  run -q -f "$root/seed.sql"
+  echo "== seed_auth.sql"
+  run -q -f "$root/seed_auth.sql"
+  echo "== seed_content.sql (first run)"
+  run -q -f "$root/seed_content.sql"
+  echo "== seed_auth.sql + seed_content.sql (second run — must be idempotent)"
+  run -q -f "$root/seed_auth.sql"
+  run -q -f "$root/seed_content.sql"
   echo "== row counts after seed"
-  run -At -c "select 'artists', count(*) from artists union all select 'artworks', count(*) from artworks
-              union all select 'artwork_images', count(*) from artwork_images union all select 'curators', count(*) from curators
-              union all select 'shortlist_items', count(*) from shortlist_items union all select 'inquiries', count(*) from inquiries
-              union all select 'documents', count(*) from documents union all select 'audit_events', count(*) from audit_events
-              union all select 'consents', count(*) from consents union all select 'auth.users', count(*) from auth.users"
+  run -At -c "select 'kofi.artists', count(*) from kofi.artists union all select 'kofi.artworks', count(*) from kofi.artworks
+              union all select 'kofi.artwork_images', count(*) from kofi.artwork_images union all select 'kofi.curators', count(*) from kofi.curators
+              union all select 'kofi.shortlist_items', count(*) from kofi.shortlist_items union all select 'kofi.inquiries', count(*) from kofi.inquiries
+              union all select 'kofi.documents', count(*) from kofi.documents union all select 'kofi.audit_events', count(*) from kofi.audit_events
+              union all select 'kofi.consents', count(*) from kofi.consents union all select 'kofi.profiles', count(*) from kofi.profiles
+              union all select 'auth.users', count(*) from auth.users union all select 'public.profiles (other product)', count(*) from public.profiles"
   echo "== tests/rls_test.sql"
   run -f "$here/rls_test.sql"
   echo "== tests/rpc_test.sql"
   run -f "$here/rpc_test.sql"
+  echo "== tests/isolation_test.sql"
+  run -f "$here/isolation_test.sql"
   echo
   echo "# RESULT: PASS"
 } 2>&1 | tee "$log"

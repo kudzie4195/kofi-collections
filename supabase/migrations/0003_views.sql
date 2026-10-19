@@ -11,10 +11,10 @@
 -- =============================================================================
 
 -- regionLabel() from src/domain/visibility.ts.
-create or replace function public.region_label(
-  p_city text, p_region text, p_country text, p_precision public.region_precision
+create or replace function kofi.region_label(
+  p_city text, p_region text, p_country text, p_precision kofi.region_precision
 ) returns text
-language sql immutable set search_path = public as $$
+language sql immutable set search_path = kofi, public as $$
   select case p_precision
     when 'city' then coalesce(nullif(concat_ws(', ', nullif(p_city, ''), nullif(p_region, '')), ''), p_country)
     when 'region' then p_region || ', ' || p_country
@@ -24,13 +24,13 @@ $$;
 
 -- Owner/admin-only artist fields. Returns no row if the caller may not see the
 -- artist at all; region_label is always filled for visible artists.
-create or replace function public.artist_extras(p_artist_id uuid)
+create or replace function kofi.artist_extras(p_artist_id uuid)
 returns table (
   region_label text,
   region_city text,
   region_region text,
   region_country text,
-  region_precision public.region_precision,
+  region_precision kofi.region_precision,
   legal_name text,
   contact_email text,
   contact_phone text,
@@ -39,9 +39,9 @@ returns table (
   consent_version text,
   consent_accepted_at timestamptz
 )
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = kofi, public as $$
   select
-    public.region_label(a.region_city, a.region_region, a.region_country, a.region_precision),
+    kofi.region_label(a.region_city, a.region_region, a.region_country, a.region_precision),
     case when x.privileged then a.region_city end,
     case when x.privileged then a.region_region end,
     case when x.privileged then a.region_country end,
@@ -50,29 +50,29 @@ language sql stable security definer set search_path = public as $$
     case when x.privileged then a.contact_email end,
     case when x.privileged then a.contact_phone end,
     case when x.privileged then a.contact_studio_address end,
-    case when public.is_admin() then a.kofi_notes end,
+    case when kofi.is_admin() then a.kofi_notes end,
     case when x.privileged then a.consent_version end,
     case when x.privileged then a.consent_accepted_at end
-  from public.artists a
-  cross join lateral (select (a.id = public.my_artist_id() or public.is_admin()) as privileged) x
-  where a.id = p_artist_id and public.artist_visible(a.id)
+  from kofi.artists a
+  cross join lateral (select (a.id = kofi.my_artist_id() or kofi.is_admin()) as privileged) x
+  where a.id = p_artist_id and kofi.artist_visible(a.id)
 $$;
 
 -- Price redaction for one artwork. No row if the artwork is not visible.
-create or replace function public.artwork_price(p_artwork_id uuid)
+create or replace function kofi.artwork_price(p_artwork_id uuid)
 returns table (price_amount numeric, price_currency text, price_withheld boolean)
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = kofi, public as $$
   select
     case when s.visible then w.price_amount end,
     case when s.visible then w.price_currency end,
     (w.price_amount is not null and not s.visible)
-  from public.artworks w
-  cross join lateral (select public.can_see(w.price_visibility, w.artist_id) as visible) s
-  where w.id = p_artwork_id and public.artwork_visible(w.id)
+  from kofi.artworks w
+  cross join lateral (select kofi.can_see(w.price_visibility, w.artist_id) as visible) s
+  where w.id = p_artwork_id and kofi.artwork_visible(w.id)
 $$;
 
 -- ------------------------------------------------------------ artists_visible
-create or replace view public.artists_visible with (security_invoker = true) as
+create or replace view kofi.artists_visible with (security_invoker = true) as
 select
   a.id,
   a.working_name,
@@ -107,12 +107,12 @@ select
   x.kofi_notes,
   x.consent_version,
   x.consent_accepted_at,
-  (a.id = public.my_artist_id() or public.is_admin()) as can_edit
-from public.artists a
-left join lateral public.artist_extras(a.id) x on true;
+  (a.id = kofi.my_artist_id() or kofi.is_admin()) as can_edit
+from kofi.artists a
+left join lateral kofi.artist_extras(a.id) x on true;
 
 -- ----------------------------------------------------------- artworks_visible
-create or replace view public.artworks_visible with (security_invoker = true) as
+create or replace view kofi.artworks_visible with (security_invoker = true) as
 select
   w.id,
   w.artist_id,
@@ -145,8 +145,8 @@ select
   a.experience_years_practicing as artist_experience_years_practicing,
   a.status as artist_status,
   a.visibility as artist_visibility,
-  (select x.region_label from public.artist_extras(w.artist_id) x) as artist_region_label,
-  (w.artist_id = public.my_artist_id() or public.is_admin()) as can_edit,
+  (select x.region_label from kofi.artist_extras(w.artist_id) x) as artist_region_label,
+  (w.artist_id = kofi.my_artist_id() or kofi.is_admin()) as can_edit,
   coalesce((
     select jsonb_agg(
       jsonb_build_object(
@@ -154,29 +154,29 @@ select
         'isPrimary', i.is_primary, 'metadataStripped', i.metadata_stripped
       ) order by i.position, i.created_at
     )
-    from public.artwork_images i where i.artwork_id = w.id
+    from kofi.artwork_images i where i.artwork_id = w.id
   ), '[]'::jsonb) as images
-from public.artworks w
-join public.artists a on a.id = w.artist_id
-left join lateral public.artwork_price(w.id) p on true;
+from kofi.artworks w
+join kofi.artists a on a.id = w.artist_id
+left join lateral kofi.artwork_price(w.id) p on true;
 
 -- ---------------------------------------------------------- inquiries_visible
 -- Adds the display labels an InquiryRow needs. The artist reading their inbox
 -- cannot read the curators table, so names come from a definer function that
 -- re-checks can_read_inquiry(). Work email / purpose are never included.
-create or replace function public.inquiry_labels(p_inquiry_id uuid)
+create or replace function kofi.inquiry_labels(p_inquiry_id uuid)
 returns table (curator_name text, institution_name text, artist_working_name text, artwork_title text)
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = kofi, public as $$
   select c.name, inst.name, a.working_name, w.title
-  from public.inquiries i
-  join public.curators c on c.id = i.curator_id
-  join public.institutions inst on inst.id = c.institution_id
-  join public.artists a on a.id = i.artist_id
-  left join public.artworks w on w.id = i.artwork_id
-  where i.id = p_inquiry_id and public.can_read_inquiry(i.id)
+  from kofi.inquiries i
+  join kofi.curators c on c.id = i.curator_id
+  join kofi.institutions inst on inst.id = c.institution_id
+  join kofi.artists a on a.id = i.artist_id
+  left join kofi.artworks w on w.id = i.artwork_id
+  where i.id = p_inquiry_id and kofi.can_read_inquiry(i.id)
 $$;
 
-create or replace view public.inquiries_visible with (security_invoker = true) as
+create or replace view kofi.inquiries_visible with (security_invoker = true) as
 select
   i.id,
   i.curator_id,
@@ -192,9 +192,9 @@ select
   l.institution_name,
   l.artist_working_name,
   l.artwork_title
-from public.inquiries i
-left join lateral public.inquiry_labels(i.id) l on true;
+from kofi.inquiries i
+left join lateral kofi.inquiry_labels(i.id) l on true;
 
-revoke all on public.artists_visible, public.artworks_visible, public.inquiries_visible from anon, authenticated;
-grant select on public.artists_visible, public.artworks_visible to anon, authenticated;
-grant select on public.inquiries_visible to authenticated;
+revoke all on kofi.artists_visible, kofi.artworks_visible, kofi.inquiries_visible from anon, authenticated;
+grant select on kofi.artists_visible, kofi.artworks_visible to anon, authenticated;
+grant select on kofi.inquiries_visible to authenticated;

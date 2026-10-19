@@ -29,27 +29,27 @@ on conflict (id) do update
       allowed_mime_types = excluded.allowed_mime_types;
 
 -- Whether the caller may read an artwork-images object.
-create or replace function public.storage_image_readable(p_name text) returns boolean
-language sql stable security definer set search_path = public as $$
+create or replace function kofi.storage_image_readable(p_name text) returns boolean
+language sql stable security definer set search_path = kofi, public as $$
   select
-    (public.my_artist_id() is not null and split_part(p_name, '/', 1) = public.my_artist_id()::text)
+    (kofi.my_artist_id() is not null and split_part(p_name, '/', 1) = kofi.my_artist_id()::text)
     or exists (
       select 1
-      from public.artwork_images i
-      join public.artworks w on w.id = i.artwork_id
+      from kofi.artwork_images i
+      join kofi.artworks w on w.id = i.artwork_id
       where i.src = 'storage:artwork-images/' || p_name
         and split_part(p_name, '/', 1) = w.artist_id::text
-        and public.artwork_visible(w.id)
+        and kofi.artwork_visible(w.id)
     )
 $$;
 
 -- Whether the caller (an admin) logged an open of this vault file in the last 2 minutes.
-create or replace function public.vault_open_logged(p_name text) returns boolean
-language sql stable security definer set search_path = public as $$
+create or replace function kofi.vault_open_logged(p_name text) returns boolean
+language sql stable security definer set search_path = kofi, public as $$
   select exists (
     select 1
-    from public.documents d
-    join public.audit_events e on e.entity_type = 'document' and e.entity_id = d.id::text
+    from kofi.documents d
+    join kofi.audit_events e on e.entity_type = 'document' and e.entity_id = d.id::text
     where d.file_ref = p_name
       and e.action = 'document.open'
       and e.actor_id = auth.uid()::text
@@ -68,45 +68,45 @@ drop policy if exists "kofi vault owner delete" on storage.objects;
 drop policy if exists "kofi vault admin read after audit" on storage.objects;
 
 create policy "kofi artwork images read" on storage.objects for select to anon, authenticated
-  using (bucket_id = 'artwork-images' and public.storage_image_readable(name));
+  using (bucket_id = 'artwork-images' and kofi.storage_image_readable(name));
 create policy "kofi artwork images insert own" on storage.objects for insert to authenticated
-  with check (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  with check (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi artwork images update own" on storage.objects for update to authenticated
-  using (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = public.my_artist_id()::text)
-  with check (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  using (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = kofi.my_artist_id()::text)
+  with check (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi artwork images delete own" on storage.objects for delete to authenticated
-  using (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  using (bucket_id = 'artwork-images' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 
 create policy "kofi vault owner read" on storage.objects for select to authenticated
-  using (bucket_id = 'vault' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  using (bucket_id = 'vault' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi vault owner insert" on storage.objects for insert to authenticated
-  with check (bucket_id = 'vault' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  with check (bucket_id = 'vault' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi vault owner update" on storage.objects for update to authenticated
-  using (bucket_id = 'vault' and (storage.foldername(name))[1] = public.my_artist_id()::text)
-  with check (bucket_id = 'vault' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  using (bucket_id = 'vault' and (storage.foldername(name))[1] = kofi.my_artist_id()::text)
+  with check (bucket_id = 'vault' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi vault owner delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'vault' and (storage.foldername(name))[1] = public.my_artist_id()::text);
+  using (bucket_id = 'vault' and (storage.foldername(name))[1] = kofi.my_artist_id()::text);
 create policy "kofi vault admin read after audit" on storage.objects for select to authenticated
-  using (bucket_id = 'vault' and public.is_admin() and public.vault_open_logged(name));
+  using (bucket_id = 'vault' and kofi.is_admin() and kofi.vault_open_logged(name));
 
 -- Authorize + audit a vault open. Returns the object path inside the `vault`
 -- bucket; the client then calls storage.from('vault').createSignedUrl(path, 60).
-create or replace function public.open_document(p_doc_id uuid) returns text
-language plpgsql volatile security definer set search_path = public as $$
+create or replace function kofi.open_document(p_doc_id uuid) returns text
+language plpgsql volatile security definer set search_path = kofi, public as $$
 declare
-  d public.documents%rowtype;
+  d kofi.documents%rowtype;
   v_owner boolean;
 begin
-  select * into d from public.documents where id = p_doc_id;
+  select * into d from kofi.documents where id = p_doc_id;
   if not found then
     raise exception 'Document not found.' using errcode = 'P0002';
   end if;
-  v_owner := d.artist_id is not distinct from public.my_artist_id();
-  if not v_owner and not public.is_admin() then
+  v_owner := d.artist_id is not distinct from kofi.my_artist_id();
+  if not v_owner and not kofi.is_admin() then
     raise exception 'This document is private.' using errcode = '42501';
   end if;
-  perform kofi_private.write_audit('document.open', 'document', d.id::text, jsonb_build_object('byOwner', v_owner));
+  perform kofi.write_audit('document.open', 'document', d.id::text, jsonb_build_object('byOwner', v_owner));
   return d.file_ref;
 end $$;
 
-revoke execute on function public.open_document(uuid) from public, anon;
+revoke execute on function kofi.open_document(uuid) from public, anon;

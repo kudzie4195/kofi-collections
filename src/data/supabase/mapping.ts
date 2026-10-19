@@ -43,7 +43,7 @@ export interface ImageJson {
   metadataStripped: boolean;
 }
 
-/** public.artworks_visible */
+/** kofi.artworks_visible */
 export interface ArtworkViewRow {
   id: string;
   artist_id: string;
@@ -81,7 +81,7 @@ export interface ArtworkViewRow {
   images: ImageJson[] | null;
 }
 
-/** Columns shared by public.artists_visible and the full public.artists row. */
+/** Columns shared by kofi.artists_visible and the full kofi.artists row. */
 interface ArtistCommonRow {
   id: string;
   working_name: string;
@@ -117,18 +117,18 @@ interface ArtistCommonRow {
   consent_accepted_at: Ts | null;
 }
 
-/** public.artists_visible */
+/** kofi.artists_visible */
 export interface ArtistViewRow extends ArtistCommonRow {
   region_label: string | null;
   can_edit: boolean;
 }
 
-/** Full public.artists row (owner export only). */
+/** Full kofi.artists row (owner export only). */
 export interface ArtistRow extends ArtistCommonRow {
   user_id: string;
 }
 
-/** Full public.artworks row + images (owner export only). */
+/** Full kofi.artworks row + images (owner export only). */
 export interface ArtworkRow {
   id: string;
   artist_id: string;
@@ -249,6 +249,8 @@ export function isUuid(v: unknown): v is string {
   return typeof v === 'string' && UUID_RE.test(v);
 }
 
+/** Postgres schema holding every Kofi table, view and RPC (supabase/migrations/0000_schema.sql). */
+export const DB_SCHEMA = 'kofi';
 export const IMAGE_BUCKET = 'artwork-images';
 export const VAULT_BUCKET = 'vault';
 export const STORAGE_PREFIX = `storage:${IMAGE_BUCKET}/`;
@@ -541,7 +543,7 @@ export function toAuditEvent(row: AuditRow): AuditEvent {
 
 /* ------------------------------------------------------ domain → database -- */
 
-/** ArtistPatch → column updates for public.artists (owner-editable columns only). */
+/** ArtistPatch → column updates for kofi.artists (owner-editable columns only). */
 export function artistPatchToRow(patch: ArtistPatch): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.workingName !== undefined) row.working_name = patch.workingName;
@@ -580,7 +582,7 @@ export function artistPatchToRow(patch: ArtistPatch): Record<string, unknown> {
   return row;
 }
 
-/** ArtworkInput → the p_artwork JSON accepted by public.save_artwork(). Images travel separately. */
+/** ArtworkInput → the p_artwork JSON accepted by kofi.save_artwork(). Images travel separately. */
 export function artworkInputToJson(input: ArtworkInput): Record<string, unknown> {
   const out: Record<string, unknown> = {
     title: input.title,

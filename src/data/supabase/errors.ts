@@ -44,6 +44,9 @@ export const CONSTRAINT_ERRORS: Record<string, { message: string; field?: string
 
 export const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again from Account.';
 export const NETWORK_MESSAGE = 'Could not reach Kofi Collections. Check your connection and try again.';
+/** PostgREST answers PGRST106 when the requested schema is not in its exposed-schemas list. */
+export const SCHEMA_NOT_EXPOSED_MESSAGE =
+  'This Supabase project does not expose the "kofi" schema yet. Add kofi under Settings → API → Exposed schemas (see docs/SUPABASE.md).';
 const GENERIC_FORBIDDEN = 'You do not have access to this.';
 
 /** Messages Postgres itself produces for privilege / RLS failures — replaced with plain language. */
@@ -59,6 +62,7 @@ function isEngineForbiddenMessage(msg: string): boolean {
  *   22023 invalid_parameter_value (RPC validation, HINT = field), 23514 CHECK,
  *   23502 NOT NULL, 23505 UNIQUE, 22P02 bad enum/number  → ValidationError
  *   PGRST301/PGRST302 / 401 JWT problems  → ForbiddenError (sign in again)
+ *   PGRST106 (schema not exposed by the project)  → Error naming the setup step
  *   network failure  → Error with a "check your connection" message
  */
 export function mapPgError(err: PgErrorLike | null | undefined, fallback = 'Something went wrong. Try again.'): Error {
@@ -93,6 +97,8 @@ export function mapPgError(err: PgErrorLike | null | undefined, fallback = 'Some
     case '22P02':
       if (/uuid/i.test(message)) return new NotFoundError('Not found.');
       return new ValidationError('One of the values is not valid. Check the form and try again.');
+    case 'PGRST106':
+      return new Error(SCHEMA_NOT_EXPOSED_MESSAGE);
     case 'PGRST301':
     case 'PGRST302':
     case 'PGRST303':
@@ -101,6 +107,7 @@ export function mapPgError(err: PgErrorLike | null | undefined, fallback = 'Some
       break;
   }
 
+  if (/invalid schema: ?kofi|schema must be one of the following/i.test(message)) return new Error(SCHEMA_NOT_EXPOSED_MESSAGE);
   if (err.status === 401 || /jwt/i.test(message)) return new ForbiddenError(SESSION_ENDED_MESSAGE);
   if (err.status === 403) return new ForbiddenError(message && !isEngineForbiddenMessage(message) ? message : GENERIC_FORBIDDEN);
   if (err.status === 404) return new NotFoundError(message || 'Not found.');

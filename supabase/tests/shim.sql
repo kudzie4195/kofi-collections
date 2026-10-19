@@ -138,3 +138,87 @@ begin
     create publication supabase_realtime;
   end if;
 end $$;
+
+-- ------------------------------------------------- the OTHER product -------
+-- Kofi shares its Supabase project with another product that already owns
+-- `public`. Recreate the parts of it that are most likely to collide, BEFORE
+-- the Kofi migrations run, so the test run proves the migrations neither
+-- touch nor clash with them:
+--   * public.profiles / public.consent_records / public.admin_users
+--   * public.is_admin() (same name as a Kofi helper)
+--   * the standard Supabase-template trigger `on_auth_user_created` on
+--     auth.users (same name the Kofi migration used before it moved to `kofi`)
+--   * two pre-existing "real" users with public.profiles rows
+-- isolation_test.sql checks all of this is byte-for-byte unchanged afterwards.
+create table if not exists public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  full_name text,
+  avatar_url text,
+  plan text not null default 'free',
+  updated_at timestamptz default now()
+);
+alter table public.profiles enable row level security;
+create policy "other product: own profile" on public.profiles for select to authenticated using (id = auth.uid());
+
+create table if not exists public.consent_records (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users (id) on delete cascade,
+  kind text not null,
+  granted_at timestamptz not null default now()
+);
+create table if not exists public.admin_users (user_id uuid primary key references auth.users (id) on delete cascade);
+
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.admin_users where user_id = auth.uid())
+$$;
+
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, full_name) values (new.id, new.raw_user_meta_data ->> 'full_name');
+  return new;
+end $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+insert into auth.users (id, aud, role, email, raw_user_meta_data) values
+  ('eeeeeeee-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'real.user.one@example.net', '{"full_name":"Real User One"}'),
+  ('eeeeeeee-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'real.user.two@example.net', '{"full_name":"Real User Two"}')
+on conflict (id) do nothing;
+update public.profiles set plan = 'pro' where id = 'eeeeeeee-0000-4000-8000-000000000002';
+insert into public.admin_users (user_id) values ('eeeeeeee-0000-4000-8000-000000000001') on conflict do nothing;
+insert into public.consent_records (user_id, kind) values ('eeeeeeee-0000-4000-8000-000000000001', 'terms');
+
+-- Fingerprint of everything in `public` (objects + data of the other
+-- product's tables), taken now, before any Kofi migration. Stored outside
+-- `public` so it does not change the fingerprint itself.
+create schema if not exists kofi_test;
+create or replace function kofi_test.public_fingerprint() returns text
+language sql stable as $$
+  select md5(string_agg(x, E'\n' order by x)) from (
+    select 'rel ' || c.relname || ' ' || c.relkind::text || ' ' || coalesce(array_to_string(c.relacl, ','), '') from pg_class c where c.relnamespace = 'public'::regnamespace
+    union all
+    select 'col ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod) || ' ' || coalesce(array_to_string(a.attacl, ','), '')
+      from pg_attribute a join pg_class c on c.oid = a.attrelid
+      where c.relnamespace = 'public'::regnamespace and a.attnum > 0 and not a.attisdropped
+    union all
+    select 'fn ' || p.oid::regprocedure::text || ' ' || md5(p.prosrc) || ' ' || coalesce(array_to_string(p.proacl, ','), '') from pg_proc p where p.pronamespace = 'public'::regnamespace
+    union all
+    select 'type ' || t.typname from pg_type t where t.typnamespace = 'public'::regnamespace
+    union all
+    select 'policy ' || pol.polname || ' on ' || c.relname from pg_policy pol join pg_class c on c.oid = pol.polrelid where c.relnamespace = 'public'::regnamespace
+    union all
+    select 'trigger ' || t.tgname || ' on ' || c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid where c.relnamespace = 'public'::regnamespace and not t.tgisinternal
+    union all
+    select 'auth-trigger ' || t.tgname || ' -> ' || t.tgfoid::regproc::text from pg_trigger t where t.tgrelid = 'auth.users'::regclass and not t.tgisinternal and t.tgfoid::regproc::text not like 'kofi.%'
+    union all
+    select 'row profiles ' || p::text from public.profiles p where p.id::text like 'eeeeeeee-%'
+    union all
+    select 'row admin_users ' || a::text from public.admin_users a
+    union all
+    select 'row consent_records ' || r.user_id || ' ' || r.kind from public.consent_records r
+  ) s (x)
+$$;
+create table kofi_test.baseline as select kofi_test.public_fingerprint() as fp, now() as taken_at;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Uploads the two FICTIONAL demo vault files (Mara's condition report and
 // appraisal letter from src/data/mock/seed.ts) into the private `vault` bucket
-// at the paths supabase/seed.sql stores in documents.file_ref.
+// at the paths supabase/seed_content.sql stores in kofi.documents.file_ref.
 //
 //   SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SERVICE_ROLE_KEY=... \
 //     node supabase/scripts/upload-demo-vault.mjs

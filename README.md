@@ -46,7 +46,7 @@ App id `org.kofi.collections`. Capacitor plugins: Share, Filesystem (export), Ha
 
 ### Supabase mode
 
-See `docs/SUPABASE.md`. In short: apply `supabase/migrations/*` in order, run `supabase/seed.sql`, copy `.env.example` → `.env` with `VITE_DATA_MODE=supabase` and your project URL + anon key.
+See `docs/SUPABASE.md`. In short: apply `supabase/migrations/*` in order, run `supabase/seed_auth.sql` then `supabase/seed_content.sql`, and expose the `kofi` schema (Settings → API → Exposed schemas), copy `.env.example` → `.env` with `VITE_DATA_MODE=supabase` and your project URL + anon key.
 
 ## The visibility model (read this before changing anything)
 

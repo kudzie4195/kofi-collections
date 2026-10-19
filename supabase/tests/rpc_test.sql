@@ -13,12 +13,12 @@ set local role anon;
 set local request.jwt.claims = '{"role":"anon"}';
 do $$
 begin
-  if (select role from public.whoami()) <> 'public' or (select user_id from public.whoami()) is not null then
+  if (select role from kofi.whoami()) <> 'public' or (select user_id from kofi.whoami()) is not null then
     raise exception 'FAIL: whoami() for a visitor should be role public with no user';
   end if;
   raise notice 'ok: whoami() — visitor';
   begin
-    perform public.save_artwork('{}'::jsonb, '[]'::jsonb);
+    perform kofi.save_artwork('{}'::jsonb, '[]'::jsonb);
     raise exception 'FAIL: visitor could call save_artwork';
   exception when insufficient_privilege then
     raise notice 'ok: mutating RPCs are not executable by anon (%)', sqlerrm;
@@ -29,14 +29,14 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000006","r
 do $$
 declare w record;
 begin
-  select * into w from public.whoami();
+  select * into w from kofi.whoami();
   if w.role <> 'curator' or w.curator_id <> '50000000-0000-4000-8000-000000000001' or not w.curator_verified or w.display_name <> 'Lena Marchetti' then
     raise exception 'FAIL: whoami() for Lena is wrong: %', row_to_json(w);
   end if;
   raise notice 'ok: whoami() — Lena is a verified curator';
-  if public.describe_access('shortlist', '60000000-0000-4000-8000-000000000001') <> 'owner'
-     or public.describe_access('shortlist', gen_random_uuid()) <> 'not_found'
-     or public.describe_access('artwork', '30000000-0000-4000-8000-000000000011') <> 'other' then
+  if kofi.describe_access('shortlist', '60000000-0000-4000-8000-000000000001') <> 'owner'
+     or kofi.describe_access('shortlist', gen_random_uuid()) <> 'not_found'
+     or kofi.describe_access('artwork', '30000000-0000-4000-8000-000000000011') <> 'other' then
     raise exception 'FAIL: describe_access() answers are wrong for Lena';
   end if;
   raise notice 'ok: describe_access() distinguishes owner / other / not_found';
@@ -57,37 +57,37 @@ declare
                    "priceVisibility":"institutions","visibility":"public","tags":["night"]}';
 begin
   begin
-    perform public.save_artwork(v_art, '[]'::jsonb);
+    perform kofi.save_artwork(v_art, '[]'::jsonb);
     raise exception 'FAIL: published a work with no images';
   exception when invalid_parameter_value then
     get stacked diagnostics v_hint = pg_exception_hint;
     if v_hint <> 'images' then raise exception 'FAIL: expected hint images, got %', v_hint; end if;
     raise notice 'ok: save_artwork() refuses to publish without images (%; field %)', sqlerrm, v_hint;
   end;
-  v_id := public.save_artwork(v_art, '[{"src":"data:image/jpeg;base64,AAAA","alt":"Night bus","isPrimary":true,"metadataStripped":true}]');
-  if not exists (select 1 from public.artworks_visible where id = v_id and price_amount = 1200 and jsonb_array_length(images) = 1) then
+  v_id := kofi.save_artwork(v_art, '[{"src":"data:image/jpeg;base64,AAAA","alt":"Night bus","isPrimary":true,"metadataStripped":true}]');
+  if not exists (select 1 from kofi.artworks_visible where id = v_id and price_amount = 1200 and jsonb_array_length(images) = 1) then
     raise exception 'FAIL: new artwork not readable by its owner with price and image';
   end if;
   raise notice 'ok: save_artwork() creates a work with its image (%)', v_id;
 
-  perform public.save_artwork(
+  perform kofi.save_artwork(
     v_art || jsonb_build_object('id', v_id, 'title', 'Night Bus (revised)', 'visibility', 'private'),
     '[{"src":"data:image/jpeg;base64,BBBB","alt":"second"},{"src":"data:image/jpeg;base64,CCCC","alt":"third"}]');
-  if (select title from public.artworks where id = v_id) <> 'Night Bus (revised)'
-     or (select count(*) from public.artwork_images where artwork_id = v_id) <> 2 then
+  if (select title from kofi.artworks where id = v_id) <> 'Night Bus (revised)'
+     or (select count(*) from kofi.artwork_images where artwork_id = v_id) <> 2 then
     raise exception 'FAIL: save_artwork() update did not replace fields/images';
   end if;
   raise notice 'ok: save_artwork() updates fields and replaces the image list';
 
   begin
-    perform public.save_artwork(v_art || '{"id":"30000000-0000-4000-8000-000000000011","dimensions":{"height":0,"width":30,"unit":"cm"}}',
+    perform kofi.save_artwork(v_art || '{"id":"30000000-0000-4000-8000-000000000011","dimensions":{"height":0,"width":30,"unit":"cm"}}',
       '[{"id":"31000000-0000-4000-8000-000000000011","src":"data:image/svg+xml,x"}]');
     raise exception 'FAIL: zero height accepted';
   exception when check_violation then
     raise notice 'ok: server rejects zero dimensions (constraint %)', (regexp_match(sqlerrm, '"([a-z_]+)"$'))[1];
   end;
   begin
-    perform public.save_artwork(v_art, '[{"src":"storage:artwork-images/20000000-0000-4000-8000-000000000003/x.jpg"}]');
+    perform kofi.save_artwork(v_art, '[{"src":"storage:artwork-images/20000000-0000-4000-8000-000000000003/x.jpg"}]');
     raise exception 'FAIL: Mara linked June''s storage object';
   exception when insufficient_privilege then
     raise notice 'ok: save_artwork() cannot reference another artist''s storage folder';
@@ -97,13 +97,13 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000003","r
 do $$
 begin
   begin
-    perform public.save_artwork('{"id":"30000000-0000-4000-8000-000000000011","title":"x"}', '[]');
+    perform kofi.save_artwork('{"id":"30000000-0000-4000-8000-000000000011","title":"x"}', '[]');
     raise exception 'FAIL: June saved over Mara''s work';
   exception when insufficient_privilege then
     raise notice 'ok: June cannot save over Mara''s work (%)', sqlerrm;
   end;
   begin
-    perform public.save_artwork('{"id":"3fffffff-0000-4000-8000-000000000000","title":"x"}', '[]');
+    perform kofi.save_artwork('{"id":"3fffffff-0000-4000-8000-000000000000","title":"x"}', '[]');
     raise exception 'FAIL: unknown id accepted';
   exception when no_data_found then
     raise notice 'ok: unknown artwork id is NotFound (%)', sqlerrm;
@@ -112,7 +112,7 @@ end $$;
 reset role;
 do $$
 begin
-  if (select count(*) from public.audit_events where actor_id = '10000000-0000-4000-8000-000000000001' and action in ('artwork.create', 'artwork.visibility')) <> 2 then
+  if (select count(*) from kofi.audit_events where actor_id = '10000000-0000-4000-8000-000000000001' and action in ('artwork.create', 'artwork.visibility')) <> 2 then
     raise exception 'FAIL: expected one artwork.create and one artwork.visibility event for Mara';
   end if;
   raise notice 'ok: artwork create / visibility change audited by trigger';
@@ -121,7 +121,7 @@ rollback;
 
 -- --------------------------------------------- consent / submit / export ----
 begin;
-update public.artists set consent_version = null, consent_accepted_at = null, status = 'draft'
+update kofi.artists set consent_version = null, consent_accepted_at = null, status = 'draft'
 where id = '20000000-0000-4000-8000-000000000003';
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000003","role":"authenticated"}';
@@ -129,19 +129,19 @@ do $$
 declare v_hint text; v_export jsonb;
 begin
   begin
-    perform public.submit_for_review();
+    perform kofi.submit_for_review();
     raise exception 'FAIL: submitted without consent';
   exception when invalid_parameter_value then
     get stacked diagnostics v_hint = pg_exception_hint;
     raise notice 'ok: submit_for_review() requires consent (%; field %)', sqlerrm, v_hint;
   end;
-  perform public.accept_consent('2026-10-v1');
-  perform public.submit_for_review();
-  if (select status from public.artists_visible where id = '20000000-0000-4000-8000-000000000003') <> 'pending' then
+  perform kofi.accept_consent('2026-10-v1');
+  perform kofi.submit_for_review();
+  if (select status from kofi.artists_visible where id = '20000000-0000-4000-8000-000000000003') <> 'pending' then
     raise exception 'FAIL: June should be pending after submitting';
   end if;
   raise notice 'ok: accept_consent() then submit_for_review() → pending';
-  v_export := public.export_my_data();
+  v_export := kofi.export_my_data();
   if jsonb_array_length(v_export -> 'artworks') <> 3 or v_export #>> '{artist,contact_email}' <> 'june@example.com' then
     raise exception 'FAIL: export_my_data() content wrong';
   end if;
@@ -151,7 +151,7 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","r
 do $$
 declare v_export jsonb;
 begin
-  v_export := public.export_my_data();
+  v_export := kofi.export_my_data();
   if jsonb_array_length(v_export -> 'documents') <> 2 or exists (select 1 from jsonb_array_elements(v_export -> 'documents') d where d ? 'file_ref') then
     raise exception 'FAIL: export documents should be 2 rows without file_ref';
   end if;
@@ -164,17 +164,17 @@ end $$;
 reset role;
 do $$
 begin
-  if not exists (select 1 from public.consents where artist_id = '20000000-0000-4000-8000-000000000003' and version = '2026-10-v1'
+  if not exists (select 1 from kofi.consents where artist_id = '20000000-0000-4000-8000-000000000003' and version = '2026-10-v1'
                  and user_id = '10000000-0000-4000-8000-000000000003' and accepted_at > now() - interval '1 minute') then
     raise exception 'FAIL: consent row not appended';
   end if;
-  if not exists (select 1 from public.audit_events where action = 'artist.consent' and consent_version = '2026-10-v1' and entity_id = '20000000-0000-4000-8000-000000000003') then
+  if not exists (select 1 from kofi.audit_events where action = 'artist.consent' and consent_version = '2026-10-v1' and entity_id = '20000000-0000-4000-8000-000000000003') then
     raise exception 'FAIL: artist.consent not audited with consent version';
   end if;
-  if not exists (select 1 from public.audit_events where action = 'artist.status' and meta ->> 'status' = 'pending' and actor_role = 'artist') then
+  if not exists (select 1 from kofi.audit_events where action = 'artist.status' and meta ->> 'status' = 'pending' and actor_role = 'artist') then
     raise exception 'FAIL: submit_for_review not audited';
   end if;
-  if (select count(*) from public.audit_events where action = 'artist.export') <> 2 then
+  if (select count(*) from kofi.audit_events where action = 'artist.export') <> 2 then
     raise exception 'FAIL: expected two artist.export events';
   end if;
   raise notice 'ok: consent appended, consent/status/export audited';
@@ -189,15 +189,15 @@ do $$
 declare v_hint text; v_id uuid;
 begin
   begin
-    perform public.request_verification('Owen Blackwood', 'Coordinator', 'not-an-email', 'Identifying artists for a terminal commission call.', '{"name":"Pittsburgh International Airport Arts Program"}');
+    perform kofi.request_verification('Owen Blackwood', 'Coordinator', 'not-an-email', 'Identifying artists for a terminal commission call.', '{"name":"Pittsburgh International Airport Arts Program"}');
     raise exception 'FAIL: bad work email accepted';
   exception when invalid_parameter_value then
     get stacked diagnostics v_hint = pg_exception_hint;
     raise notice 'ok: request_verification() validates the work email (field %)', v_hint;
   end;
-  v_id := public.request_verification('Owen Blackwood', 'Public Art Coordinator', 'o.blackwood@example.org',
+  v_id := kofi.request_verification('Owen Blackwood', 'Public Art Coordinator', 'o.blackwood@example.org',
     'Identifying artists for a terminal commission call, round two.', '{"name":"pittsburgh international airport arts program","country":"United States"}');
-  if v_id <> '50000000-0000-4000-8000-000000000002' or (select count(*) from public.institutions) <> 3 then
+  if v_id <> '50000000-0000-4000-8000-000000000002' or (select count(*) from kofi.institutions) <> 3 then
     raise exception 'FAIL: re-request should reuse Owen''s curator row and the existing institution (case-insensitive)';
   end if;
   raise notice 'ok: request_verification() updates the existing request and reuses the institution';
@@ -206,7 +206,7 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","r
 do $$
 begin
   begin
-    perform public.request_verification('Mara', 't', 'm@example.org', 'I would like to be a curator too please.', '{"name":"X"}');
+    perform kofi.request_verification('Mara', 't', 'm@example.org', 'I would like to be a curator too please.', '{"name":"X"}');
     raise exception 'FAIL: an artist requested curator verification';
   exception when insufficient_privilege then
     raise notice 'ok: only curator accounts can request verification';
@@ -215,14 +215,14 @@ end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000008","role":"authenticated"}';
 do $$
 begin
-  perform public.set_curator_status('50000000-0000-4000-8000-000000000002', 'verified', 'Checked staff directory.');
-  if (select status from public.curators where id = '50000000-0000-4000-8000-000000000002') <> 'verified' then
+  perform kofi.set_curator_status('50000000-0000-4000-8000-000000000002', 'verified', 'Checked staff directory.');
+  if (select status from kofi.curators where id = '50000000-0000-4000-8000-000000000002') <> 'verified' then
     raise exception 'FAIL: admin could not verify Owen';
   end if;
-  perform public.set_kofi_notes('20000000-0000-4000-8000-000000000001', 'Updated note.');
-  perform public.mark_artwork_reviewed('30000000-0000-4000-8000-000000000013');
+  perform kofi.set_kofi_notes('20000000-0000-4000-8000-000000000001', 'Updated note.');
+  perform kofi.mark_artwork_reviewed('30000000-0000-4000-8000-000000000013');
   begin
-    perform public.mark_artwork_reviewed(gen_random_uuid());
+    perform kofi.mark_artwork_reviewed(gen_random_uuid());
     raise exception 'FAIL: unknown artwork reviewed';
   exception when no_data_found then
     raise notice 'ok: mark_artwork_reviewed() unknown id is NotFound';
@@ -232,7 +232,7 @@ end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000007","role":"authenticated"}';
 do $$
 begin
-  if (select price_amount from public.artworks_visible where id = '30000000-0000-4000-8000-000000000011') is distinct from 9800 then
+  if (select price_amount from kofi.artworks_visible where id = '30000000-0000-4000-8000-000000000011') is distinct from 9800 then
     raise exception 'FAIL: newly verified Owen should now see 9800';
   end if;
   raise notice 'ok: once verified, Owen sees the institutions-only price (verification read from the record)';
@@ -240,10 +240,10 @@ end $$;
 reset role;
 do $$
 begin
-  if not exists (select 1 from public.audit_events where action = 'curator.request' and actor_id = '10000000-0000-4000-8000-000000000007')
-     or not exists (select 1 from public.audit_events where action = 'curator.status' and meta ->> 'status' = 'verified' and actor_role = 'admin')
-     or not exists (select 1 from public.audit_events where action = 'artist.update' and meta ->> 'field' = 'kofiNotes')
-     or not exists (select 1 from public.audit_events where action = 'artwork.update' and meta ->> 'reviewed' = 'true') then
+  if not exists (select 1 from kofi.audit_events where action = 'curator.request' and actor_id = '10000000-0000-4000-8000-000000000007')
+     or not exists (select 1 from kofi.audit_events where action = 'curator.status' and meta ->> 'status' = 'verified' and actor_role = 'admin')
+     or not exists (select 1 from kofi.audit_events where action = 'artist.update' and meta ->> 'field' = 'kofiNotes')
+     or not exists (select 1 from kofi.audit_events where action = 'artwork.update' and meta ->> 'reviewed' = 'true') then
     raise exception 'FAIL: curator request/status, notes or review not audited';
   end if;
   raise notice 'ok: curator.request, curator.status, kofi notes and review audited';
@@ -257,7 +257,7 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","r
 do $$
 declare n integer;
 begin
-  delete from public.artworks where id = '30000000-0000-4000-8000-000000000011';
+  delete from kofi.artworks where id = '30000000-0000-4000-8000-000000000011';
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'FAIL: Mara could not delete her own artwork'; end if;
   raise notice 'ok: Mara deletes aw_mara_1';
@@ -265,19 +265,19 @@ end $$;
 reset role;
 do $$
 begin
-  if exists (select 1 from public.shortlist_items where artwork_id = '30000000-0000-4000-8000-000000000011') then
+  if exists (select 1 from kofi.shortlist_items where artwork_id = '30000000-0000-4000-8000-000000000011') then
     raise exception 'FAIL: shortlist item survived the artwork deletion';
   end if;
-  if exists (select 1 from public.documents where artwork_id is not null) then
+  if exists (select 1 from kofi.documents where artwork_id is not null) then
     raise exception 'FAIL: documents should be detached (artwork_id null), not deleted';
   end if;
-  if (select count(*) from public.documents) <> 2 then
+  if (select count(*) from kofi.documents) <> 2 then
     raise exception 'FAIL: vault documents must be retained after artwork deletion';
   end if;
-  if exists (select 1 from public.audit_events where action = 'shortlist.remove') then
+  if exists (select 1 from kofi.audit_events where action = 'shortlist.remove') then
     raise exception 'FAIL: cascade removal was logged as a curator shortlist.remove';
   end if;
-  if not exists (select 1 from public.audit_events where action = 'artwork.delete' and actor_role = 'artist') then
+  if not exists (select 1 from kofi.audit_events where action = 'artwork.delete' and actor_role = 'artist') then
     raise exception 'FAIL: artwork.delete not audited';
   end if;
   raise notice 'ok: deleting a work removes shortlist items, detaches documents, audits only artwork.delete';
@@ -291,23 +291,23 @@ set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","r
 do $$
 begin
   begin
-    perform public.kofi_demo_reset();
+    perform kofi.kofi_demo_reset();
     raise exception 'FAIL: an artist reset the demo';
   exception when insufficient_privilege then
     raise notice 'ok: kofi_demo_reset() refuses non-admins (%)', sqlerrm;
   end;
-  update public.artists set bio = 'Changed before the reset, should be restored afterwards.' where id = '20000000-0000-4000-8000-000000000001';
+  update kofi.artists set bio = 'Changed before the reset, should be restored afterwards.' where id = '20000000-0000-4000-8000-000000000001';
 end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000008","role":"authenticated"}';
 do $$
 declare before_count bigint;
 begin
-  select count(*) into before_count from public.audit_events;
-  perform public.kofi_demo_reset();
-  if (select bio from public.artists_visible where id = '20000000-0000-4000-8000-000000000001') like 'Changed before%' then
+  select count(*) into before_count from kofi.audit_events;
+  perform kofi.kofi_demo_reset();
+  if (select bio from kofi.artists_visible where id = '20000000-0000-4000-8000-000000000001') like 'Changed before%' then
     raise exception 'FAIL: reset did not restore Mara''s bio';
   end if;
-  if (select count(*) from public.audit_events) <> before_count then
+  if (select count(*) from kofi.audit_events) <> before_count then
     raise exception 'FAIL: reset wrote per-row audit noise';
   end if;
   raise notice 'ok: admin kofi_demo_reset() restores seed content without audit noise; audit log kept';
