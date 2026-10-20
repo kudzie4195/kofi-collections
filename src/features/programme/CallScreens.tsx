@@ -132,9 +132,14 @@ export function CallScreen() {
   const application = q.data.mine.find((a) => a.callId === call.id && a.status !== 'withdrawn');
   const facts: { label: string; value: string }[] = [
     { label: 'Deadline', value: call.deadline ? formatDay(call.deadline) : 'None stated · open until filled' },
-    { label: 'Opens', value: formatDay(call.opensOn) },
-    { label: 'Works accepted', value: `Up to ${call.maxWorks}` },
-    { label: 'Mediums', value: call.mediums.length ? call.mediums.map((m) => m[0]!.toUpperCase() + m.slice(1)).join(', ') : 'Any medium' },
+    // Calls run on a partner's form publish their own terms; only show what Kofi actually states.
+    ...(call.externalUrl
+      ? []
+      : [
+          { label: 'Opens', value: formatDay(call.opensOn) },
+          { label: 'Works accepted', value: `Up to ${call.maxWorks}` },
+          { label: 'Mediums', value: call.mediums.length ? call.mediums.map((m) => m[0]!.toUpperCase() + m.slice(1)).join(', ') : 'Any medium' },
+        ]),
     { label: 'Fee', value: call.fee },
     ...(call.award ? [{ label: 'Award', value: call.award }] : []),
     { label: 'Eligibility', value: call.eligibility },
@@ -211,6 +216,11 @@ function CallAction({ call, phase, viewer, application }: { call: OpenCall; phas
         <button type="button" className="btn btn--secondary btn--block" disabled>
           Applications closed
         </button>
+        {call.externalUrl && (
+          <a className="btn btn--ghost btn--block" href={call.externalUrl} target="_blank" rel="noopener noreferrer">
+            Read the call on {new URL(call.externalUrl).hostname.replace(/^www\./, '')} ↗
+          </a>
+        )}
       </>
     );
   } else if (phase === 'upcoming') {

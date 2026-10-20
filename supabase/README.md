@@ -13,6 +13,8 @@ Backend for Kofi Collections' Supabase mode. Full guide: [`docs/SUPABASE.md`](..
 | `migrations/0006_realtime.sql` | Realtime publication for the main `kofi.*` tables |
 | `migrations/0007_expose_schema.sql` | No-op for exposure (exposing `kofi` is a **manual dashboard step**, see docs/SUPABASE.md §2); `service_role` grants; schema-cache reload |
 | `migrations/0008_programme.sql` | The programme: exhibitions, open calls, events, stories, applications, collector inquiries; their views, RPCs, RLS, the public `kofi-programme` image bucket; recorded in `kofi.applied_migrations` (docs/SUPABASE.md §9) |
+| `apply/0008_part1..4.sql` | **Generated** (`scripts/split-0008.mjs`) from 0008: the same migration in four ≤ 25 KB pieces for pasting into a live project, one transaction each |
+| `apply/0008_live_patch.sql` | **Generated.** Updates the 13 existing works' `rights_note` to the current seed, by fixed id (live project, which must not be reset) |
 | `seed_auth.sql` | **Generated.** 8 demo auth users (password `kofi-demo-2026`). **Creates real auth accounts in the shared `auth.users`** |
 | `seed_content.sql` | **Generated.** Fictional demo content in `kofi`, the `kofi.demo_*` snapshot and `kofi.kofi_demo_reset()`. Run after `seed_auth.sql` |
 | `seed_programme.sql` | **Generated.** Additive programme rows only (`on conflict do nothing`, never deletes) — for a project whose content was loaded without the reset snapshot |

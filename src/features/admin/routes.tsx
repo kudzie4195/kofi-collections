@@ -1,27 +1,19 @@
 import type { RouteObject } from 'react-router-dom';
-import { AdminHome } from './AdminHome';
-import { AdminArtists } from './AdminArtists';
-import { AdminArtistDetail } from './AdminArtistDetail';
-import { AdminCurators } from './AdminCurators';
-import { AdminInquiries } from './AdminInquiries';
-import { AdminActivity } from './AdminActivity';
-import { AdminProgramme } from './AdminProgramme';
-import { ProgrammeEditorRoute } from './ProgrammeEditor';
-import { AdminApplications } from './AdminApplications';
-import { AdminApplicationDetail } from './AdminApplicationDetail';
-import { AdminCollectors } from './AdminCollectors';
 
-/** Relative children of `/admin`. The role gate lives in the spine. */
+/**
+ * Relative children of `/admin`. The role gate lives in the spine.
+ * Each screen is a route-level `lazy` chunk so visitors never download the desk.
+ */
 export const adminRoutes: RouteObject[] = [
-  { index: true, element: <AdminHome /> },
-  { path: 'artists', element: <AdminArtists /> },
-  { path: 'artists/:id', element: <AdminArtistDetail /> },
-  { path: 'curators', element: <AdminCurators /> },
-  { path: 'inquiries', element: <AdminInquiries /> },
-  { path: 'activity', element: <AdminActivity /> },
-  { path: 'programme', element: <AdminProgramme /> },
-  { path: 'programme/:kind/:id', element: <ProgrammeEditorRoute /> },
-  { path: 'applications', element: <AdminApplications /> },
-  { path: 'applications/:id', element: <AdminApplicationDetail /> },
-  { path: 'collectors', element: <AdminCollectors /> },
+  { index: true, lazy: () => import('./AdminHome').then((m) => ({ Component: m.AdminHome })) },
+  { path: 'artists', lazy: () => import('./AdminArtists').then((m) => ({ Component: m.AdminArtists })) },
+  { path: 'artists/:id', lazy: () => import('./AdminArtistDetail').then((m) => ({ Component: m.AdminArtistDetail })) },
+  { path: 'curators', lazy: () => import('./AdminCurators').then((m) => ({ Component: m.AdminCurators })) },
+  { path: 'inquiries', lazy: () => import('./AdminInquiries').then((m) => ({ Component: m.AdminInquiries })) },
+  { path: 'activity', lazy: () => import('./AdminActivity').then((m) => ({ Component: m.AdminActivity })) },
+  { path: 'programme', lazy: () => import('./AdminProgramme').then((m) => ({ Component: m.AdminProgramme })) },
+  { path: 'programme/:kind/:id', lazy: () => import('./ProgrammeEditor').then((m) => ({ Component: m.ProgrammeEditorRoute })) },
+  { path: 'applications', lazy: () => import('./AdminApplications').then((m) => ({ Component: m.AdminApplications })) },
+  { path: 'applications/:id', lazy: () => import('./AdminApplicationDetail').then((m) => ({ Component: m.AdminApplicationDetail })) },
+  { path: 'collectors', lazy: () => import('./AdminCollectors').then((m) => ({ Component: m.AdminCollectors })) },
 ];

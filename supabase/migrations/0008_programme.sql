@@ -19,10 +19,11 @@
 -- Access model (least privilege, same style as 0002/0003):
 --   programme tables   RLS select: published OR kofi.is_admin(); writes: admin
 --                      only (RLS). anon/authenticated may SELECT every column
---                      except artwork_ids; works are read through the views
---                      kofi.exhibitions_visible / kofi.stories_visible, whose
---                      artwork_ids are filtered server-side to the works the
---                      caller may see (kofi.artwork_visible), keeping order.
+--                      except artwork_ids, exhibition_id (calls, events) and
+--                      stories.artist_id; those are read through the *_visible
+--                      views, which filter works to what the caller may see
+--                      (kofi.artwork_discoverable, order kept) and drop links to
+--                      draft exhibitions / artists the caller may not see.
 --   applications       no table writes for any API role — RPCs only
 --                      (submit_application / withdraw_application /
 --                      set_application_status). authenticated may SELECT every
@@ -478,29 +479,61 @@ select
   e.external_url, e.curated_by, e.sample, e.published, e.created_at, e.updated_at
 from kofi.exhibitions e;
 
+-- Links from a programme item to an exhibition / artist, returned only when
+-- the caller may see both the item (published, or admin) and the target
+-- (a published exhibition, or an artist profile kofi.artist_visible allows).
+-- The raw columns are not selectable by the API roles (see the grants), so
+-- draft exhibition and pending artist UUIDs never leak; the views call these.
+create or replace function kofi.programme_exhibition_link(p_kind text, p_id uuid) returns uuid
+language plpgsql stable security definer set search_path = kofi, public as $$
+declare
+  v_ex uuid;
+  v_published boolean;
+begin
+  if p_kind = 'open_call' then
+    select c.exhibition_id, c.published into v_ex, v_published from kofi.open_calls c where c.id = p_id;
+  elsif p_kind = 'event' then
+    select v.exhibition_id, v.published into v_ex, v_published from kofi.events v where v.id = p_id;
+  else
+    return null;
+  end if;
+  if v_ex is null or not (v_published or kofi.is_admin()) then
+    return null;
+  end if;
+  return (select e.id from kofi.exhibitions e where e.id = v_ex and (e.published or kofi.is_admin()));
+end $$;
+
+create or replace function kofi.story_artist_link(p_id uuid) returns uuid
+language sql stable security definer set search_path = kofi, public as $$
+  select s.artist_id
+  from kofi.stories s
+  where s.id = p_id and s.artist_id is not null
+    and (s.published or kofi.is_admin())
+    and kofi.artist_visible(s.artist_id)
+$$;
+
 -- artist_id is dropped when the caller may not see that artist's profile.
 create or replace view kofi.stories_visible with (security_invoker = true) as
 select
   s.id, s.title, s.dek, s.kind, s.body, s.author, s.published_on,
-  case when s.artist_id is not null and kofi.artist_visible(s.artist_id) then s.artist_id end as artist_id,
+  kofi.story_artist_link(s.id) as artist_id,
   kofi.programme_artwork_ids('story', s.id) as artwork_ids,
   s.image, s.sample, s.published, s.created_at, s.updated_at
 from kofi.stories s;
 
--- exhibition_id is dropped when the caller may not see that exhibition (a
--- draft): the subquery runs under the caller's RLS on kofi.exhibitions.
+-- exhibition_id is dropped when the caller may not see that exhibition (a draft).
 create or replace view kofi.open_calls_visible with (security_invoker = true) as
 select
   c.id, c.title, c.partner, c.summary, c.body, c.eligibility, c.mediums, c.opens_on, c.deadline,
   c.max_works, c.fee, c.award, c.image, c.external_url,
-  (select e.id from kofi.exhibitions e where e.id = c.exhibition_id) as exhibition_id,
+  kofi.programme_exhibition_link('open_call', c.id) as exhibition_id,
   c.sample, c.published, c.created_at, c.updated_at
 from kofi.open_calls c;
 
 create or replace view kofi.events_visible with (security_invoker = true) as
 select
   v.id, v.title, v.kind, v.starts_at, v.ends_at, v.venue, v.summary, v.rsvp_url,
-  (select e.id from kofi.exhibitions e where e.id = v.exhibition_id) as exhibition_id,
+  kofi.programme_exhibition_link('event', v.id) as exhibition_id,
   v.sample, v.published, v.created_at, v.updated_at
 from kofi.events v;
 
@@ -776,6 +809,22 @@ begin
     jsonb_build_object('status', p_status, 'noteOnly', v_old = p_status));
 end $$;
 
+-- RPC privileges (kept next to the RPCs so they are never callable more widely,
+-- even between the parts of supabase/apply/0008_part*.sql). Mutating ones need a
+-- session, except the collector inquiry form.
+revoke execute on function kofi.submit_application(uuid, uuid[], text) from public, anon;
+revoke execute on function kofi.withdraw_application(uuid) from public, anon;
+revoke execute on function kofi.set_application_status(uuid, kofi.application_status, text, text) from public, anon;
+revoke execute on function kofi.set_buyer_inquiry_status(uuid, kofi.buyer_inquiry_status, text) from public, anon;
+revoke execute on function kofi.submit_buyer_inquiry(uuid, text, text, text, text, text, boolean) from public;
+grant execute on function
+  kofi.submit_application(uuid, uuid[], text),
+  kofi.withdraw_application(uuid),
+  kofi.set_application_status(uuid, kofi.application_status, text, text),
+  kofi.set_buyer_inquiry_status(uuid, kofi.buyer_inquiry_status, text)
+to authenticated;
+grant execute on function kofi.submit_buyer_inquiry(uuid, text, text, text, text, text, boolean) to anon, authenticated;
+
 -- ------------------------------------------------------------ privileges ----
 -- Nothing by default (0000); grant back exactly what each role needs.
 revoke all on kofi.exhibitions, kofi.open_calls, kofi.events, kofi.stories,
@@ -783,7 +832,9 @@ revoke all on kofi.exhibitions, kofi.open_calls, kofi.events, kofi.stories,
 revoke all on kofi.exhibitions_visible, kofi.stories_visible, kofi.open_calls_visible, kofi.events_visible,
   kofi.applications_visible, kofi.buyer_inquiries_visible from anon, authenticated;
 
--- Programme: read (artwork_ids only through the *_visible views), admin writes (RLS).
+-- Programme: read through the *_visible views for artwork_ids and links
+-- (exhibition_id, stories.artist_id); those columns are not selectable on the
+-- base tables. Admin writes (RLS).
 grant select (id, title, subtitle, starts_on, ends_on, venue, summary, body, image,
               external_url, curated_by, sample, published, created_at, updated_at)
   on kofi.exhibitions to anon, authenticated;
@@ -794,7 +845,9 @@ grant insert (title, subtitle, starts_on, ends_on, venue, summary, body, image, 
       delete
   on kofi.exhibitions to authenticated;
 
-grant select on kofi.open_calls to anon, authenticated;
+grant select (id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee,
+              award, image, external_url, sample, published, created_at, updated_at)
+  on kofi.open_calls to anon, authenticated;
 grant insert (title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee,
               award, image, external_url, exhibition_id, sample, published),
       update (title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee,
@@ -802,13 +855,14 @@ grant insert (title, partner, summary, body, eligibility, mediums, opens_on, dea
       delete
   on kofi.open_calls to authenticated;
 
-grant select on kofi.events to anon, authenticated;
+grant select (id, title, kind, starts_at, ends_at, venue, summary, rsvp_url, sample, published, created_at, updated_at)
+  on kofi.events to anon, authenticated;
 grant insert (title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published),
       update (title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published),
       delete
   on kofi.events to authenticated;
 
-grant select (id, title, dek, kind, body, author, published_on, artist_id, image, sample, published,
+grant select (id, title, dek, kind, body, author, published_on, image, sample, published,
               created_at, updated_at)
   on kofi.stories to anon, authenticated;
 grant insert (title, dek, kind, body, author, published_on, artist_id, artwork_ids, image, sample, published),
@@ -827,20 +881,6 @@ grant select on kofi.applications_visible to authenticated;
 -- Buyer inquiries: admins read (RLS); no anon access, no direct writes.
 grant select on kofi.buyer_inquiries to authenticated;
 grant select on kofi.buyer_inquiries_visible to authenticated;
-
--- RPCs. Mutating ones need a session, except the collector inquiry form.
-revoke execute on function kofi.submit_application(uuid, uuid[], text) from public, anon;
-revoke execute on function kofi.withdraw_application(uuid) from public, anon;
-revoke execute on function kofi.set_application_status(uuid, kofi.application_status, text, text) from public, anon;
-revoke execute on function kofi.set_buyer_inquiry_status(uuid, kofi.buyer_inquiry_status, text) from public, anon;
-revoke execute on function kofi.submit_buyer_inquiry(uuid, text, text, text, text, text, boolean) from public;
-grant execute on function
-  kofi.submit_application(uuid, uuid[], text),
-  kofi.withdraw_application(uuid),
-  kofi.set_application_status(uuid, kofi.application_status, text, text),
-  kofi.set_buyer_inquiry_status(uuid, kofi.buyer_inquiry_status, text)
-to authenticated;
-grant execute on function kofi.submit_buyer_inquiry(uuid, text, text, text, text, text, boolean) to anon, authenticated;
 
 -- Trigger functions (incl. the new ones) are never API-callable.
 do $$

@@ -27,11 +27,13 @@ describe('Discover (/)', () => {
     // open call band: the soonest-closing open call, with days left
     const band = screen.getByRole('heading', { name: 'Night Weather Studio Award' }).closest('section') as HTMLElement;
     expect(within(band).getByText('Closes in 41 days')).toBeInTheDocument();
-    expect(within(band).getByRole('link', { name: 'The Art of Advocacy: Giving Form and Voice to Justice' })).toHaveAttribute('href', '/calls/call_advocacy');
+    // The real Art of Advocacy call closed on Sep 11, 2026, so it is not offered as "also open".
+    expect(within(band).queryByRole('link', { name: /Art of Advocacy/ })).not.toBeInTheDocument();
     // journal: the three newest stories
     expect(screen.getByRole('heading', { name: 'Mara Oyelaran paints the hour after a storm' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Inside June Takahashi-Bell’s loom room' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /named curatorial partner/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /The Art of Advocacy: Kofi Collections leads artist selection/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'What an artist-owned record changes' })).not.toBeInTheDocument();
     // what's on: upcoming events only (the opening on Oct 2 is past)
     expect(screen.getByText('Artist talk: Mara Oyelaran on glazing')).toBeInTheDocument();
     expect(screen.queryByText('Night Weather: opening reception')).not.toBeInTheDocument();
@@ -123,7 +125,7 @@ describe('Exhibitions', () => {
 describe('Open calls', () => {
   it('list groups open / opening soon and keeps closed calls behind a disclosure', async () => {
     renderAt('/calls');
-    expect(await screen.findByRole('heading', { name: /^open\s*2$/i, level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /^open\s*1$/i, level: 2 })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /opening soon/i, level: 2 })).toBeInTheDocument();
     const closed = screen.getByText('Closed calls').closest('details') as HTMLElement;
     expect(closed).not.toHaveAttribute('open');
@@ -156,14 +158,33 @@ describe('Open calls', () => {
     expect(screen.queryByRole('link', { name: /sign in as an artist/i })).not.toBeInTheDocument();
   });
 
-  it('an external call links to the partner form for everyone, in a new tab', async () => {
-    renderAt('/calls/call_advocacy', MARA);
+  it('an open external call links to the partner form for everyone, in a new tab, and hides terms Kofi does not state', async () => {
+    const ds = new MockDataSource({ persist: false, now: () => SEED_NOW });
+    const call = await ds.saveOpenCall(QUINCY, {
+      sample: true, published: true, title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
+      body: 'Read the call on the partner site.', eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1,
+      fee: 'See the call', externalUrl: 'https://example.org/apply',
+    });
+    renderAt(`/calls/${call.id}`, MARA, ds);
     const a = await screen.findByRole('link', { name: /apply on the partner’s form/i });
     expect(a).toHaveAttribute('target', '_blank');
     expect(a).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(a.getAttribute('href')).toMatch(/^https:\/\/docs\.google\.com\/forms\//);
+    expect(a).toHaveAttribute('href', 'https://example.org/apply');
     expect(screen.getByText('Open until filled')).toBeInTheDocument();
+    expect(screen.queryByText('Works accepted')).not.toBeInTheDocument();
+    expect(screen.queryByText('Any medium')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Apply with your works' })).not.toBeInTheDocument();
+  });
+
+  it('Kofi’s real Art of Advocacy call shows as closed on its published deadline, linking to Kofi’s page', async () => {
+    renderAt('/calls/call_advocacy', MARA);
+    expect(await screen.findByRole('button', { name: 'Applications closed' })).toBeDisabled();
+    expect(screen.getByText('Applications closed on Sep 11, 2026.')).toBeInTheDocument();
+    const read = screen.getByRole('link', { name: /read the call on koficollections\.org/i });
+    expect(read).toHaveAttribute('href', 'https://www.koficollections.org/artists');
+    expect(read).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.queryByText('Works accepted')).not.toBeInTheDocument();
+    expect(screen.queryByText('Opens')).not.toBeInTheDocument();
   });
 
   it('closed and upcoming calls show a disabled state', async () => {

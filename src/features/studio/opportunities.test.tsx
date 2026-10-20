@@ -53,14 +53,22 @@ afterEach(() => {
 
 describe('opportunities', () => {
   it('lists open and upcoming calls with medium hints, partner forms and applied status', async () => {
-    renderStudio('/studio/opportunities', DESHAWN);
+    const ds = new MockDataSource({ persist: false });
+    await ds.saveOpenCall(ADMIN, {
+      sample: true, published: true, title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
+      body: 'Read the call on the partner site.', eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1,
+      fee: 'See the call', externalUrl: 'https://example.org/apply',
+    });
+    renderStudio('/studio/opportunities', DESHAWN, ds);
     const list = await screen.findByRole('list', { name: 'Open and upcoming calls' });
     const night = within(list).getByRole('article', { name: 'Night Weather Studio Award' });
     expect(within(night).getByText('Submitted')).toBeInTheDocument();
     expect(within(night).getByText('Fits your mediums')).toBeInTheDocument();
     expect(within(night).getByRole('link', { name: 'View your application' })).toHaveAttribute('href', '/studio/applications');
-    const advocacy = within(list).getByRole('article', { name: /The Art of Advocacy/ });
-    expect(within(advocacy).getByRole('link', { name: /Apply on partner form/ })).toHaveAttribute('href', expect.stringContaining('docs.google.com'));
+    const partner = within(list).getByRole('article', { name: 'Partner Form Call' });
+    expect(within(partner).getByRole('link', { name: /Apply on partner form/ })).toHaveAttribute('href', 'https://example.org/apply');
+    // Kofi's real Art of Advocacy call closed on Sep 11, 2026.
+    expect(within(list).queryByRole('article', { name: /The Art of Advocacy/ })).not.toBeInTheDocument();
     // Soft Ground wants printmaking/textile — not DeShawn's photography/video.
     const soft = within(list).getByRole('article', { name: /Soft Ground/ });
     expect(within(soft).getByText('Outside your listed mediums')).toBeInTheDocument();
@@ -72,7 +80,7 @@ describe('apply flow', () => {
   it('Mara applies to the Night Weather award with two works and sees it in her applications', async () => {
     const { ds, router } = renderStudio('/studio/apply/call_night_weather');
     expect(await screen.findByRole('heading', { level: 1, name: 'Apply' })).toBeInTheDocument();
-    expect(screen.getByText('0 of 3 selected')).toBeInTheDocument();
+    expect(await screen.findByText('0 of 3 selected')).toBeInTheDocument(); // lazy route: the shell can paint before the call loads
     const doubling = screen.getByRole('checkbox', { name: /Doubling/ });
     const small = screen.getByRole('checkbox', { name: /Small Weather No. 4/ });
     fireEvent.click(doubling);
@@ -148,7 +156,12 @@ describe('apply flow', () => {
     renderStudio('/studio/apply/call_soft_ground');
     expect(await screen.findByRole('heading', { name: 'This call isn’t open yet' })).toBeInTheDocument();
     cleanup();
-    renderStudio('/studio/apply/call_advocacy');
+    const ds = new MockDataSource({ persist: false });
+    const partner = await ds.saveOpenCall(ADMIN, {
+      sample: true, published: true, title: 'Partner Form Call', summary: 'A call run on a partner form.', body: 'Read it there.',
+      eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1, fee: 'See the call', externalUrl: 'https://example.org/apply',
+    });
+    renderStudio(`/studio/apply/${partner.id}`, MARA, ds);
     expect(await screen.findByRole('heading', { name: 'This call uses the partner’s form' })).toBeInTheDocument();
     cleanup();
     renderStudio('/studio/apply/call_nope');
@@ -182,9 +195,9 @@ describe('studio home', () => {
   it('shows open calls and application counts', async () => {
     renderStudio('/studio');
     const block = await screen.findByRole('region', { name: 'Opportunities' });
-    const open = within(block).getByRole('link', { name: /Open calls/ });
+    const open = within(block).getByRole('link', { name: /Open call/ });
     expect(open).toHaveAttribute('href', '/studio/opportunities');
-    expect(open).toHaveTextContent(/^2/); // Night Weather + Art of Advocacy
+    expect(open).toHaveTextContent(/^1/); // Night Weather (Art of Advocacy closed Sep 11, 2026)
     expect(within(block).getByRole('link', { name: /My applications/ })).toHaveTextContent('1 selected');
   });
 });

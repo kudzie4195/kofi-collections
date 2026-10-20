@@ -60,7 +60,10 @@ export function DiscoverScreen() {
 
   const published = (d?.exhibitions ?? []).filter((x) => x.published);
   const nowShowing = published.find((x) => exhibitionPhase(x, today) === 'current') ?? published.find((x) => exhibitionPhase(x, today) === 'upcoming');
-  const openCalls = (d?.calls ?? []).filter((c) => c.published && callPhase(c, today) === 'open');
+  // Kofi's own (non-sample) calls lead; within each group the data source's order (soonest deadline) holds.
+  const openCalls = (d?.calls ?? [])
+    .filter((c) => c.published && callPhase(c, today) === 'open')
+    .sort((a, b) => Number(a.sample) - Number(b.sample));
   const newest = [...works].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
   const stories = (d?.stories ?? []).filter((s) => s.published).slice(0, 3);
   const now = new Date();

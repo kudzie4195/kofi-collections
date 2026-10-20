@@ -3,8 +3,8 @@
  * Keep components small and dumb; business rules live in domain/ and data/.
  */
 import {
-  useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -13,6 +13,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useInRouterContext, useNavigate } from 'react-router-dom';
 import type { ArtworkView, Medium, Visibility } from '@/domain/types';
 import { VISIBILITIES, VISIBILITY_HELP, VISIBILITY_LABEL } from '@/domain/types';
@@ -408,33 +409,157 @@ export function StatusDot({ status }: { status: string }) {
 }
 
 /* ---------- sheet ---------- */
+const TABBABLE = [
+  'a[href]',
+  'area[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'iframe',
+  'audio[controls]',
+  'video[controls]',
+  'summary',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]',
+].join(',');
+
+/** Keyboard-reachable elements inside `root`, in DOM order (unchecked radios in a checked group are skipped, as the browser does). */
+export function tabbables(root: HTMLElement): HTMLElement[] {
+  const all = Array.from(root.querySelectorAll<HTMLElement>(TABBABLE));
+  return all.filter((el) => {
+    if (el.tabIndex < 0) return false;
+    if ((el as HTMLButtonElement).disabled) return false;
+    if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return false;
+    const vis = (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility;
+    if (typeof vis === 'function' && !vis.call(el)) return false;
+    if (el instanceof HTMLInputElement && el.type === 'radio' && el.name && !el.checked) {
+      const group = all.filter((o): o is HTMLInputElement => o instanceof HTMLInputElement && o.type === 'radio' && o.name === el.name && o.form === el.form);
+      if (group.some((o) => o.checked) || group[0] !== el) return false;
+    }
+    return true;
+  });
+}
+
+/** Open sheets, bottom → top. Only the top one traps focus and answers Escape. */
+const sheetStack: HTMLElement[] = [];
+
+/** Make everything behind the top sheet inert: the app root (#root) and any sheet below it. */
+function syncInert() {
+  const app = document.getElementById('root');
+  const top = sheetStack[sheetStack.length - 1];
+  if (app) {
+    if (top) {
+      app.setAttribute('inert', '');
+      app.setAttribute('aria-hidden', 'true');
+    } else {
+      app.removeAttribute('inert');
+      app.removeAttribute('aria-hidden');
+    }
+  }
+  for (const layer of sheetStack) {
+    if (layer === top) {
+      layer.removeAttribute('inert');
+      layer.removeAttribute('aria-hidden');
+    } else {
+      layer.setAttribute('inert', '');
+      layer.setAttribute('aria-hidden', 'true');
+    }
+  }
+}
+
+/**
+ * Modal bottom sheet. Rendered in a portal on <body> (outside #root) so the page
+ * behind can be made inert. On open, focus moves to `[data-autofocus]`, else the
+ * first field or button in the body, else the dialog; Tab loops inside; Escape
+ * closes; on close focus returns to whatever opened it.
+ */
 export function Sheet({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+  const layerRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    const dialog = ref.current;
+    if (!open || !layer || !dialog) return;
+    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    sheetStack.push(layer);
+    syncInert();
+    const isTop = () => sheetStack[sheetStack.length - 1] === layer;
+
+    // Initial focus — unless something inside (e.g. autoFocus) already took it.
+    if (!dialog.contains(document.activeElement)) {
+      const target = dialog.querySelector<HTMLElement>('[data-autofocus]') ?? (bodyRef.current ? tabbables(bodyRef.current)[0] : undefined) ?? dialog;
+      target.focus({ preventScroll: true });
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (!isTop()) return;
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = tabbables(dialog);
+      if (items.length === 0) {
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      const inside = active instanceof Node && dialog.contains(active);
+      if (e.shiftKey && (!inside || active === first || active === dialog)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (!inside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    // Belt and braces: if focus ever lands outside the top sheet, pull it back in.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!isTop()) return;
+      const t = e.target;
+      if (t instanceof Node && !layer.contains(t)) (tabbables(dialog)[0] ?? dialog).focus({ preventScroll: true });
+    };
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
+    document.addEventListener('focusin', onFocusIn);
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    ref.current?.focus();
+
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      document.removeEventListener('focusin', onFocusIn);
+      document.body.style.overflow = prevOverflow;
+      const i = sheetStack.lastIndexOf(layer);
+      if (i >= 0) sheetStack.splice(i, 1);
+      syncInert(); // un-inert first: an element inside an inert root cannot take focus
+      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true });
     };
-  }, [open, onClose]);
-  if (!open) return null;
-  return (
-    <>
+  }, [open]);
+
+  if (!open || typeof document === 'undefined') return null;
+  return createPortal(
+    <div className="sheet-layer" ref={layerRef}>
       <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
       <div className="sheet" role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}>
         <div className="sheet__head">
           <h2 className="sheet__title">{title}</h2>
           <Button tone="ghost" icon={<Icon.Close />} aria-label="Close" onClick={onClose} />
         </div>
-        <div className="sheet__body">{children}</div>
+        <div className="sheet__body" ref={bodyRef}>
+          {children}
+        </div>
         {footer && <div className="sheet__foot">{footer}</div>}
       </div>
-    </>
+    </div>,
+    document.body,
   );
 }
 
@@ -448,7 +573,7 @@ export function Confirm({ open, onClose, onConfirm, title, body, confirmLabel = 
       title={title}
       footer={
         <>
-          <Button tone="secondary" onClick={onClose} block>
+          <Button tone="secondary" onClick={onClose} block data-autofocus>
             Cancel
           </Button>
           <Button
@@ -518,8 +643,10 @@ export function Toasts() {
   const { toasts, dismiss } = useToast();
   // Toasts may be mounted outside the router (tests, boot); fall back to a hash link there.
   const inRouter = useInRouterContext();
-  if (!toasts.length) return null;
-  return (
+  // The live region always exists (screen readers only announce changes to a region that is already
+  // in the DOM) and sits outside #root, so toasts stay announced and clickable while a Sheet has made
+  // the app inert.
+  const region = (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) =>
         t.action ? (
@@ -546,6 +673,7 @@ export function Toasts() {
       )}
     </div>
   );
+  return typeof document === 'undefined' ? region : createPortal(region, document.body);
 }
 
 /* ---------- save (heart) toggle ---------- */

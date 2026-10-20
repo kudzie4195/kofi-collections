@@ -32,6 +32,17 @@ function Layout() {
   );
 }
 
+/** Shown only while a lazily-loaded desk route (studio / curator / admin) resolves on a cold deep link. */
+function RouteFallback() {
+  return (
+    <div className="boot" role="status" aria-live="polite">
+      <span className="boot__mark" aria-hidden="true" />
+      Loading Kofi Collections
+    </div>
+  );
+}
+
+// Role desks (/studio, /curator, /admin) are route-level `lazy` chunks; their gates stay eager.
 // Hash router: works identically on Vercel, file:// previews and inside Capacitor WebViews.
 const router = createHashRouter([
   {
@@ -52,7 +63,7 @@ export function App() {
   return (
     <ToastProvider>
       <SessionProvider>
-        <RouterProvider router={router} />
+        <RouterProvider router={router} fallbackElement={<RouteFallback />} />
       </SessionProvider>
     </ToastProvider>
   );

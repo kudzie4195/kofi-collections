@@ -443,3 +443,25 @@ out("select set_config('kofi.seeding', 'off', true);");
 out();
 out('commit;');
 writeOut('seed_programme.sql');
+
+// ================================================ apply/0008_live_patch.sql ==
+// Brings the artworks already on a live project (loaded from an earlier
+// seed_content.sql, never to be wiped) in line with the current TS seed's
+// rights notes. Updates only rows whose note differs; touches nothing else.
+lines = [];
+header('live patch: artwork rights notes', [
+  'For a project that already holds the 13 demo works (fixed UUIDs) and must NOT',
+  'be reset. Sets kofi.artworks.rights_note to the current seed text, by id, only',
+  'where it differs. No inserts, no deletes, no other columns. Re-runnable.',
+  'Kept out of the audit log (seed correction, not a user action).',
+]);
+out('begin;');
+out("select set_config('kofi.seeding', 'on', true);");
+out();
+for (const w of seed.artworks) {
+  out(`update kofi.artworks set rights_note = ${s(w.rightsNote)} where id = ${uuid(w.id)} and rights_note is distinct from ${s(w.rightsNote)};`);
+}
+out();
+out("select set_config('kofi.seeding', 'off', true);");
+out('commit;');
+writeOut('apply/0008_live_patch.sql');

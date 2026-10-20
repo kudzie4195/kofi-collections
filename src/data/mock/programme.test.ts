@@ -81,9 +81,10 @@ describe('programme reads', () => {
   it('seeds the real programme and the sample programme with stable ids, in display order', async () => {
     const { ds } = make();
     expect((await ds.listExhibitions(visitor)).map((x) => x.id)).toEqual(['ex_night_weather', 'ex_soft_ground', 'ex_being_seen', 'ex_spirit_west', 'ex_i_am']);
-    expect((await ds.listOpenCalls(visitor)).map((x) => x.id)).toEqual(['call_night_weather', 'call_advocacy', 'call_soft_ground', 'call_summer_open']);
+    // The Art of Advocacy closed on its extended deadline (Sep 11, 2026); closed calls list most recent first.
+    expect((await ds.listOpenCalls(visitor)).map((x) => x.id)).toEqual(['call_night_weather', 'call_soft_ground', 'call_summer_open', 'call_advocacy']);
     expect((await ds.listEvents(visitor)).map((x) => x.id)).toEqual(['ev_nw_opening', 'ev_mara_talk', 'ev_june_open_studio', 'ev_collector_evening']);
-    expect((await ds.listStories(visitor)).map((x) => x.id)).toEqual(['st_mara_interview', 'st_june_loom', 'st_artist_record', 'st_advocacy_partner']);
+    expect((await ds.listStories(visitor)).map((x) => x.id)).toEqual(['st_advocacy_partner', 'st_mara_interview', 'st_june_loom', 'st_artist_record']);
     const real = (await ds.listExhibitions(visitor)).filter((x) => !x.sample).map((x) => x.id);
     expect(real).toEqual(['ex_being_seen', 'ex_spirit_west', 'ex_i_am']);
     // No fictional works on real exhibitions.

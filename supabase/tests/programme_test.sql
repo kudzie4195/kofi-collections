@@ -115,6 +115,16 @@ begin
   end if;
   raise notice 'ok: calls / events drop links to draft exhibitions; stories drop links to artists the visitor cannot see';
 
+  perform kofi_test.expect_error($q$select exhibition_id from kofi.open_calls$q$, '42501');
+  perform kofi_test.expect_error($q$select exhibition_id from kofi.events$q$, '42501');
+  perform kofi_test.expect_error($q$select artist_id from kofi.stories$q$, '42501');
+  if kofi.programme_exhibition_link('open_call', 'a2000000-0000-4000-8000-000000000003') is not null
+     or kofi.programme_exhibition_link('event', 'a4000000-0000-4000-8000-000000000003') is not null
+     or kofi.story_artist_link('a5000000-0000-4000-8000-000000000002') is not null then
+    raise exception 'FAIL: a link helper called directly leaks a draft exhibition / paused artist id to a visitor';
+  end if;
+  raise notice 'ok: visitor cannot read exhibition_id (calls, events) or stories.artist_id from the base tables, nor through the link helpers';
+
   perform kofi_test.expect_error($q$select artwork_ids from kofi.exhibitions$q$, '42501');
   perform kofi_test.expect_error($q$select artwork_ids from kofi.stories$q$, '42501');
   raise notice 'ok: visitor cannot read raw artwork_ids from the base tables (views only)';
@@ -127,6 +137,37 @@ begin
   perform kofi_test.expect_error($q$select kofi.submit_application('a2000000-0000-4000-8000-000000000002', '{}', 'x')$q$, '42501');
   perform kofi_test.expect_error($q$select kofi.set_buyer_inquiry_status('a6000000-0000-4000-8000-000000000001', 'closed')$q$, '42501');
   raise notice 'ok: visitor cannot write programme rows, read applications / collector inquiries, or call the artist/admin RPCs';
+end $$;
+rollback;
+
+-- --------------------------------------- links: admin sees, artist can't ---
+begin;
+update kofi.exhibitions set published = false where id = 'a1000000-0000-4000-8000-000000000005';  -- Soft Ground → draft
+update kofi.artists set status = 'paused' where id = '20000000-0000-4000-8000-000000000003';      -- June paused
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000008","role":"authenticated"}';
+do $$
+begin
+  if (select exhibition_id from kofi.open_calls_visible where id = 'a2000000-0000-4000-8000-000000000003') is distinct from 'a1000000-0000-4000-8000-000000000005'
+     or (select exhibition_id from kofi.events_visible where id = 'a4000000-0000-4000-8000-000000000003') is distinct from 'a1000000-0000-4000-8000-000000000005'
+     or (select artist_id from kofi.stories_visible where id = 'a5000000-0000-4000-8000-000000000002') is distinct from '20000000-0000-4000-8000-000000000003' then
+    raise exception 'FAIL: admin should see the links to the draft exhibition and the paused artist';
+  end if;
+  raise notice 'ok: admin sees call / event links to a draft exhibition and a story''s link to a paused artist';
+end $$;
+set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform kofi_test.expect_error($q$select exhibition_id from kofi.open_calls$q$, '42501');
+  perform kofi_test.expect_error($q$select artist_id from kofi.stories$q$, '42501');
+  if (select exhibition_id from kofi.events_visible where id = 'a4000000-0000-4000-8000-000000000003') is not null
+     or (select artist_id from kofi.stories_visible where id = 'a5000000-0000-4000-8000-000000000002') is not null then
+    raise exception 'FAIL: an artist sees a link to a draft exhibition or another paused artist';
+  end if;
+  if (select artist_id from kofi.stories_visible where id = 'a5000000-0000-4000-8000-000000000001') is distinct from '20000000-0000-4000-8000-000000000001' then
+    raise exception 'FAIL: a visible artist link should be kept';
+  end if;
+  raise notice 'ok: a signed-in artist gets the same gated links (base columns denied, draft / paused targets null, visible ones kept)';
 end $$;
 rollback;
 
@@ -421,7 +462,7 @@ declare
   r record;
 begin
   select * into r from kofi.applications_visible where id = 'a3000000-0000-4000-8000-000000000002';
-  if r.id is null or r.status <> 'declined' or r.decision_note is null or r.staff_note is not null or r.call_title <> 'Summer Open 2026' then
+  if r.id is null or r.status <> 'declined' or r.decision_note is null or r.staff_note is not null or r.call_title <> 'Late Summer Open 2026' then
     raise exception 'FAIL: June should see her declined application with the decision note, without the staff note: %', row_to_json(r);
   end if;
   if (select count(*) from kofi.applications_visible) <> 1 or exists (select 1 from kofi.applications where artist_id <> '20000000-0000-4000-8000-000000000003') then
@@ -743,7 +784,7 @@ begin
   select count(*) into n from pg_proc p
   where p.proname in ('submit_application', 'withdraw_application', 'set_application_status', 'submit_buyer_inquiry',
                       'set_buyer_inquiry_status', 'programme_artwork_ids', 'application_labels', 'buyer_inquiry_labels', 'programme_audit',
-                      'artwork_discoverable', 'programme_check_artworks',
+                      'artwork_discoverable', 'programme_check_artworks', 'programme_exhibition_link', 'story_artist_link',
                       'open_calls_guard_delete', 'programme_keep_created', 'programme_image_src_ok', 'programme_image_alt_ok',
                       'venue_ok', 'http_url_ok')
     and p.pronamespace <> 'kofi'::regnamespace;
@@ -780,10 +821,14 @@ begin
      or has_table_privilege('authenticated', 'kofi.applications', 'update')
      or has_table_privilege('authenticated', 'kofi.buyer_inquiries', 'insert')
      or has_column_privilege('authenticated', 'kofi.applications', 'staff_note', 'select')
-     or has_column_privilege('anon', 'kofi.exhibitions', 'artwork_ids', 'select') then
+     or has_column_privilege('anon', 'kofi.exhibitions', 'artwork_ids', 'select')
+     or has_column_privilege('anon', 'kofi.open_calls', 'exhibition_id', 'select')
+     or has_column_privilege('authenticated', 'kofi.events', 'exhibition_id', 'select')
+     or has_column_privilege('authenticated', 'kofi.stories', 'artist_id', 'select')
+     or not has_column_privilege('authenticated', 'kofi.open_calls', 'exhibition_id', 'update') then
     raise exception 'FAIL: a programme privilege is wider than designed';
   end if;
-  raise notice 'ok: least-privilege grants — no anon access to inquiries, no direct application writes, staff_note and artwork_ids column-gated, trigger functions not callable';
+  raise notice 'ok: least-privilege grants — no anon access to inquiries, no direct application writes, staff_note, artwork_ids and link columns gated, trigger functions not callable';
 
   if not exists (select 1 from kofi.applied_migrations where name = '0008_programme') then
     raise exception 'FAIL: 0008_programme not recorded in kofi.applied_migrations';

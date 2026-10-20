@@ -63,6 +63,44 @@ set +e
   run -f "$here/programme_test.sql"
   echo "== tests/isolation_test.sql"
   run -f "$here/isolation_test.sql"
+
+  # ---- live path: 0008 applied as the pasted parts, programme seeded additively
+  pdb="${db}_parts"
+  runp() { psql -X -v ON_ERROR_STOP=1 -d "$pdb" "$@"; }
+  echo
+  echo "== LIVE PATH: $pdb = shim + 0000-0007 + apply/0008_part1..4 (+ part 1..4 again), seeds"
+  psql -X -q -d postgres -c "drop database if exists $pdb" -c "create database $pdb"
+  runp -q -f "$here/shim.sql"
+  for f in "$root"/migrations/000[0-7]_*.sql; do runp -q -f "$f"; done
+  for pass in 1 2; do for f in "$root"/apply/0008_part*.sql; do echo "== $(basename "$f") (pass $pass)"; runp -q -f "$f"; done; done
+  runp -q -f "$root/seed_auth.sql"
+  runp -q -f "$root/seed_content.sql"
+  echo "== live state: programme tables empty, artworks with old rights notes; then seed_programme.sql + apply/0008_live_patch.sql (twice)"
+  runp -q -c "begin; select set_config('kofi.seeding', 'on', true);
+              delete from kofi.applications; delete from kofi.buyer_inquiries; delete from kofi.events;
+              delete from kofi.open_calls; delete from kofi.stories; delete from kofi.exhibitions;
+              create table kofi_test.expected_notes as select id, rights_note from kofi.artworks;
+              update kofi.artworks set rights_note = 'old note'; commit;"
+  for pass in 1 2; do runp -q -f "$root/seed_programme.sql"; runp -q -f "$root/apply/0008_live_patch.sql"; done
+  runp -At -c "do \$\$ begin
+      if (select count(*) from kofi.exhibitions) <> 5 or (select count(*) from kofi.open_calls) <> 4 or (select count(*) from kofi.events) <> 4
+         or (select count(*) from kofi.stories) <> 4 or (select count(*) from kofi.applications) <> 3 or (select count(*) from kofi.buyer_inquiries) <> 2 then
+        raise exception 'FAIL: seed_programme.sql did not load the programme';
+      end if;
+      if exists (select 1 from kofi.artworks w join kofi_test.expected_notes e using (id) where w.rights_note is distinct from e.rights_note) then
+        raise exception 'FAIL: 0008_live_patch.sql did not restore the seed rights notes';
+      end if;
+      if exists (select 1 from kofi.audit_events where action in ('programme.save', 'artwork.update')) then
+        raise exception 'FAIL: seeding / patching wrote audit rows';
+      end if;
+      raise notice 'ok: live path — parts 1..4 (twice), seed_programme.sql (twice) and the live patch (twice) leave the seeded state, without audit noise';
+    end \$\$;"
+  runp -q -c "drop table kofi_test.expected_notes"
+  echo "== tests/programme_test.sql (live-path database)"
+  runp -f "$here/programme_test.sql"
+  echo "== tests/isolation_test.sql (live-path database)"
+  runp -f "$here/isolation_test.sql"
+  psql -X -q -d postgres -c "drop database if exists $pdb"
   echo
   echo "# RESULT: PASS"
 } 2>&1 | tee "$log"

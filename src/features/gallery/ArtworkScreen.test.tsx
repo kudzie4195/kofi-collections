@@ -14,7 +14,8 @@ describe('Artwork detail (/work/:id)', () => {
     expect(screen.queryByText('$9,800')).not.toBeInTheDocument();
     expect(screen.getByText('152 × 122 × 4 cm (59.8 × 48 × 1.6 in)')).toBeInTheDocument();
     expect(screen.getByText('oil on linen')).toBeInTheDocument();
-    expect(screen.getByText('© Mara Oyelaran. Reproduction by permission only.')).toBeInTheDocument();
+    // The photograph is a real work from koficollections.org, so the record says so instead of crediting the sample artist.
+    expect(screen.getByText(/Sample listing\. The photograph shows a painting by Clarence James/)).toBeInTheDocument();
     expect(within(h).getByRole('link', { name: 'Mara Oyelaran' })).toHaveAttribute('href', '/artists/art_mara');
     expect(screen.queryByText(/^Record:/)).not.toBeInTheDocument();
     expect(screen.getByText(/curators from verified institutions can request an introduction/i)).toBeInTheDocument();

@@ -105,8 +105,8 @@ export function AboutScreen() {
         </header>
 
         <figure className="container container--wide kp-about__photo">
-          <img src={photo} alt="Opening night of The Spirit of the West: visitors among paintings on easels in a high-ceilinged room" loading="lazy" />
-          <figcaption className="kp-credit">The Spirit of the West, opening night, September 2024 · © Kofi Collections</figcaption>
+          <img src={photo} alt="An exhibition opening: visitors among paintings on easels in a high-ceilinged room" loading="lazy" />
+          <figcaption className="kp-credit">A Kofi Collections exhibition opening · photograph from koficollections.org</figcaption>
         </figure>
 
         <div className="container container--wide kp-about__services">
