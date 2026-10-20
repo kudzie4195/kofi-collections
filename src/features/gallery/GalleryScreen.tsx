@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import bundledArt from 'virtual:bundled-art';
 import { useSearchParams } from 'react-router-dom';
 import type { ArtworkFilters, SortKey } from '@/domain/filters';
 import { applyFilters, countActiveFilters } from '@/domain/filters';
@@ -12,7 +13,7 @@ import { clearedFilters, compact, filtersFromParams, paramsFromFilters, SORT_OPT
 
 // Optional full-bleed photograph behind the hero headline. Empty means no request is made.
 // Exhibition photograph from koficollections.org (public/art/hero.jpg, metadata stripped).
-const heroSrc: string = '/art/hero.jpg';
+const heroSrc: string = bundledArt['hero.jpg'] ?? '/art/hero.jpg';
 
 export function GalleryScreen() {
   const [params, setParams] = useSearchParams();

@@ -11,6 +11,7 @@ import type {
 } from '@/domain/types';
 import { CONSENT_VERSION } from '@/domain/types';
 import { placeholderArt } from './placeholderArt';
+import bundledArt from 'virtual:bundled-art';
 
 /**
  * All content below is fictional. Names, institutions and works are invented
@@ -51,7 +52,7 @@ export const DEMO_USERS = {
  */
 export const BUNDLED_ART = new Set(['mara1', 'mara2', 'mara3', 'tobias1', 'june1', 'june2', 'june3', 'deshawn1', 'deshawn2', 'priya1', 'priya2']);
 function img(seed: string, medium: Artwork['medium'], alt: string, isPrimary = true): Artwork['images'][number] {
-  const src = BUNDLED_ART.has(seed) ? `/art/${seed}.jpg` : placeholderArt(seed, medium);
+  const src = BUNDLED_ART.has(seed) ? (bundledArt[`${seed}.jpg`] ?? `/art/${seed}.jpg`) : placeholderArt(seed, medium);
   return { id: `img_${seed}`, src, alt, isPrimary, metadataStripped: true };
 }
 
