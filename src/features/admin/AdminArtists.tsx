@@ -66,8 +66,12 @@ export function AdminArtists() {
   return (
     <div className="screen">
       <TopBar title="Artists" back="/admin" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
-        <div className="stack">
+      <main className="container container--wide ad-main">
+        <div className="ad-split">
+        <aside className="ad-split__aside stack">
+          <p className="eyebrow eyebrow--gold">Kofi desk</p>
+          <h2 className="h1">Artists</h2>
+          <span className="rule" aria-hidden="true" />
           <div className="seg-wrap">
             <Segmented<Filter> label="Filter artists by status" value={filter} onChange={(v) => update({ status: v })} options={FILTERS} />
           </div>
@@ -76,7 +80,8 @@ export function AdminArtists() {
               Has works Kofi hasn’t reviewed
             </Chip>
           </div>
-        </div>
+        </aside>
+        <div className="ad-split__main stack--lg">
 
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
@@ -99,7 +104,7 @@ export function AdminArtists() {
                 {ARTIST_STATUS_LABEL[g.status]}
                 <span className="group-title__count">{g.rows.length}</span>
               </h2>
-              <Panel pinned={g.status === 'pending'}>
+              <Panel className="ad-flat">
                 <ul className="list">
                   {g.rows.map((a) => (
                     <ArtistRow key={a.id} a={a} unreviewed={q.data!.unreviewed.get(a.id) ?? 0} />
@@ -109,6 +114,8 @@ export function AdminArtists() {
             </section>
           ))
         )}
+        </div>
+        </div>
       </main>
     </div>
   );

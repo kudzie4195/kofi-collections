@@ -130,7 +130,7 @@ export function AdminArtistDetail() {
   return (
     <div className="screen">
       <TopBar title={a?.workingName ?? 'Artist'} back="/admin/artists" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide ad-main">
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
@@ -142,8 +142,9 @@ export function AdminArtistDetail() {
         ) : !a ? (
           <EmptyState title="No artist with that link" body="The profile may have been removed." actions={<LinkButton to="/admin/artists">All artists</LinkButton>} />
         ) : (
-          <>
-            <header className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
+          <div className="ad-split">
+            <div className="ad-split__aside stack--lg">
+            <header className="ad-person">
               <Avatar name={a.workingName} color={a.avatarColor} size="lg" />
               <div className="stack--sm" style={{ minWidth: 0, flex: 1 }}>
                 <h2 className="h2" style={{ overflowWrap: 'break-word' }}>
@@ -220,7 +221,10 @@ export function AdminArtistDetail() {
               </p>
             </Panel>
 
-            <Panel title="Kofi notes">
+            </div>
+
+            <div className="ad-split__main stack--lg">
+            <Panel title="Kofi notes" className="ad-notes">
               <form
                 className="stack"
                 onSubmit={(e) => {
@@ -268,7 +272,7 @@ export function AdminArtistDetail() {
               {q.data.works.length === 0 ? (
                 <EmptyState title="No works yet" body="This artist hasn’t added any artwork records." />
               ) : (
-                <Panel>
+                <Panel className="ad-flat">
                   <ul className="list">
                     {q.data.works.map((w) => {
                       const img = w.images.find((i) => i.isPrimary) ?? w.images[0];
@@ -307,7 +311,8 @@ export function AdminArtistDetail() {
                 </Panel>
               )}
             </section>
-          </>
+            </div>
+          </div>
         )}
       </main>
       <NoteSheet action={action} onClose={() => setAction(undefined)} />

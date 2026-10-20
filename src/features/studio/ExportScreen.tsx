@@ -65,9 +65,10 @@ export function ExportScreen() {
   return (
     <div className="screen">
       <TopBar title="Export or withdraw" back="/studio" />
-      <main className="container section stack--lg">
+      <main className="container container--wide section st-export">
         <section className="stack" aria-labelledby="export-title">
-          <h2 className="h2" id="export-title">
+          <p className="eyebrow eyebrow--green">Export</p>
+          <h2 className="h1" id="export-title">
             Your records are yours to take
           </h2>
           <p className="lede">Download a full copy any time. No lock-in — the export is built to be read by a person or another system.</p>
@@ -104,7 +105,8 @@ export function ExportScreen() {
         </section>
 
         <section className="stack" aria-labelledby="withdraw-title">
-          <h2 className="h2" id="withdraw-title">
+          <p className="eyebrow eyebrow--red">Withdraw</p>
+          <h2 className="h1" id="withdraw-title">
             Correct or withdraw
           </h2>
           <Panel tint>

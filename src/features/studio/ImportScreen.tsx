@@ -58,9 +58,13 @@ export function ImportScreen() {
   return (
     <div className="screen">
       <TopBar title="Import works" back="/studio" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide section">
+        <div className="st-split">
+        <div className="st-split__aside stack--lg">
         <section className="stack">
-          <h2 className="h2">Bring in a spreadsheet</h2>
+          <p className="eyebrow eyebrow--green">Import</p>
+          <h2 className="h1">Bring in a spreadsheet</h2>
+          <span className="rule rule--green" aria-hidden="true" />
           <p className="lede">Review every row before anything is saved. Imported works start as “Only me” drafts without images.</p>
           <Notice tone="plain" icon={<Icon.Doc />}>
             Use the same columns as the CSV export (title, year, medium, materials, height, width, depth, unit, status, price_amount, price_currency, price_visibility, description, rights_note, tags). Separate several materials or tags with “;”.
@@ -95,9 +99,17 @@ export function ImportScreen() {
             </Button>
           </div>
         </label>
+        </div>
 
+        <div className="st-split__main stack--lg">
+        {!result && !done && (
+          <div className="st-import-empty">
+            <p className="eyebrow">Review</p>
+            <p className="serif st-import-empty__text">Choose a CSV and every row appears here for you to check before anything is saved.</p>
+          </div>
+        )}
         {result && (
-          <Panel title={`Review ${result.rows.length} ${result.rows.length === 1 ? 'row' : 'rows'}`} pinned>
+          <Panel className="st-review" title={`Review ${result.rows.length} ${result.rows.length === 1 ? 'row' : 'rows'}`}>
             {result.missingColumns.length > 0 && (
               <Notice tone="coral" icon={<Icon.Warn />}>
                 Missing required columns: {result.missingColumns.join(', ')}. Fix the header row and choose the file again.
@@ -106,10 +118,10 @@ export function ImportScreen() {
             <p className="small muted" style={{ margin: '8px 0 12px' }}>
               {result.ok} ready · {result.failed} with problems. Rows with problems are skipped; fix them in the sheet and import again.
             </p>
-            <ul className="list" aria-label="Rows to import">
+            <ul className="list st-import-rows" aria-label="Rows to import">
               {result.rows.map((row) => (
-                <li key={row.line} className="list-row" style={{ alignItems: 'flex-start' }}>
-                  <span className={`status-dot status-dot--${row.input ? 'approved' : 'declined'}`} aria-hidden="true" style={{ marginTop: 8 }} />
+                <li key={row.line} className="list-row">
+                  <span className={`status-dot status-dot--${row.input ? 'approved' : 'declined'}`} aria-hidden="true" />
                   <div className="list-row__main">
                     <div className="list-row__title" style={{ whiteSpace: 'normal' }}>
                       {row.preview.title} <span className="muted small">· line {row.line}</span>
@@ -118,7 +130,7 @@ export function ImportScreen() {
                       {row.preview.year} · {row.preview.medium} · {row.preview.dimensions} · {row.preview.price}
                     </div>
                     {row.problems.length > 0 && (
-                      <ul className="small" style={{ color: 'var(--danger)', marginTop: 4, fontWeight: 600 }}>
+                      <ul className="small st-import-problems">
                         {row.problems.map((p) => (
                           <li key={p}>{p}</li>
                         ))}
@@ -158,6 +170,8 @@ export function ImportScreen() {
             </div>
           </Notice>
         )}
+        </div>
+        </div>
       </main>
     </div>
   );

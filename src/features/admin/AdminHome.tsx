@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@/state/session';
-import { EmptyState, ErrorState, Icon, LinkButton, Panel, Skeleton, TopBar } from '@/ui';
+import { EmptyState, ErrorState, Icon, LinkButton, Skeleton, TopBar } from '@/ui';
 import { AuditList, loadAuditNames } from './AuditList';
 import './admin.css';
 
@@ -62,10 +62,13 @@ export function AdminHome() {
   return (
     <div className="screen">
       <TopBar title="Kofi desk" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
-        <section className="stack--sm">
-          <h2 className="h1">Today’s queue</h2>
-          <p className="muted">Everything waiting on a person at Kofi. Tap a number to work through it.</p>
+      <main className="container container--wide stack--lg ad-main">
+        <section>
+          <p className="eyebrow eyebrow--gold">Operations</p>
+          <h2 className="section-title ad-title" style={{ marginTop: 8 }}>
+            Today’s queue
+          </h2>
+          <p className="ad-lede">Everything waiting on a person at Kofi. Tap a number to work through it.</p>
         </section>
 
         {q.error && !q.data ? (
@@ -113,11 +116,13 @@ export function AdminHome() {
               />
             </nav>
 
-            <Panel pinned>
-              <ul className="list" aria-label="Kofi admin sections">
+            <div className="ad-home-grid">
+              <ul className="list ad-nav" aria-label="Kofi admin sections">
                 <li>
                   <Link to="/admin/artists" className="list-row">
-                    <Icon.Artists aria-hidden="true" style={{ width: 22, height: 22 }} />
+                    <span className="ad-nav__icon" aria-hidden="true">
+                      <Icon.Artists />
+                    </span>
                     <span className="list-row__main">
                       <span className="list-row__title" style={{ display: 'block' }}>
                         Artists
@@ -129,7 +134,9 @@ export function AdminHome() {
                 </li>
                 <li>
                   <Link to="/admin/curators" className="list-row">
-                    <Icon.Building aria-hidden="true" style={{ width: 22, height: 22 }} />
+                    <span className="ad-nav__icon" aria-hidden="true">
+                      <Icon.Building />
+                    </span>
                     <span className="list-row__main">
                       <span className="list-row__title" style={{ display: 'block' }}>
                         Curators
@@ -141,7 +148,9 @@ export function AdminHome() {
                 </li>
                 <li>
                   <Link to="/admin/inquiries" className="list-row">
-                    <Icon.Mail aria-hidden="true" style={{ width: 22, height: 22 }} />
+                    <span className="ad-nav__icon" aria-hidden="true">
+                      <Icon.Mail />
+                    </span>
                     <span className="list-row__main">
                       <span className="list-row__title" style={{ display: 'block' }}>
                         Introduction requests
@@ -153,7 +162,9 @@ export function AdminHome() {
                 </li>
                 <li>
                   <Link to="/admin/activity" className="list-row">
-                    <Icon.Eye aria-hidden="true" style={{ width: 22, height: 22 }} />
+                    <span className="ad-nav__icon" aria-hidden="true">
+                      <Icon.Eye />
+                    </span>
                     <span className="list-row__main">
                       <span className="list-row__title" style={{ display: 'block' }}>
                         Activity log
@@ -164,11 +175,10 @@ export function AdminHome() {
                   </Link>
                 </li>
               </ul>
-            </Panel>
 
             <section className="stack">
               <div className="row row--between row--wrap">
-                <h2 className="h2">Recent activity</h2>
+                <h2 className="eyebrow">Recent activity</h2>
                 <LinkButton to="/admin/activity" tone="ghost" size="sm" className="ghost-flat">
                   See all activity
                 </LinkButton>
@@ -179,6 +189,7 @@ export function AdminHome() {
                 <AuditList events={q.data.audit} names={q.data.names} />
               )}
             </section>
+            </div>
           </>
         )}
       </main>

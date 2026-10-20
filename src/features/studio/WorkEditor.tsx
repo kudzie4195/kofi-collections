@@ -442,7 +442,7 @@ export function WorkEditor({ id }: { id?: string }) {
       <div className="st-editor">
         <aside className="st-editor__preview" aria-label="Live wall label preview">
           <div className="st-wall" data-medium={f.medium}>
-            <p className="tiny strong st-wall__caption">Live wall label</p>
+            <p className="st-wall__caption">Live wall label</p>
             <div className="st-wall__pin">
               {recordVisibleToPreview ? (
                 <WallLabel work={previewWork} unit={f.unit} />
@@ -478,7 +478,7 @@ export function WorkEditor({ id }: { id?: string }) {
         </aside>
 
         <form
-          className="st-editor__form stack--lg"
+          className="st-editor__form st-flat stack--lg"
           noValidate
           onSubmit={(e) => {
             e.preventDefault();
@@ -722,7 +722,7 @@ export function WorkEditor({ id }: { id?: string }) {
 function DimInput({ label, value, onChange, invalid }: { label: string; value: string; onChange: (v: string) => void; invalid: boolean }) {
   return (
     <label className="st-dim">
-      <span className="tiny strong">{label}</span>
+      <span>{label}</span>
       <input className="input" inputMode="decimal" value={value} aria-invalid={invalid || undefined} onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ''))} />
     </label>
   );

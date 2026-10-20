@@ -122,7 +122,7 @@ export function VerifyScreen() {
   return (
     <div className="screen">
       <TopBar title="Verification" back="/curator" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide cu-main">
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : q.loading && !seeded ? (
@@ -132,13 +132,16 @@ export function VerifyScreen() {
             <Skeleton h={48} />
           </div>
         ) : c?.status === 'verified' ? (
-          <>
-            <CuratorPass curator={c} fallbackName={viewer.displayName ?? 'Curator'} />
+          <div className="cu-split">
+            <div className="cu-split__aside">
+              <CuratorPass curator={c} fallbackName={viewer.displayName ?? 'Curator'} />
+            </div>
+            <div className="cu-split__main stack--lg">
             <Notice tone="lime" icon={<Icon.Check />}>
               <p className="strong">Kofi verified {c.institution.name}{c.verifiedAt ? ` on ${formatDate(c.verifiedAt)}` : ''}.</p>
               <p>You can see prices artists share with verified institutions and request introductions from any shortlist.</p>
             </Notice>
-            <Panel title="On file with Kofi">
+            <Panel title="On file with Kofi" className="cu-flat">
               <dl className="spec">
                 <dt>Name</dt>
                 <dd>{c.name}</dd>
@@ -155,14 +158,20 @@ export function VerifyScreen() {
               </dl>
             </Panel>
             <ContactRule />
-            <LinkButton to="/curator" tone="secondary">
-              Back to your shortlists
-            </LinkButton>
-          </>
+            <div>
+              <LinkButton to="/curator" tone="secondary">
+                Back to your shortlists
+              </LinkButton>
+            </div>
+            </div>
+          </div>
         ) : (
-          <>
-            <section className="stack--sm">
+          <div className="cu-split">
+            <div className="cu-split__aside stack--lg">
+            <section className="stack">
+              <p className="eyebrow eyebrow--gold">Verification</p>
               <h2 className="h1">Verify your institution</h2>
+              <span className="rule rule--gold" aria-hidden="true" />
               <p className="lede">
                 A person at Kofi checks every request by hand — usually against your institution’s staff directory or by writing to your work email.
               </p>
@@ -183,10 +192,12 @@ export function VerifyScreen() {
             )}
 
             <ContactRule />
+            </div>
 
-            <form className="stack" onSubmit={submit} noValidate aria-label="Verification request">
-              <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
-                <legend className="h3" style={{ marginBottom: 12 }}>
+            <div className="cu-split__main">
+            <form className="stack cu-form" onSubmit={submit} noValidate aria-label="Verification request">
+              <fieldset className="stack">
+                <legend className="eyebrow eyebrow--gold">
                   About you
                 </legend>
                 <Input label="Your name" autoComplete="name" value={form.name} error={errors.name} onChange={(e) => set('name', e.target.value)} />
@@ -210,8 +221,8 @@ export function VerifyScreen() {
                 />
               </fieldset>
 
-              <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
-                <legend className="h3" style={{ marginBottom: 12, marginTop: 8 }}>
+              <fieldset className="stack">
+                <legend className="eyebrow eyebrow--gold">
                   Your institution
                 </legend>
                 <Input
@@ -256,7 +267,8 @@ export function VerifyScreen() {
                 {c ? 'Resend for verification' : 'Send for verification'}
               </Button>
             </form>
-          </>
+            </div>
+          </div>
         )}
       </main>
     </div>

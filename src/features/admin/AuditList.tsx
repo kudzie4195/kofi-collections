@@ -65,9 +65,9 @@ function EntityRef({ ev, names }: { ev: AuditEvent; names: AuditNames | undefine
 
 export function AuditList({ events, names, now = new Date() }: { events: AuditEvent[]; names: AuditNames | undefined; now?: Date }) {
   return (
-    <ol className="list" aria-label="Activity">
+    <ol className="list ad-audit" aria-label="Activity">
       {events.map((ev) => (
-        <li key={ev.id} className="audit-row">
+        <li key={ev.id} className={`audit-row ${ev.action === 'private.view' ? 'audit-row--sensitive' : ''}`} data-action={ev.action}>
           <time className="audit-row__time" dateTime={ev.at} title={formatDateTime(ev.at)}>
             {timeAgo(ev.at, now)}
           </time>

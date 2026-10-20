@@ -81,25 +81,21 @@ export function StudioHome() {
   return (
     <div className="screen">
       <TopBar title="Studio" />
-      <section className="band st-band">
-        <div className="band__stripe band__stripe--1" aria-hidden="true" />
-        <div className="band__stripe band__stripe--2" aria-hidden="true" />
-        <div className="container band__inner">
-          <div className="st-greeting" style={{ ['--av' as string]: artist.avatarColor }}>
-            <p className="tiny strong st-greeting__kicker">Your studio</p>
-            <h2 className="h1">Hello, {firstName}.</h2>
-            <p className="small muted">
+      <main className="container container--wide st-main st-home">
+        <div className="st-home__aside stack--lg">
+          <header className="st-greeting">
+            <p className="eyebrow eyebrow--gold st-greeting__kicker">Your studio</p>
+            <h2 className="h1 st-greeting__title">Hello, {firstName}.</h2>
+            <span className="rule" aria-hidden="true" />
+            <p className="small muted st-greeting__who">
               Signed in as <span className="strong">{artist.workingName}</span>
             </p>
-          </div>
-        </div>
-      </section>
+          </header>
 
-      <main className="container stack--lg st-main">
         <section className="st-status" aria-label="Profile status">
           <div className="row">
             <StatusDot status={artist.status} />
-            <span className="strong">{status.label}</span>
+            <span className="eyebrow st-status__label">{status.label}</span>
             {artist.status === 'approved' && artist.visibility !== 'public' && (
               <VisibilityBadge level={artist.visibility} prefix="Profile" />
             )}
@@ -129,7 +125,7 @@ export function StudioHome() {
           </Notice>
         )}
 
-        <ul className="tiles" aria-label="Studio at a glance">
+        <ul className="tiles st-tiles" aria-label="Studio at a glance">
           <li className="tile tile--cobalt">
             <div className="tile__num">{works.length}</div>
             <div className="tile__label">{works.length === 1 ? 'Work in your studio' : 'Works in your studio'}</div>
@@ -151,10 +147,12 @@ export function StudioHome() {
             </Link>
           </li>
         </ul>
+        </div>
 
+        <div className="st-home__main stack--lg">
         <section aria-labelledby="your-works" className="stack">
           <div className="row row--between row--wrap">
-            <h2 className="h2" id="your-works">
+            <h2 className="section-title st-works-title" id="your-works">
               Your works
             </h2>
             {works.length > 0 && (
@@ -185,7 +183,7 @@ export function StudioHome() {
         </section>
 
         <nav aria-label="Studio tools" className="st-tools">
-          <h2 className="h3">Studio tools</h2>
+          <h2 className="eyebrow st-tools__title">Studio tools</h2>
           <ul className="list">
             <ToolRow to="profile" icon={<Icon.Person />} title="Profile" sub="Bio, mediums, region and who sees your profile" />
             <ToolRow to="vault" icon={<Icon.Lock />} title="Private vault" sub="Invoices, condition reports, provenance, appraisals" />
@@ -195,6 +193,7 @@ export function StudioHome() {
             <ToolRow to="consent" icon={<Icon.Doc />} title="Artist terms" sub={consentCurrent ? `Agreed to ${CONSENT_VERSION}` : 'Needs your agreement'} />
           </ul>
         </nav>
+        </div>
       </main>
     </div>
   );

@@ -63,12 +63,13 @@ export function Consent() {
   return (
     <div className="screen">
       <TopBar title="Artist terms" back="/studio" />
-      <main className="container section stack--lg">
-        <header className="stack--sm">
+      <main className="container container--wide section">
+        <div className="st-split">
+        <header className="st-split__aside stack">
           <p className="kicker">Version {CONSENT_VERSION}</p>
           <h2 className="h1">The deal, in plain language</h2>
+          <span className="rule" aria-hidden="true" />
           <p className="lede">Six things to know before Kofi shows any of your work.</p>
-        </header>
 
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
@@ -84,7 +85,9 @@ export function Consent() {
             The terms changed since you agreed to version {q.data.consentVersion}. Please read and agree to the current version.
           </Notice>
         ) : null}
+        </header>
 
+        <div className="st-split__main stack--lg">
         <ol className="st-terms">
           {TERMS.map((t, i) => (
             <li key={t.title} className="st-terms__item">
@@ -114,6 +117,8 @@ export function Consent() {
             Agree and continue
           </Button>
         </section>
+        </div>
+        </div>
         <FictionalFooter />
       </main>
     </div>

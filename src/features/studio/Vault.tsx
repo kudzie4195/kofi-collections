@@ -110,7 +110,7 @@ export function Vault() {
               {g.title}
               <span className="tiny muted"> {g.docs.length === 1 ? '1 document' : `${g.docs.length} documents`}</span>
             </h2>
-            <ul className="stack">
+            <ul>
               {g.docs.map((d) => (
                 <li key={d.id} className="st-doc">
                   <div className="st-doc__head">
@@ -163,14 +163,21 @@ export function Vault() {
           ) : undefined
         }
       />
-      <main className="container section stack--lg">
-        <Notice tone="plain" icon={<Icon.Lock />}>
-          <p className="strong">Appraisal-ready dossier.</p>
-          <p>
-            Kofi stores documents privately and logs every open. Kofi never estimates or labels an appraised value — qualified appraisers and insurers do that.
-          </p>
-        </Notice>
-        {body}
+      <main className="container container--wide section">
+        <div className="st-split">
+          <aside className="st-split__aside stack">
+            <p className="eyebrow eyebrow--gold">Private vault</p>
+            <h2 className="h1">The papers behind the work</h2>
+            <span className="rule rule--gold" aria-hidden="true" />
+            <Notice tone="plain" icon={<Icon.Lock />}>
+              <p className="strong">Appraisal-ready dossier.</p>
+              <p>
+                Kofi stores documents privately and logs every open. Kofi never estimates or labels an appraised value — qualified appraisers and insurers do that.
+              </p>
+            </Notice>
+          </aside>
+          <div className="st-split__main">{body}</div>
+        </div>
       </main>
       {adding && q.data && <AddDocumentSheet works={q.data.works} onClose={() => setAdding(false)} />}
       <Confirm

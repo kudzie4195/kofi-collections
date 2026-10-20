@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Icon } from '@/ui';
 import { useViewer } from '@/state/session';
 import type { ReactNode } from 'react';
@@ -32,13 +32,20 @@ export function TabBar() {
   return (
     <nav className="tabbar" aria-label="Main">
       <div className="tabbar__inner">
+        <Link to="/" className="tabbar__brand" aria-label="Kofi Collections home">
+          <span className="star" aria-hidden="true" />
+          <span className="tabbar__brand-name">
+            Kofi
+            <small>Collections</small>
+          </span>
+        </Link>
         {tabs.map((t) => {
           const active = t.match ? t.match(pathname) : pathname === t.to;
           return (
-            <NavLink key={t.to} to={t.to} className="tab" aria-current={active ? 'page' : undefined}>
+            <Link key={t.to} to={t.to} className="tab" aria-current={active ? 'page' : undefined}>
               {t.icon}
               <span>{t.label}</span>
-            </NavLink>
+            </Link>
           );
         })}
       </div>

@@ -171,7 +171,7 @@ export function ShortlistScreen() {
   return (
     <div className="screen">
       <TopBar title={list?.name ?? 'Shortlist'} back="/curator" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide stack--lg cu-main">
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
@@ -194,43 +194,44 @@ export function ShortlistScreen() {
           />
         ) : (
           <>
-            <header className="stack--sm">
-              <div className="row" style={{ alignItems: 'flex-start' }}>
-                <h2 className="h2 sl-title">
-                  {list.name}
-                </h2>
-                <Button
-                  tone="ghost"
-                  icon={<Icon.Edit />}
-                  aria-label="Rename shortlist"
-                  onClick={() => {
-                    setNewName(list.name);
-                    setRenameError(undefined);
-                    setRenaming(true);
-                  }}
-                />
+            <header className="sl-head">
+              <div className="sl-head__main">
+                <p className="eyebrow eyebrow--gold">Shortlist</p>
+                <div className="row" style={{ alignItems: 'flex-start', marginTop: 8 }}>
+                  <h2 className="h1 sl-title">{list.name}</h2>
+                  <Button
+                    tone="ghost"
+                    icon={<Icon.Edit />}
+                    aria-label="Rename shortlist"
+                    onClick={() => {
+                      setNewName(list.name);
+                      setRenameError(undefined);
+                      setRenaming(true);
+                    }}
+                  />
+                </div>
+                <p className="eyebrow">
+                  {list.items.length === 1 ? '1 work' : `${list.items.length} works`}, updated {formatDate(list.updatedAt)}
+                </p>
               </div>
-              <p className="muted small">
-                {list.items.length === 1 ? '1 work' : `${list.items.length} works`}, updated {formatDate(list.updatedAt)}
-              </p>
-            </header>
 
-            <div className="toolbar">
-              <Button tone="secondary" size="sm" icon={<Icon.Doc />} onClick={copyAsText}>
-                Copy as text
-              </Button>
-              <div className="toolbar__unit">
-                <Segmented<Unit>
-                  label="Dimension units"
-                  value={unit}
-                  onChange={setUnit}
-                  options={[
-                    { value: 'cm', label: 'cm' },
-                    { value: 'in', label: 'in' },
-                  ]}
-                />
+              <div className="toolbar">
+                <Button tone="secondary" size="sm" icon={<Icon.Doc />} onClick={copyAsText}>
+                  Copy as text
+                </Button>
+                <div className="toolbar__unit">
+                  <Segmented<Unit>
+                    label="Dimension units"
+                    value={unit}
+                    onChange={setUnit}
+                    options={[
+                      { value: 'cm', label: 'cm' },
+                      { value: 'in', label: 'in' },
+                    ]}
+                  />
+                </div>
               </div>
-            </div>
+            </header>
 
             {!verified && (
               <Notice tone="butter" icon={<Icon.Lock />}>
@@ -444,7 +445,7 @@ export function ShortlistScreen() {
 
 function LinkButtonInline() {
   return (
-    <Link to="/curator/verify" style={{ color: 'inherit', fontWeight: 700 }}>
+    <Link to="/curator/verify" style={{ color: 'inherit', fontWeight: 500 }}>
       Check your verification
     </Link>
   );

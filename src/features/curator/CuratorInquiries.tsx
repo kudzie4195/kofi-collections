@@ -16,10 +16,17 @@ export function CuratorInquiries() {
   return (
     <div className="screen">
       <TopBar title="Introduction requests" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
-        <Notice tone="cobalt" icon={<Icon.Lock />}>
-          Kofi reviews each request, then forwards it to the artist’s studio. The artist’s contact details are shared only after they accept.
-        </Notice>
+      <main className="container container--wide cu-main">
+        <div className="cu-split">
+        <aside className="cu-split__aside stack">
+          <p className="eyebrow eyebrow--gold">Requests</p>
+          <h2 className="h1">Introductions you’ve asked for</h2>
+          <span className="rule rule--gold" aria-hidden="true" />
+          <Notice tone="cobalt" icon={<Icon.Lock />}>
+            Kofi reviews each request, then forwards it to the artist’s studio. The artist’s contact details are shared only after they accept.
+          </Notice>
+        </aside>
+        <div className="cu-split__main">
 
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
@@ -45,7 +52,7 @@ export function CuratorInquiries() {
             }
           />
         ) : (
-          <ul aria-label="Your introduction requests">
+          <ul className="cu-inqs" aria-label="Your introduction requests">
             {q.data.rows.map((r) => {
               const step = STEPS[r.status];
               return (
@@ -81,6 +88,8 @@ export function CuratorInquiries() {
             })}
           </ul>
         )}
+        </div>
+        </div>
       </main>
     </div>
   );

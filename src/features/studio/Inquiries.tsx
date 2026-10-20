@@ -82,10 +82,10 @@ export function Inquiries() {
       <div className="stack--lg">
         {waiting.length > 0 && (
           <section aria-labelledby="waiting" className="stack">
-            <h2 className="h3" id="waiting">
+            <h2 className="eyebrow eyebrow--gold" id="waiting">
               Waiting for you
             </h2>
-            <ul className="stack">
+            <ul>
               {waiting.map((r) => (
                 <InquiryCard key={r.id} row={r} onAccept={() => setAccepting(r)} onDecline={() => setDeclining(r)} />
               ))}
@@ -94,10 +94,10 @@ export function Inquiries() {
         )}
         {answered.length > 0 && (
           <section aria-labelledby="answered" className="stack">
-            <h2 className="h3" id="answered">
+            <h2 className="eyebrow" id="answered">
               Answered
             </h2>
-            <ul className="stack">
+            <ul>
               {answered.map((r) => (
                 <InquiryCard key={r.id} row={r} />
               ))}
@@ -111,11 +111,18 @@ export function Inquiries() {
   return (
     <div className="screen">
       <TopBar title="Introductions" back="/studio" />
-      <main className="container section stack--lg">
-        <Notice tone="cobalt" icon={<Icon.Admin />}>
-          Kofi reviews every request before it reaches you. Accepting lets Kofi share your email with this curator; declining tells Kofi only.
-        </Notice>
-        {body}
+      <main className="container container--wide section">
+        <div className="st-split">
+          <aside className="st-split__aside stack">
+            <p className="eyebrow eyebrow--gold">Introductions</p>
+            <h2 className="h1">Curators who want to meet you</h2>
+            <span className="rule rule--gold" aria-hidden="true" />
+            <Notice tone="cobalt" icon={<Icon.Admin />}>
+              Kofi reviews every request before it reaches you. Accepting lets Kofi share your email with this curator; declining tells Kofi only.
+            </Notice>
+          </aside>
+          <div className="st-split__main">{body}</div>
+        </div>
       </main>
 
       <Confirm
@@ -175,7 +182,7 @@ function InquiryCard({ row, onAccept, onDecline }: { row: InquiryRow; onAccept?:
           <div className="h3">{row.institutionName}</div>
           <div className="small">{row.curatorName}</div>
         </div>
-        <div className="row small strong">
+        <div className="row eyebrow st-inq__status">
           <StatusDot status={row.status} />
           {STATUS_LABEL[row.status]}
         </div>

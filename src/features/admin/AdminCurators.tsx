@@ -72,11 +72,18 @@ export function AdminCurators() {
   return (
     <div className="screen">
       <TopBar title="Curators" back="/admin" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide ad-main">
+        <div className="ad-split">
+        <aside className="ad-split__aside stack">
+          <p className="eyebrow eyebrow--gold">Kofi desk</p>
+          <h2 className="h1">Curators</h2>
+          <span className="rule rule--gold" aria-hidden="true" />
         <Notice tone="plain" icon={<Icon.Building />}>
           Check each request by hand before verifying: find the person in the institution’s staff directory, or write to the work email from a
           known address.
         </Notice>
+        </aside>
+        <div className="ad-split__main stack--lg">
 
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
@@ -98,7 +105,7 @@ export function AdminCurators() {
                   {GROUP_LABEL[s]}
                   <span className="group-title__count">{rows.length}</span>
                 </h2>
-                <Panel pinned={s === 'pending'}>
+                <Panel className="ad-flat">
                   <ul>
                     {rows.map((c) => (
                       <li key={c.id} className="ops" aria-label={`${c.name}, ${c.institution.name}`}>
@@ -165,6 +172,8 @@ export function AdminCurators() {
             );
           })
         )}
+        </div>
+        </div>
       </main>
       <NoteSheet action={action} onClose={() => setAction(undefined)} />
     </div>

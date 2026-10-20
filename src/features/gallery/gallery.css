@@ -833,6 +833,20 @@
   padding: 0;
   border: 0;
   background: transparent;
+  flex-wrap: wrap;
+}
+.kg-member .identity > .btn {
+  margin-left: calc(44px + var(--space-3));
+  flex: none;
+}
+@media (min-width: 560px) {
+  .kg-member .identity > .btn {
+    margin-left: auto;
+  }
+}
+.kg-member .identity > div {
+  min-width: 0;
+  flex: 1 1 160px;
 }
 .kg-member .identity[aria-current='true'] {
   border: 0;
@@ -842,7 +856,8 @@
   border-bottom: 0;
 }
 .kg-member .identity__label {
-  font-size: var(--fs-2xl);
+  font-size: clamp(1.5rem, 7vw, var(--fs-2xl));
+  overflow-wrap: anywhere;
 }
 .kg-member__star {
   position: absolute;

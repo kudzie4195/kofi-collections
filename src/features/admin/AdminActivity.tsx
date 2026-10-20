@@ -31,7 +31,12 @@ export function AdminActivity() {
   return (
     <div className="screen">
       <TopBar title="Activity log" back="/admin" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide ad-main">
+        <div className="ad-split">
+        <aside className="ad-split__aside stack">
+          <p className="eyebrow eyebrow--gold">Kofi desk</p>
+          <h2 className="h1">Activity log</h2>
+          <span className="rule" aria-hidden="true" />
         <Notice tone="plain" icon={<Icon.Lock />}>
           This log is append-only. Sensitive actions — status changes, visibility edits, opening private documents or records, shortlists and
           introduction decisions — add an entry, and nobody, including Kofi staff, can edit or delete one from the app. Showing the latest 200.
@@ -45,7 +50,9 @@ export function AdminActivity() {
             </Chip>
           ))}
         </div>
+        </aside>
 
+        <div className="ad-split__main">
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
@@ -62,6 +69,8 @@ export function AdminActivity() {
         ) : (
           <AuditList events={shown} names={q.data.names} />
         )}
+        </div>
+        </div>
       </main>
     </div>
   );

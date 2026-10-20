@@ -93,7 +93,12 @@ export function AdminInquiries() {
   return (
     <div className="screen">
       <TopBar title="Introduction requests" back="/admin" />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide ad-main">
+        <div className="ad-split">
+        <aside className="ad-split__aside stack">
+          <p className="eyebrow eyebrow--gold">Kofi desk</p>
+          <h2 className="h1">Introduction requests</h2>
+          <span className="rule rule--green" aria-hidden="true" />
         <Notice tone="cobalt" icon={<Icon.Lock />}>
           Forwarding sends the request to the artist’s studio inbox. It still shares no contact details: the artist accepts or declines, and only
           then does Kofi connect the two.
@@ -102,6 +107,8 @@ export function AdminInquiries() {
         <div className="seg-wrap">
           <Segmented<Filter> label="Filter requests by status" value={filter} onChange={setFilter} options={FILTERS} />
         </div>
+        </aside>
+        <div className="ad-split__main stack--lg">
 
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
@@ -131,7 +138,7 @@ export function AdminInquiries() {
             {filter === 'all' && pendingCount > 0 && (
               <p className="small strong">{pendingCount === 1 ? '1 request is waiting on you.' : `${pendingCount} requests are waiting on you.`}</p>
             )}
-            <Panel pinned>
+            <Panel className="ad-flat">
               <ul aria-label="Introduction requests">
                 {rows.map((r) => {
                   const cStatus = q.data!.curatorStatus.get(r.curatorId);
@@ -191,6 +198,8 @@ export function AdminInquiries() {
             </Panel>
           </>
         )}
+        </div>
+        </div>
       </main>
       <NoteSheet action={action} onClose={() => setAction(undefined)} />
     </div>

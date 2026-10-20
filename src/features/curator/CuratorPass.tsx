@@ -10,23 +10,23 @@ export function CuratorPass({ curator, fallbackName }: { curator: CuratorRow | u
   const inst = curator?.institution;
   return (
     <section className={`pass pass--${status}`} aria-label="Your curator pass">
-      <div className="pass__band" aria-hidden="true" />
-      <div className="pass__body">
+      <div className="pass__head">
         <div className="pass__kicker">Kofi curator pass</div>
+        {status === 'verified' && <span className="star pass__star" aria-hidden="true" />}
+      </div>
+      <div className="pass__body">
         <h2 className="pass__name">{curator?.name ?? fallbackName}</h2>
         {curator?.title && <p className="pass__title">{curator.title}</p>}
         <div className="pass__inst">
           <Icon.Building />
           <div>
-            <div>{inst ? inst.name : 'No institution on file'}</div>
-            {inst && (
-              <div className="small muted" style={{ fontWeight: 500 }}>
-                {[institutionTypeLabel(inst.type), inst.city, inst.country].filter(Boolean).join(', ')}
-              </div>
-            )}
+            <div className="pass__inst-name">{inst ? inst.name : 'No institution on file'}</div>
+            {inst && <div className="pass__inst-meta">{[institutionTypeLabel(inst.type), inst.city, inst.country].filter(Boolean).join(', ')}</div>}
           </div>
         </div>
-        <div className="pass__status small">
+      </div>
+      <div className="pass__status small">
+        <div className="pass__status-text">
           <span className="row">
             <span className={`status-dot status-dot--${status === 'none' ? 'draft' : status}`} aria-hidden="true" />
             <strong>{CURATOR_STATUS_LABEL[status]}</strong>
@@ -34,9 +34,9 @@ export function CuratorPass({ curator, fallbackName }: { curator: CuratorRow | u
           {status === 'verified' && curator?.verifiedAt && <span className="muted">on {formatDate(curator.verifiedAt)}</span>}
           {status === 'pending' && curator?.createdAt && <span className="muted">since {formatDate(curator.createdAt)}</span>}
         </div>
-      </div>
-      <div className="pass__stamp" aria-hidden="true">
-        {stamp}
+        <span className="pass__stamp" aria-hidden="true">
+          {stamp}
+        </span>
       </div>
     </section>
   );

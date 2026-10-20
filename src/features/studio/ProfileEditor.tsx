@@ -54,14 +54,29 @@ interface ProfileForm {
 }
 
 const SWATCHES: { color: string; name: string }[] = [
-  { color: '#2436F5', name: 'Cobalt' },
-  { color: '#FF5C39', name: 'Coral' },
-  { color: '#CFFF4A', name: 'Lime' },
-  { color: '#FFD23F', name: 'Butter' },
-  { color: '#5B41E6', name: 'Violet' },
-  { color: '#0FA3B1', name: 'Teal' },
-  { color: '#16122B', name: 'Ink' },
+  { color: '#c8322b', name: 'Red' },
+  { color: '#e3b23c', name: 'Gold' },
+  { color: '#7fa344', name: 'Green' },
+  { color: '#4f6a25', name: 'Deep green' },
+  { color: '#f3eee6', name: 'Cream' },
+  { color: '#242424', name: 'Charcoal' },
 ];
+
+/** v1 avatar colours still stored on older records, matched to the swatch they now render as. */
+const LEGACY_SWATCH: Record<string, string> = {
+  '#2436f5': '#4f6a25',
+  '#ff5c39': '#c8322b',
+  '#cfff4a': '#7fa344',
+  '#ffd23f': '#e3b23c',
+  '#7b61ff': '#f3eee6',
+  '#5b41e6': '#f3eee6',
+  '#0fa3b1': '#7fa344',
+  '#16122b': '#242424',
+};
+function swatchOf(color: string): string {
+  const c = color.trim().toLowerCase();
+  return LEGACY_SWATCH[c] ?? c;
+}
 
 const STAGE_LABEL: Record<CareerStage, string> = { emerging: 'Emerging', 'mid-career': 'Mid-career', established: 'Established' };
 
@@ -247,7 +262,7 @@ export function ProfileEditor() {
     <Shell>
       {guard.dialog}
       <form
-        className="stack--lg"
+        className="stack--lg st-flat st-profile"
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
@@ -281,7 +296,7 @@ export function ProfileEditor() {
                     key={s.color}
                     type="button"
                     role="radio"
-                    aria-checked={f.avatarColor.toLowerCase() === s.color.toLowerCase()}
+                    aria-checked={swatchOf(f.avatarColor) === s.color}
                     aria-label={s.name}
                     className="st-swatch"
                     style={{ background: s.color }}
@@ -478,7 +493,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="screen">
       <TopBar title="Profile" back="/studio" />
-      <main className="container section">{children}</main>
+      <main className="container container--wide section">{children}</main>
     </div>
   );
 }

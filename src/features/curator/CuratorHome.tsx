@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ValidationError } from '@/data/DataSource';
 import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
-import { Button, EmptyState, ErrorState, Icon, Input, LinkButton, Notice, Panel, Sheet, Skeleton, TopBar } from '@/ui';
+import { Button, EmptyState, ErrorState, Icon, Input, LinkButton, Notice, Sheet, Skeleton, TopBar } from '@/ui';
 import { CuratorPass } from './CuratorPass';
 import { formatDate } from './shared';
 import './curator.css';
@@ -55,7 +55,7 @@ export function CuratorHome() {
   return (
     <div className="screen">
       <TopBar title="Shortlists" right={<LinkButton to="/curator/inquiries" tone="ghost" size="sm" className="ghost-flat" icon={<Icon.Inbox />}>Requests</LinkButton>} />
-      <main className="container stack--lg" style={{ paddingTop: 20 }}>
+      <main className="container container--wide cu-main">
         {q.error && !q.data ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
@@ -65,7 +65,8 @@ export function CuratorHome() {
             <Skeleton h={56} />
           </div>
         ) : (
-          <>
+          <div className="cu-split">
+            <div className="cu-split__aside stack--lg">
             <CuratorPass curator={curator} fallbackName={viewer.displayName ?? 'Curator'} />
 
             {!verified && (
@@ -91,11 +92,16 @@ export function CuratorHome() {
                 </div>
               </Notice>
             )}
+            </div>
 
+            <div className="cu-split__main">
             {curator ? (
-              <section className="stack">
-                <div className="row row--between row--wrap">
-                  <h2 className="h2">Your shortlists</h2>
+              <section className="stack--lg">
+                <div className="cu-head">
+                  <div>
+                    <p className="eyebrow eyebrow--gold">{q.data.shortlists.length === 1 ? '1 list' : `${q.data.shortlists.length} lists`}</p>
+                    <h2 className="section-title">Your shortlists</h2>
+                  </div>
                   {q.data.shortlists.length > 0 && (
                     <Button size="sm" icon={<Icon.Plus />} onClick={openCreate}>
                       New shortlist
@@ -118,11 +124,10 @@ export function CuratorHome() {
                     }
                   />
                 ) : (
-                  <Panel pinned>
-                    <ul className="list" aria-label="Shortlists">
+                    <ul className="list cu-lists" aria-label="Shortlists">
                       {q.data.shortlists.map((s) => (
                         <li key={s.id}>
-                          <Link to={`/curator/shortlists/${s.id}`} className="list-row">
+                          <Link to={`/curator/shortlists/${s.id}`} className="list-row cu-list-row">
                             <span className="sl-count" aria-hidden="true">
                               {s.items.length}
                             </span>
@@ -139,7 +144,6 @@ export function CuratorHome() {
                         </li>
                       ))}
                     </ul>
-                  </Panel>
                 )}
                 <p className="small muted">To add a work, open it in the gallery and choose a shortlist.</p>
               </section>
@@ -157,7 +161,8 @@ export function CuratorHome() {
                 }
               />
             )}
-          </>
+            </div>
+          </div>
         )}
       </main>
 
