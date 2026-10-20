@@ -5,7 +5,7 @@ import { exhibitionPhase } from '@/domain/programme';
 import { useQuery, useViewer } from '@/state/session';
 import { EmptyState, ErrorState, Icon, LinkButton, Segmented, SiteFooter, Skeleton, TopBar, WallLabel } from '@/ui';
 import { CallCard, EventRow, ExhibitionCard, ExhibitionVisual, PageHead, SampleTag, SectionHead, useToday, workImage } from './shared';
-import { EXHIBITION_PHASE_LABEL, eventIsPast, formatDateRange, paragraphs } from './format';
+import { creditLine, EXHIBITION_PHASE_LABEL, eventIsPast, formatDateRange, paragraphs } from './format';
 
 const PHASES: ExhibitionPhase[] = ['current', 'upcoming', 'past'];
 const TAB_LABEL: Record<ExhibitionPhase, string> = { current: 'Current', upcoming: 'Upcoming', past: 'Past' };
@@ -155,7 +155,7 @@ export function ExhibitionScreen() {
           <div className="kp-extop">
             <div className="kp-extop__media">
               <ExhibitionVisual ex={ex} size="lg" fallback={workImage(works[0])} />
-              {(ex.image ?? workImage(works[0]))?.credit && <p className="kp-credit">{ex.image ? 'Image' : works[0]?.title} © {(ex.image ?? workImage(works[0]))!.credit}</p>}
+              {(ex.image ?? workImage(works[0]))?.credit && <p className="kp-credit">{ex.image ? '' : `${works[0]?.title} · `}{creditLine((ex.image ?? workImage(works[0]))!.credit!)}</p>}
             </div>
             <header className="kp-extop__text">
               <p className="kp-eyebrow-row">

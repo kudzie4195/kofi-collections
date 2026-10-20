@@ -217,8 +217,8 @@ function CallAction({ call, phase, viewer, application }: { call: OpenCall; phas
           Applications closed
         </button>
         {call.externalUrl && (
-          <a className="btn btn--ghost btn--block" href={call.externalUrl} target="_blank" rel="noopener noreferrer">
-            Read the call on {new URL(call.externalUrl).hostname.replace(/^www\./, '')} ↗
+          <a className="btn btn--ghost btn--block kp-cta__wrap" href={call.externalUrl} target="_blank" rel="noopener noreferrer" aria-label={`Read the call on ${new URL(call.externalUrl).hostname.replace(/^www\./, '')} (opens in a new tab)`}>
+            Read the call ↗
           </a>
         )}
       </>

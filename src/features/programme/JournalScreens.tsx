@@ -4,7 +4,7 @@ import type { ArtworkView } from '@/domain/types';
 import { useQuery, useViewer } from '@/state/session';
 import { EmptyState, ErrorState, Icon, LinkButton, SiteFooter, Skeleton, TopBar, WallLabel } from '@/ui';
 import { imageSrc, PageHead, Poster, SampleTag, SectionHead, StoryCard, workImage } from './shared';
-import { formatDay, paragraphs, STORY_KIND_LABEL } from './format';
+import { creditLine, formatDay, paragraphs, STORY_KIND_LABEL } from './format';
 
 export function JournalScreen() {
   const q = useQuery(async (data, viewer) => {
@@ -130,7 +130,7 @@ export function StoryScreen() {
             {heroSrc && hero ? (
               <>
                 <img src={heroSrc} alt={hero.alt} />
-                {hero.credit && <figcaption className="kp-credit">{works[0] && !story.image ? `${works[0].title} · ` : ''}© {hero.credit}</figcaption>}
+                {hero.credit && <figcaption className="kp-credit">{works[0] && !story.image ? `${works[0].title} · ` : ''}{creditLine(hero.credit)}</figcaption>}
               </>
             ) : (
               <Poster title={story.title} kicker={STORY_KIND_LABEL[story.kind]} meta={formatDay(story.publishedOn)} size="lg" />

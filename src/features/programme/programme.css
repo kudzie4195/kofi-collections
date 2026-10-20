@@ -2390,3 +2390,12 @@ ul.kg-rail {
 .kp-room .segmented__btn {
   min-height: 44px;
 }
+
+/* Secondary links inside the call CTA card may wrap on narrow screens (buttons don't by default). */
+.btn.kp-cta__wrap {
+  white-space: normal;
+  text-align: center;
+  height: auto;
+  min-height: 44px;
+  padding-block: 10px;
+}

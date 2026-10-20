@@ -141,3 +141,12 @@ export function formatInstantDay(iso: string): string {
   if (Number.isNaN(t.getTime())) return '';
   return formatDay(kofiToday(t));
 }
+
+/**
+ * A caption for an image credit. Credits that are already a sentence ("Photograph from …",
+ * "Painting by …", "Courtesy …") are shown as written; a bare name gets a © prefix.
+ */
+export function creditLine(credit: string): string {
+  const c = credit.trim();
+  return /^(photo|photograph|painting|image|courtesy|©)/i.test(c) ? c : `© ${c}`;
+}
