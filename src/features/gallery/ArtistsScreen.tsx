@@ -41,14 +41,16 @@ export function ArtistsScreen() {
   return (
     <div className="screen">
       <TopBar title="Artists" />
-      <main className="container stack" style={{ paddingTop: 20 }}>
-        <header className="stack--sm">
-          <h2 className="h1">The artists</h2>
+      <main className="container container--wide stack kg-artists">
+        <header className="stack--sm kg-artists-head">
+          <h2 className="h1">
+            The <em className="kg-em">artists</em>
+          </h2>
           <p className="lede">Every profile is approved by Kofi and published by the artist, who decides how precisely their location is shown.</p>
         </header>
 
         <div className="kg-toolbar kg-toolbar--flush">
-          <div className="stack--sm">
+          <div className="stack--sm kg-toolbar__inner">
             <SearchBox label="Search artists" placeholder="Name, place, medium" value={query} onChange={(v) => update(v, selected, true)} />
             {present.length > 0 && (
               <div className="chips chips--scroll" role="group" aria-label="Medium">
@@ -74,7 +76,7 @@ export function ArtistsScreen() {
           <div className="stack--sm" aria-busy="true" aria-label="Loading artists">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="row" style={{ padding: '12px 0' }}>
-                <Skeleton h={44} w={44} style={{ borderRadius: 999 }} />
+                <Skeleton h={56} w={56} style={{ borderRadius: 999 }} />
                 <div className="stack--sm" style={{ flex: 1 }}>
                   <Skeleton h={16} w="60%" />
                   <Skeleton h={12} w="40%" />
@@ -94,10 +96,10 @@ export function ArtistsScreen() {
           )
         ) : (
           <>
-            <p className="small strong" aria-live="polite">
+            <p className="eyebrow kg-artists-count" aria-live="polite">
               {plural(results.length, 'artist')}
             </p>
-            <ul className="list" aria-label="Artists">
+            <ul className="list kg-artists-list" aria-label="Artists">
               {results.map((a) => {
                 const n = workCount.get(a.id);
                 return (

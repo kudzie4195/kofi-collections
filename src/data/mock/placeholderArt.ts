@@ -4,6 +4,9 @@ import type { Medium } from '@/domain/types';
  * Deterministic abstract "artwork" images as SVG data URLs so the demo ships
  * with zero external assets and is clearly fictional. Each medium gets its
  * own visual grammar so the gallery doesn't look like one wallpaper.
+ *
+ * Colours are the Kofi Noir brand set: gallery black and warm cream grounds,
+ * brush strokes in the red / gold / green of the Ghana star.
  */
 
 function hash(str: string): number {
@@ -25,105 +28,167 @@ function rng(seed: number) {
   };
 }
 
+const BLACK = '#0a0a0a';
+const BLACK_2 = '#141414';
+const CREAM = '#f3eee6';
+const CREAM_2 = '#e9e2d6';
+const DARK_GROUNDS = [BLACK, BLACK_2];
+const LIGHT_GROUNDS = [CREAM, CREAM_2];
+
+/** Brush palettes: each a subset of the brand strokes, so works vary but stay on-brand. */
 const PALETTES = [
-  ['#2436F5', '#FF5C39', '#CFFF4A', '#FFD23F', '#16122B'],
-  ['#FF5C39', '#FFD23F', '#2436F5', '#F4F2FA', '#16122B'],
-  ['#CFFF4A', '#16122B', '#2436F5', '#FF5C39', '#F4F2FA'],
-  ['#FFD23F', '#2436F5', '#16122B', '#CFFF4A', '#FF5C39'],
-  ['#16122B', '#F4F2FA', '#FF5C39', '#CFFF4A', '#2436F5'],
-  ['#7B61FF', '#FF5C39', '#FFD23F', '#16122B', '#F4F2FA'],
-  ['#0FA3B1', '#FFD23F', '#FF5C39', '#16122B', '#F4F2FA'],
+  ['#c8322b', '#e3b23c', '#7fa344'],
+  ['#c8322b', '#a8261f', '#e3b23c'],
+  ['#e3b23c', '#b98a1c', '#4f6a25'],
+  ['#7fa344', '#4f6a25', '#c8322b'],
+  ['#a8261f', '#e3b23c', '#4f6a25', '#f3eee6'],
+  ['#c8322b', '#b98a1c', '#7fa344', '#0a0a0a'],
 ];
+
+const f = (n: number) => n.toFixed(0);
 
 export function placeholderArt(seed: string, medium: Medium, w = 800, h = 1000): string {
   const r = rng(hash(seed));
   const pal = PALETTES[hash(seed + medium) % PALETTES.length]!;
   const pick = () => pal[Math.floor(r() * pal.length)]!;
-  const bg = pick();
+  const from = (xs: string[]) => xs[Math.floor(r() * xs.length)]!;
+  const noiseSeed = hash(seed) % 997;
   const parts: string[] = [];
-  const n = 4 + Math.floor(r() * 6);
+  let bg = from(DARK_GROUNDS);
+  // rough, dry-brush edges for the hand-made mediums
+  let filter = '';
 
   switch (medium) {
     case 'painting':
-    case 'mixed media':
+    case 'mixed media': {
+      const light = r() < 0.35;
+      bg = light ? from(LIGHT_GROUNDS) : from(DARK_GROUNDS);
+      filter = `<filter id="brush" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.012 0.09" numOctaves="3" seed="${noiseSeed}"/><feDisplacementMap in="SourceGraphic" scale="26"/></filter>`;
+      const strokes = pal.filter((c) => (light ? c !== CREAM : c !== BLACK));
+      const n = 5 + Math.floor(r() * 4);
       for (let i = 0; i < n; i++) {
-        const cx = r() * w;
-        const cy = r() * h;
-        const rx = 60 + r() * 300;
-        const ry = 40 + r() * 260;
-        const rot = r() * 180;
+        const sw = 320 + r() * 420;
+        const sh = 46 + r() * 130;
+        const cx = 80 + r() * (w - 160);
+        const cy = 80 + r() * (h - 160);
+        const rot = (r() - 0.5) * 50;
+        const c = strokes[Math.floor(r() * strokes.length)]!;
+        const op = (0.85 + r() * 0.1).toFixed(2);
+        const x = cx - sw / 2;
+        const y = cy - sh / 2;
+        // the stroke, plus a few bristle streaks in the ground colour
+        let streaks = '';
+        for (let k = 0; k < 3; k++) {
+          const sy = y + sh * (0.2 + r() * 0.6);
+          streaks += `<line x1="${f(x + sw * 0.08)}" y1="${f(sy)}" x2="${f(x + sw * (0.55 + r() * 0.4))}" y2="${f(sy)}" stroke="${bg}" stroke-width="${f(2 + r() * 4)}" opacity="0.28" stroke-linecap="round"/>`;
+        }
         parts.push(
-          `<ellipse cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="${pick()}" transform="rotate(${rot.toFixed(0)} ${cx.toFixed(0)} ${cy.toFixed(0)})" opacity="0.92"/>`,
+          `<g transform="rotate(${rot.toFixed(1)} ${f(cx)} ${f(cy)})" opacity="${op}" filter="url(#brush)">` +
+            `<rect x="${f(x)}" y="${f(y)}" width="${f(sw)}" height="${f(sh)}" rx="${f(sh / 2)}" fill="${c}"/>${streaks}</g>`,
         );
       }
       break;
+    }
     case 'drawing':
-    case 'printmaking':
-      for (let i = 0; i < n * 3; i++) {
+    case 'printmaking': {
+      bg = from(LIGHT_GROUNDS);
+      filter = `<filter id="brush" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="${noiseSeed}"/><feDisplacementMap in="SourceGraphic" scale="9"/></filter>`;
+      const n = 10 + Math.floor(r() * 10);
+      for (let i = 0; i < n; i++) {
         const x1 = r() * w;
         const y1 = r() * h;
-        const x2 = x1 + (r() - 0.5) * 500;
-        const y2 = y1 + (r() - 0.5) * 500;
+        const x2 = x1 + (r() - 0.5) * 560;
+        const y2 = y1 + (r() - 0.5) * 560;
+        const qx = (x1 + x2) / 2 + (r() - 0.5) * 240;
+        const qy = (y1 + y2) / 2 + (r() - 0.5) * 240;
+        const c = r() < 0.78 ? BLACK : r() < 0.6 ? '#c8322b' : '#a8261f';
         parts.push(
-          `<line x1="${x1.toFixed(0)}" y1="${y1.toFixed(0)}" x2="${x2.toFixed(0)}" y2="${y2.toFixed(0)}" stroke="${pick()}" stroke-width="${(4 + r() * 22).toFixed(0)}" stroke-linecap="round"/>`,
+          `<path d="M${f(x1)} ${f(y1)} Q${f(qx)} ${f(qy)} ${f(x2)} ${f(y2)}" fill="none" stroke="${c}" stroke-width="${f(2 + r() * (c === BLACK ? 10 : 22))}" stroke-linecap="round" opacity="0.92" filter="url(#brush)"/>`,
         );
       }
       break;
+    }
     case 'sculpture':
     case 'ceramics':
     case 'installation': {
+      bg = BLACK_2;
+      // a pool of light on the plinth, so the object reads as photographed
+      filter = `<radialGradient id="lit" cx="50%" cy="38%" r="65%"><stop offset="0" stop-color="${CREAM}" stop-opacity="0.12"/><stop offset="1" stop-color="${CREAM}" stop-opacity="0"/></radialGradient>`;
+      parts.push(`<rect width="${w}" height="${h}" fill="url(#lit)"/>`);
+      const blocks = ['#e3b23c', '#b98a1c', '#7fa344', '#4f6a25'];
+      const floor = h - 110 - r() * 60;
+      const axis = w * (0.35 + r() * 0.3);
+      let y = floor;
+      const n = 3 + Math.floor(r() * 3);
       for (let i = 0; i < n; i++) {
-        const x = r() * (w - 200);
-        const y = r() * (h - 300);
-        const bw = 80 + r() * 240;
-        const bh = 120 + r() * 400;
-        parts.push(
-          `<rect x="${x.toFixed(0)}" y="${y.toFixed(0)}" width="${bw.toFixed(0)}" height="${bh.toFixed(0)}" rx="${(r() * 60).toFixed(0)}" fill="${pick()}"/>`,
-        );
+        const bw = 200 + r() * 260;
+        const bh = 120 + r() * 170;
+        y -= bh;
+        if (y < 60) break;
+        const x = axis - bw / 2 + (r() - 0.5) * 60;
+        parts.push(`<rect x="${f(x)}" y="${f(y)}" width="${f(bw)}" height="${f(bh)}" rx="${f(r() * 18)}" fill="${from(blocks)}"/>`);
+        y -= 6;
       }
-      parts.push(`<rect x="0" y="${h - 90}" width="${w}" height="90" fill="${pick()}" opacity="0.5"/>`);
+      parts.push(`<rect x="0" y="${f(floor)}" width="${w}" height="2" fill="${CREAM}" opacity="0.35"/>`);
+      parts.push(`<ellipse cx="${f(axis)}" cy="${f(floor + 26)}" rx="${f(220)}" ry="14" fill="${CREAM}" opacity="0.06"/>`);
       break;
     }
-    case 'textile':
-      for (let y = 0; y < h; y += 40) {
-        parts.push(`<rect x="0" y="${y}" width="${w}" height="20" fill="${pick()}" opacity="0.85"/>`);
+    case 'textile': {
+      bg = BLACK;
+      const threads = ['#c8322b', '#e3b23c', '#7fa344', '#4f6a25', '#a8261f'];
+      let y = 0;
+      while (y < h) {
+        const bh = 14 + Math.floor(r() * 4) * 12;
+        parts.push(`<rect x="0" y="${y}" width="${w}" height="${bh}" fill="${from(threads)}" opacity="0.9"/>`);
+        y += bh + 8 + Math.floor(r() * 3) * 8;
       }
-      for (let x = 0; x < w; x += 50) {
-        parts.push(`<rect x="${x}" y="0" width="22" height="${h}" fill="${pick()}" opacity="0.45"/>`);
+      for (let x = 0; x < w; x += 48 + Math.floor(r() * 3) * 16) {
+        parts.push(`<rect x="${x}" y="0" width="${14 + Math.floor(r() * 2) * 10}" height="${h}" fill="${from(threads)}" opacity="0.5"/>`);
       }
+      for (let x = 0; x < w; x += 6) parts.push(`<rect x="${x}" y="0" width="1" height="${h}" fill="${BLACK}" opacity="0.18"/>`);
       break;
+    }
     case 'photography':
     case 'video': {
-      const horizon = h * (0.4 + r() * 0.3);
-      parts.push(`<rect x="0" y="0" width="${w}" height="${horizon.toFixed(0)}" fill="${pick()}"/>`);
-      parts.push(`<rect x="0" y="${horizon.toFixed(0)}" width="${w}" height="${h}" fill="${pick()}"/>`);
-      const sun = pick();
-      parts.push(`<circle cx="${(r() * w).toFixed(0)}" cy="${(horizon * 0.5).toFixed(0)}" r="${(60 + r() * 120).toFixed(0)}" fill="${sun}"/>`);
-      for (let i = 0; i < 24; i++) {
-        parts.push(`<rect x="0" y="${(r() * h).toFixed(0)}" width="${w}" height="2" fill="#000" opacity="0.08"/>`);
+      const swap = r() < 0.4;
+      const top = swap ? BLACK : from(LIGHT_GROUNDS);
+      const bottom = swap ? from(LIGHT_GROUNDS) : BLACK_2;
+      bg = top;
+      const horizon = h * (0.42 + r() * 0.24);
+      parts.push(`<rect x="0" y="${f(horizon)}" width="${w}" height="${f(h - horizon)}" fill="${bottom}"/>`);
+      parts.push(`<circle cx="${f(w * (0.25 + r() * 0.5))}" cy="${f(horizon * (0.45 + r() * 0.3))}" r="${f(60 + r() * 110)}" fill="#c8322b"/>`);
+      for (let i = 0; i < 28; i++) {
+        parts.push(`<rect x="0" y="${f(r() * h)}" width="${w}" height="2" fill="${i % 2 ? BLACK : CREAM}" opacity="0.06"/>`);
       }
       break;
     }
     case 'digital':
+      bg = BLACK;
       for (let gy = 0; gy < 10; gy++)
         for (let gx = 0; gx < 8; gx++) {
-          if (r() > 0.55) continue;
-          parts.push(`<rect x="${gx * 100}" y="${gy * 100}" width="100" height="100" fill="${pick()}"/>`);
+          if (r() > 0.45) continue;
+          parts.push(`<rect x="${gx * 100 + 4}" y="${gy * 100 + 4}" width="92" height="92" fill="${pick()}" opacity="${(0.55 + r() * 0.4).toFixed(2)}"/>`);
         }
       break;
-    case 'performance':
+    case 'performance': {
+      bg = from(DARK_GROUNDS);
+      const n = 4 + Math.floor(r() * 4);
       for (let i = 0; i < n; i++) {
-        const cx = r() * w;
-        const cy = r() * h;
-        parts.push(`<circle cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" r="${(40 + r() * 200).toFixed(0)}" fill="none" stroke="${pick()}" stroke-width="${(8 + r() * 30).toFixed(0)}"/>`);
+        const c = pick();
+        parts.push(
+          `<circle cx="${f(r() * w)}" cy="${f(r() * h)}" r="${f(40 + r() * 200)}" fill="none" stroke="${c === BLACK ? CREAM : c}" stroke-width="${f(8 + r() * 30)}" opacity="0.9"/>`,
+        );
       }
       break;
+    }
   }
 
+  const light = LIGHT_GROUNDS.includes(bg);
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">` +
+    (filter ? `<defs>${filter}</defs>` : '') +
     `<rect width="${w}" height="${h}" fill="${bg}"/>${parts.join('')}` +
-    `<text x="${w - 16}" y="${h - 16}" text-anchor="end" font-family="sans-serif" font-size="22" fill="#000" opacity="0.35">fictional sample</text>` +
+    `<text x="${w - 16}" y="${h - 16}" text-anchor="end" font-family="sans-serif" font-size="22" fill="${light ? BLACK : CREAM}" opacity="0.35">fictional sample</text>` +
     `</svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }

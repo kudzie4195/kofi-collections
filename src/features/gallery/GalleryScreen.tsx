@@ -10,6 +10,10 @@ import { FilterSheet } from './FilterSheet';
 import { cap, plural, SearchBox } from './helpers';
 import { clearedFilters, compact, filtersFromParams, paramsFromFilters, SORT_OPTIONS, toggleIn, withUnit } from './params';
 
+// Optional full-bleed photograph behind the hero headline. Empty means no request is made.
+// Exhibition photograph from koficollections.org (public/art/hero.jpg, metadata stripped).
+const heroSrc: string = '/art/hero.jpg';
+
 export function GalleryScreen() {
   const [params, setParams] = useSearchParams();
   const filters = useMemo(() => filtersFromParams(params), [params]);
@@ -42,23 +46,29 @@ export function GalleryScreen() {
       <TopBar title="Kofi Collections" />
 
       <section className="band kg-hero" aria-labelledby="kg-hero-title">
+        {heroSrc && <div className="kg-hero--photo" style={{ ['--kg-hero-img' as string]: `url("${heroSrc}")` }} aria-hidden="true" />}
         <span className="band__stripe band__stripe--1" aria-hidden="true" />
         <span className="band__stripe band__stripe--2" aria-hidden="true" />
         <span className="band__stripe band__stripe--3" aria-hidden="true" />
-        <div className="container container--wide band__inner">
+        <div className="container container--wide band__inner kg-hero__inner">
+          <p className="eyebrow kg-hero__eyebrow">Pittsburgh · Artist-owned records</p>
           <h2 id="kg-hero-title" className="display kg-hero__title">
-            <span className="kg-hero__line">Artists keep the record.</span>{' '}
-            <span className="kg-hero__line kg-hero__line--offset">Curators find the work.</span>
+            <span className="kg-hero__line">Artists keep the record.</span> <span className="kg-hero__line kg-hero__line--offset">Curators find the work.</span>
           </h2>
           <p className="kg-hero__lede">
             Every work here was catalogued by the artist who made it, with price and detail shown only to the people they choose.
-            {all && all.length > 0 && <> Browsing {plural(all.length, 'work')} by {plural(artistCount, 'artist')}.</>}
+            {all && all.length > 0 && (
+              <span className="kg-hero__count">
+                {' '}
+                Browsing {plural(all.length, 'work')} by {plural(artistCount, 'artist')}.
+              </span>
+            )}
           </p>
         </div>
       </section>
 
-      <div className="kg-toolbar">
-        <div className="container container--wide stack--sm">
+      <div className="kg-toolbar kg-toolbar--home">
+        <div className="container container--wide stack--sm kg-toolbar__inner">
           <SearchBox
             label="Search works"
             placeholder="Search title, artist, material, tag"
@@ -83,43 +93,49 @@ export function GalleryScreen() {
       </div>
 
       <main className="container container--wide kg-gallery">
-        <div className="kg-controls">
-          <Button tone={active ? 'primary' : 'secondary'} size="sm" icon={<Icon.Filter />} onClick={() => setSheetOpen(true)} aria-haspopup="dialog">
-            {active ? `Filters (${active})` : 'Filters'}
-          </Button>
-          <label className="kg-sort">
-            <span className="sr-only">Sort works</span>
-            <Icon.Sort aria-hidden="true" />
-            <select className="select kg-sort__select" value={filters.sort ?? 'newest'} onChange={(e) => commit({ ...filters, sort: e.target.value as SortKey })}>
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="kg-unit">
-            <Segmented<Unit>
-              label="Show sizes in"
-              value={unit}
-              onChange={(u) => commit(withUnit(filters, u), true)}
-              options={[
-                { value: 'cm', label: 'cm' },
-                { value: 'in', label: 'in' },
-              ]}
-            />
-          </div>
-        </div>
-
-        <div className="row row--between kg-count">
-          <p className="small strong" aria-live="polite" data-testid="result-count">
-            {q.loading && !all ? 'Loading works' : plural(results.length, 'work')}
-          </p>
-          {active > 0 && (
-            <Button tone="ghost" size="sm" onClick={() => commit(clearedFilters(filters))}>
-              Clear filters
+        <div className="kg-bar">
+          <div className="kg-controls">
+            <Button tone={active ? 'primary' : 'secondary'} size="sm" icon={<Icon.Filter />} onClick={() => setSheetOpen(true)} aria-haspopup="dialog">
+              {active ? `Filters (${active})` : 'Filters'}
             </Button>
-          )}
+            <label className="kg-sort">
+              <span className="sr-only">Sort works</span>
+              <Icon.Sort aria-hidden="true" />
+              <select
+                className="select kg-sort__select"
+                value={filters.sort ?? 'newest'}
+                onChange={(e) => commit({ ...filters, sort: e.target.value as SortKey })}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="kg-unit">
+              <Segmented<Unit>
+                label="Show sizes in"
+                value={unit}
+                onChange={(u) => commit(withUnit(filters, u), true)}
+                options={[
+                  { value: 'cm', label: 'cm' },
+                  { value: 'in', label: 'in' },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className="row row--between kg-count">
+            <p className="eyebrow" aria-live="polite" data-testid="result-count">
+              {q.loading && !all ? 'Loading works' : plural(results.length, 'work')}
+            </p>
+            {active > 0 && (
+              <Button tone="ghost" size="sm" onClick={() => commit(clearedFilters(filters))}>
+                Clear filters
+              </Button>
+            )}
+          </div>
         </div>
 
         {q.error && !all ? (
@@ -131,7 +147,11 @@ export function GalleryScreen() {
             <EmptyState
               title="Nothing published yet"
               body="Artists are still cataloguing their work. Meet the artists already on Kofi while you wait."
-              actions={<LinkButton to="/artists" tone="secondary">Browse artists</LinkButton>}
+              actions={
+                <LinkButton to="/artists" tone="secondary">
+                  Browse artists
+                </LinkButton>
+              }
             />
           ) : (
             <EmptyState

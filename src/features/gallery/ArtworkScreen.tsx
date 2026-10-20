@@ -28,7 +28,7 @@ export function ArtworkScreen() {
   return (
     <div className="screen">
       <TopBar title="Artwork" back={back} />
-      <main className="container kg-detail">
+      <main className="container container--wide kg-detail">
         {q.error && !work ? (
           <ErrorState error={q.error} retry={q.reload} />
         ) : pending ? (
@@ -79,8 +79,8 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
   const others = (more.data ?? []).filter((w) => w.id !== work.id);
 
   return (
-    <article className="stack--lg" data-medium={work.medium}>
-      <div className="stack">
+    <article className="stack--lg kg-artwork" data-medium={work.medium}>
+      <div className="stack kg-artwork__media">
         <div className="hero-img" data-medium={work.medium}>
           {shown ? <img src={shown.src} alt={shown.alt} /> : <div className="kg-noimg">No image yet</div>}
         </div>
@@ -102,111 +102,112 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
         )}
       </div>
 
-      <header className="stack--sm">
-        <span className="kicker">{cap(work.medium)}</span>
-        <h1 className="h1 kg-title">{work.title}</h1>
-        <p className="kg-byline">
-          <Link to={`/artists/${work.artistId}`} className="strong">
-            {work.artistWorkingName}
-          </Link>
-          <span className="muted">, {work.year}</span>
-        </p>
-        {work.price ? (
-          <p className="kg-price">{formatPrice(work.price.amount, work.price.currency)}</p>
-        ) : work.priceWithheld ? (
-          <p className="kg-price kg-price--withheld">Price on request</p>
-        ) : null}
-        {work.canEdit && (
-          <div className="row row--wrap" aria-label="Who can see this">
-            <VisibilityBadge level={work.visibility} prefix="Record" />
-            <VisibilityBadge level={work.priceVisibility} prefix="Price" />
+      <div className="stack--lg kg-artwork__label">
+        <header className="kg-artwork__head">
+          <span className="kicker">{cap(work.medium)}</span>
+          <h1 className="h1 kg-title">{work.title}</h1>
+          <p className="kg-byline">
+            <Link to={`/artists/${work.artistId}`}>{work.artistWorkingName}</Link>
+            <span className="muted">, {work.year}</span>
+          </p>
+          {work.price ? (
+            <p className="kg-price">{formatPrice(work.price.amount, work.price.currency)}</p>
+          ) : work.priceWithheld ? (
+            <p className="kg-price kg-price--withheld">Price on request</p>
+          ) : null}
+          {work.canEdit && (
+            <div className="row row--wrap" aria-label="Who can see this">
+              <VisibilityBadge level={work.visibility} prefix="Record" />
+              <VisibilityBadge level={work.priceVisibility} prefix="Price" />
+            </div>
+          )}
+        </header>
+
+        {work.description && (
+          <div className="prose">
+            <p>{work.description}</p>
           </div>
         )}
-      </header>
 
-      {work.description && (
-        <div className="prose">
-          <p>{work.description}</p>
-        </div>
-      )}
-
-      <dl className="spec">
-        <dt>Medium</dt>
-        <dd>{cap(work.medium)}</dd>
-        <dt>Materials</dt>
-        <dd>{work.materials.length ? work.materials.join(', ') : <span className="muted">Not listed</span>}</dd>
-        <dt>Dimensions</dt>
-        <dd>
-          {bothUnits(work.dimensions)}
-          <span className="tiny muted kg-block">Height × width{work.dimensions.depth !== undefined ? ' × depth' : ''}</span>
-        </dd>
-        <dt>Status</dt>
-        <dd>{cap(work.status)}</dd>
-        <dt>Rights</dt>
-        <dd>{work.rightsNote || <span className="muted">No note</span>}</dd>
-        {work.tags.length > 0 && (
-          <>
-            <dt>Tags</dt>
-            <dd>
-              <span className="chips">
-                {work.tags.map((t) => (
-                  <Tag key={t}>{t}</Tag>
-                ))}
-              </span>
-            </dd>
-          </>
-        )}
-      </dl>
-
-      {(isOwner || isAdmin || verified) && (
-        <div className="sticky-actions kg-actions">
-          {isOwner && (
-            <LinkButton to={`/studio/work/${work.id}`} icon={<Icon.Edit />} block>
-              Edit in studio
-            </LinkButton>
-          )}
-          {isAdmin && (
-            <LinkButton to={`/admin/artists/${work.artistId}`} icon={<Icon.Admin />} block>
-              Review in Kofi admin
-            </LinkButton>
-          )}
-          {verified && (
+        <dl className="spec kg-spec">
+          <dt>Medium</dt>
+          <dd>{cap(work.medium)}</dd>
+          <dt>Materials</dt>
+          <dd>{work.materials.length ? work.materials.join(', ') : <span className="muted">Not listed</span>}</dd>
+          <dt>Dimensions</dt>
+          <dd>
+            {bothUnits(work.dimensions)}
+            <span className="tiny muted kg-block">
+              Height × width
+              {work.dimensions.depth !== undefined ? ' × depth' : ''}
+            </span>
+          </dd>
+          <dt>Status</dt>
+          <dd>{cap(work.status)}</dd>
+          <dt>Rights</dt>
+          <dd>{work.rightsNote || <span className="muted">No note</span>}</dd>
+          {work.tags.length > 0 && (
             <>
-              <Button tone="secondary" icon={<Icon.Shortlist />} onClick={() => setShortlistOpen(true)} aria-haspopup="dialog">
-                Add to shortlist
-              </Button>
-              <Button icon={<Icon.Mail />} onClick={() => setIntroOpen(true)} aria-haspopup="dialog">
-                Request introduction
-              </Button>
+              <dt>Tags</dt>
+              <dd>
+                <span className="chips">
+                  {work.tags.map((t) => (
+                    <Tag key={t}>{t}</Tag>
+                  ))}
+                </span>
+              </dd>
             </>
           )}
-        </div>
-      )}
-      {!work.canEdit && <CuratorAccessNotice viewer={viewer} />}
+        </dl>
 
-      {artist.data && (
-        <section className="panel kg-artist-card" aria-labelledby="kg-about">
-          <div className="row" style={{ alignItems: 'flex-start' }}>
-            <Avatar name={artist.data.workingName} color={artist.data.avatarColor} />
-            <div className="stack--sm" style={{ minWidth: 0, flex: 1 }}>
-              <h2 id="kg-about" className="h3">
-                About {artist.data.workingName}
-              </h2>
-              <p className="small muted">
-                {[artist.data.regionLabel, cap(artist.data.careerStage)].filter(Boolean).join(', ')}
-              </p>
-              <p className="small">{artist.data.bio}</p>
-              <Link to={`/artists/${artist.data.id}`} className="small strong">
-                View profile
-              </Link>
-            </div>
+        {(isOwner || isAdmin || verified) && (
+          <div className="sticky-actions kg-actions">
+            {isOwner && (
+              <LinkButton to={`/studio/work/${work.id}`} icon={<Icon.Edit />} block>
+                Edit in studio
+              </LinkButton>
+            )}
+            {isAdmin && (
+              <LinkButton to={`/admin/artists/${work.artistId}`} icon={<Icon.Admin />} block>
+                Review in Kofi admin
+              </LinkButton>
+            )}
+            {verified && (
+              <>
+                <Button tone="secondary" icon={<Icon.Shortlist />} onClick={() => setShortlistOpen(true)} aria-haspopup="dialog">
+                  Add to shortlist
+                </Button>
+                <Button icon={<Icon.Mail />} onClick={() => setIntroOpen(true)} aria-haspopup="dialog">
+                  Request introduction
+                </Button>
+              </>
+            )}
           </div>
-        </section>
-      )}
+        )}
+        {!work.canEdit && <CuratorAccessNotice viewer={viewer} />}
+
+        {artist.data && (
+          <section className="panel kg-artist-card" aria-labelledby="kg-about">
+            <div className="row" style={{ alignItems: 'flex-start' }}>
+              <Avatar name={artist.data.workingName} color={artist.data.avatarColor} />
+              <div className="stack--sm" style={{ minWidth: 0, flex: 1 }}>
+                <h2 id="kg-about" className="h3">
+                  About {artist.data.workingName}
+                </h2>
+                <p className="small muted">{[artist.data.regionLabel, cap(artist.data.careerStage)].filter(Boolean).join(', ')}</p>
+                <p className="small">{artist.data.bio}</p>
+                <Link to={`/artists/${artist.data.id}`} className="small strong">
+                  View profile
+                </Link>
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
 
       {others.length > 0 && (
-        <section className="stack" aria-labelledby="kg-more">
-          <h2 id="kg-more" className="h2">
+        <section className="stack--lg kg-artwork__more" aria-labelledby="kg-more">
+          <h2 id="kg-more" className="h2 kg-sec-title">
             More by {work.artistWorkingName}
           </h2>
           <ul className="kg-rail">

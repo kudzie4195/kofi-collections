@@ -247,15 +247,17 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
  * `back` may be `true` (go back, or to `/` when the app was opened on a deep link)
  * or a path string (always go there — use when there is no sensible history).
  */
-export function TopBar({ title, back, right }: { title: string; back?: boolean | string; right?: ReactNode }) {
+export function TopBar({ title, back, right, home }: { title: string; back?: boolean | string; right?: ReactNode; home?: boolean }) {
   const nav = useNavigate();
   const goBack = () => {
     if (typeof back === 'string') return nav(back);
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     return idx > 0 ? nav(-1) : nav('/');
   };
+  // The home screen's bar repeats the nav wordmark; on desktop it is visually hidden (h1 stays in the DOM).
+  const isHome = home ?? (!back && title === 'Kofi Collections');
   return (
-    <header className="topbar">
+    <header className={isHome ? 'topbar topbar--home' : 'topbar'}>
       <div className="container container--wide topbar__inner">
         {back && (
           <button type="button" className="topbar__back" aria-label="Back" onClick={goBack}>
@@ -341,30 +343,53 @@ export function GallerySkeleton({ n = 6 }: { n?: number }) {
   );
 }
 
+/** v1 avatar colours (still stored on older records) → the Kofi Noir brand set. */
+const AVATAR_BRAND: Record<string, string> = {
+  '#2436f5': '#4f6a25', // cobalt → deep green
+  '#ff5c39': '#c8322b', // coral → red
+  '#cfff4a': '#7fa344', // lime → green
+  '#ffd23f': '#e3b23c', // butter → gold
+  '#7b61ff': '#f3eee6', // violet → cream
+  '#5b41e6': '#f3eee6', // violet (seed) → cream
+  '#0fa3b1': '#7fa344', // teal → green
+  '#16122b': '#242424', // ink → charcoal
+  '#6b6684': '#242424', // v1 public grey → charcoal
+};
+export const AVATAR_COLORS = ['#c8322b', '#e3b23c', '#7fa344', '#4f6a25', '#f3eee6', '#242424'] as const;
+
+/** Any stored avatar colour, shown in the brand palette. Unknown hexes pass through. */
+export function brandAvatarColor(color: string): string {
+  return AVATAR_BRAND[color.trim().toLowerCase()] ?? color;
+}
+
 export function Avatar({ name, color, size = 'md' }: { name: string; color: string; size?: 'md' | 'lg' }) {
   const initials = name
+    .replace(/[^\p{L}\p{N}\s'-]/gu, '')
     .split(/\s+/)
+    .filter(Boolean)
     .slice(0, 2)
     .map((s) => s[0]?.toUpperCase() ?? '')
     .join('');
+  const bg = brandAvatarColor(color);
   return (
-    <span className={`avatar ${size === 'lg' ? 'avatar--lg' : ''}`} style={{ background: color, color: inkFor(color), textShadow: 'none' }} aria-hidden="true">
+    <span className={`avatar ${size === 'lg' ? 'avatar--lg' : ''}`} style={{ background: bg, color: inkFor(bg), textShadow: 'none' }} aria-hidden="true">
       {initials}
     </span>
   );
 }
 
-/** White or ink text, whichever has the higher contrast on a hex background. */
+/** Black or cream text, whichever has the higher contrast on a hex background. */
 export function inkFor(hex: string): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return '#fff';
+  if (!m) return '#f3eee6';
   const n = parseInt(m[1]!, 16);
   const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
     const s = c / 255;
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   }) as [number, number, number];
   const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? '#16122B' : '#fff';
+  // contrast against #0a0a0a (L≈0.003) vs #f3eee6 (L≈0.85)
+  return (L + 0.05) / 0.053 > 0.9 / (L + 0.05) ? '#0a0a0a' : '#f3eee6';
 }
 
 export function StatusDot({ status }: { status: string }) {
@@ -493,5 +518,5 @@ export function Toasts() {
 }
 
 export function FictionalFooter() {
-  return <p className="fictional">All artists, works and institutions shown are fictional sample content.</p>;
+  return <p className="fictional">Sample artists and institutions are fictional. Artwork photography © the artists, via koficollections.org.</p>;
 }
