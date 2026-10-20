@@ -1,56 +1,79 @@
-/* Kofi Collections — design tokens
-   Palette: cobalt / coral / lime / butter on lilac-white, ink for text.
-   Shadows are hard, two-tone offsets (a wall-label pinned to a wall), never soft grey. */
+/* Kofi Collections — design tokens ("Kofi Noir")
+   Palette lifted from koficollections.org: gallery black, warm off-white, and the three
+   brush-stroke colours of the Ghana star — red, gold, green. Dark ground only: artwork
+   is the colour, the chrome stays out of its way. Hairline rules, no boxes, no drop shadows. */
 
 :root {
-  --cobalt: #2436f5;
-  --cobalt-deep: #1623b8;
-  --coral: #ff5c39;
-  --coral-deep: #d8421f;
-  --lime: #cfff4a;
-  --lime-deep: #a8d61b;
-  --butter: #ffd23f;
-  --butter-deep: #e0b000;
-  --violet: #7b61ff;
-  --ink: #16122b;
-  --ink-2: #3a3550;
-  --ink-3: #585370;
-  --paper: #f4f2fa;
-  --paper-2: #ffffff;
-  --paper-3: #e9e6f4;
-  --line: #16122b;
-  --line-soft: rgba(22, 18, 43, 0.14);
-  --danger: #b5330f;
-  --ok: #176b40;
-  --kofi-ink: #7a6000;
+  /* brand */
+  --black: #0a0a0a;
+  --black-2: #121212;
+  --black-3: #1a1a1a;
+  --black-4: #242424;
+  --cream: #f3eee6;
+  --cream-2: #cfc8bc;
+  --cream-3: #928b7f;
+  --red: #c8322b;
+  --red-bright: #e34a40;
+  --gold: #e3b23c;
+  --gold-deep: #b98a1c;
+  --green: #7fa344;
+  --green-deep: #4f6a25;
 
-  --accent: var(--cobalt);
-  --accent-ink: #ffffff;
-  --accent-2: var(--coral);
+  /* legacy tone names used by screens — remapped onto the brand palette */
+  --cobalt: var(--green-deep);
+  --cobalt-deep: #34481a;
+  --coral: var(--red);
+  --coral-deep: #9c241e;
+  --lime: var(--green);
+  --lime-deep: var(--green-deep);
+  --butter: var(--gold);
+  --butter-deep: var(--gold-deep);
+  --violet: var(--gold);
+  --ink: var(--black);
+  --ink-2: var(--black-3);
+  --ink-3: var(--black-4);
+  --paper: var(--cream);
+  --paper-2: var(--cream);
+  --paper-3: var(--cream-2);
 
-  --bg: var(--paper);
-  --surface: var(--paper-2);
-  --surface-2: var(--paper-3);
-  --text: var(--ink);
-  --text-2: var(--ink-2);
-  --text-3: var(--ink-3);
+  --line: rgba(243, 238, 230, 0.16);
+  --line-soft: rgba(243, 238, 230, 0.09);
+  --line-strong: var(--cream);
+  --danger: #ff8a7a;
+  --ok: #9ec45e;
+  --kofi-ink: var(--gold);
 
-  --font-display: 'Syne', 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
-  --font-body: 'Instrument Sans', -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  --accent: var(--cream);
+  --accent-ink: var(--black);
+  --accent-2: var(--red);
 
-  /* type scale — 1.25 ratio from 16 */
+  --bg: var(--black);
+  --surface: var(--black-2);
+  --surface-2: var(--black-3);
+  --surface-3: var(--black-4);
+  --text: var(--cream);
+  --text-2: var(--cream-2);
+  --text-3: var(--cream-3);
+
+  --font-display: 'Instrument Serif', 'Times New Roman', Georgia, serif;
+  --font-body: 'Jost', 'Futura', 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
+  --font-label: var(--font-body);
+  --track: 0.14em;
+  --track-wide: 0.22em;
+
+  /* type scale — serif display runs large, sans labels run small */
   --fs-xs: 0.75rem;
   --fs-sm: 0.875rem;
   --fs-md: 1rem;
   --fs-lg: 1.25rem;
-  --fs-xl: 1.5625rem;
-  --fs-2xl: 1.953rem;
-  --fs-3xl: 2.441rem;
-  --fs-4xl: 3.052rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.125rem;
+  --fs-3xl: 2.75rem;
+  --fs-4xl: 3.5rem;
 
-  --radius-sm: 4px;
-  --radius-md: 10px;
-  --radius-lg: 20px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
   --radius-pill: 999px;
 
   --space-1: 4px;
@@ -61,82 +84,48 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+  --space-9: 96px;
 
-  --gutter: 16px;
-  --content-max: 720px;
-  --wide-max: 1120px;
+  --gutter: 20px;
+  --content-max: 760px;
+  --wide-max: 1280px;
 
-  --shadow-pin: 4px 4px 0 var(--ink);
-  --shadow-pin-accent: 4px 4px 0 var(--accent);
-  --shadow-pin-lg: 8px 8px 0 var(--ink);
-  --shadow-float: 0 12px 32px -12px rgba(22, 18, 43, 0.35);
+  /* shadows exist only for floating layers (sheets, toasts) — never on cards */
+  --shadow-pin: none;
+  --shadow-pin-accent: none;
+  --shadow-pin-lg: none;
+  --shadow-float: 0 24px 64px -24px rgba(0, 0, 0, 0.9);
 
   --tabbar-h: 64px;
   --topbar-h: 56px;
+  --nav-h: 76px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur-fast: 140ms;
-  --dur-med: 240ms;
+  --dur-fast: 160ms;
+  --dur-med: 280ms;
 
-  color-scheme: light;
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #110e22;
-    --surface: #1b1731;
-    --surface-2: #262040;
-    --text: #f4f2fa;
-    --text-2: #cfcbe3;
-    --text-3: #9a95b8;
-    --line: #f4f2fa;
-    --line-soft: rgba(244, 242, 250, 0.16);
-    --accent: var(--lime);
-    --accent-ink: var(--ink);
-    --accent-2: var(--coral);
-    --shadow-pin: 4px 4px 0 var(--lime);
-    --shadow-pin-accent: 4px 4px 0 var(--coral);
-    --shadow-pin-lg: 8px 8px 0 var(--lime);
-    --danger: #ff9a7e;
-  --ok: #6fe3a1;
-  --kofi-ink: #ffd23f;
-  color-scheme: dark;
+@media (min-width: 900px) {
+  :root {
+    --gutter: 40px;
   }
 }
 
-:root[data-theme='dark'] {
-  --bg: #110e22;
-  --surface: #1b1731;
-  --surface-2: #262040;
-  --text: #f4f2fa;
-  --text-2: #cfcbe3;
-  --text-3: #9a95b8;
-  --line: #f4f2fa;
-  --line-soft: rgba(244, 242, 250, 0.16);
-  --accent: var(--lime);
-  --accent-ink: var(--ink);
-  --accent-2: var(--coral);
-  --shadow-pin: 4px 4px 0 var(--lime);
-  --shadow-pin-accent: 4px 4px 0 var(--coral);
-  --shadow-pin-lg: 8px 8px 0 var(--lime);
-  --danger: #ff9a7e;
-  --ok: #6fe3a1;
-  --kofi-ink: #ffd23f;
-  color-scheme: dark;
-}
-
-/* Medium → accent mapping. Used by wall labels and chips so every medium has a color. */
-[data-medium='painting'] { --m: var(--cobalt); --m-ink: #fff; }
-[data-medium='drawing'] { --m: var(--ink); --m-ink: #fff; }
-[data-medium='printmaking'] { --m: #5b41e6; --m-ink: #fff; }
-[data-medium='sculpture'] { --m: var(--coral); --m-ink: var(--ink); }
-[data-medium='ceramics'] { --m: var(--butter); --m-ink: var(--ink); }
-[data-medium='textile'] { --m: var(--lime); --m-ink: var(--ink); }
-[data-medium='photography'] { --m: #0fa3b1; --m-ink: var(--ink); }
-[data-medium='video'] { --m: #0fa3b1; --m-ink: var(--ink); }
-[data-medium='installation'] { --m: #c43a17; --m-ink: #fff; }
-[data-medium='mixed media'] { --m: #5b41e6; --m-ink: #fff; }
-[data-medium='digital'] { --m: var(--cobalt-deep); --m-ink: #fff; }
-[data-medium='performance'] { --m: var(--butter-deep); --m-ink: var(--ink); }
+/* Medium → brush colour. Every medium gets one of the three strokes (or cream),
+   used for the hairline accent on wall labels and the chip fill when selected. */
+[data-medium='painting'] { --m: var(--red); --m-ink: var(--cream); }
+[data-medium='drawing'] { --m: var(--cream); --m-ink: var(--black); }
+[data-medium='printmaking'] { --m: var(--gold); --m-ink: var(--black); }
+[data-medium='sculpture'] { --m: var(--green); --m-ink: var(--black); }
+[data-medium='ceramics'] { --m: var(--gold); --m-ink: var(--black); }
+[data-medium='textile'] { --m: var(--red); --m-ink: var(--cream); }
+[data-medium='photography'] { --m: var(--cream); --m-ink: var(--black); }
+[data-medium='video'] { --m: var(--green); --m-ink: var(--black); }
+[data-medium='installation'] { --m: var(--gold); --m-ink: var(--black); }
+[data-medium='mixed media'] { --m: var(--red); --m-ink: var(--cream); }
+[data-medium='digital'] { --m: var(--green); --m-ink: var(--black); }
+[data-medium='performance'] { --m: var(--gold); --m-ink: var(--black); }

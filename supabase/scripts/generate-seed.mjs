@@ -198,12 +198,15 @@ out(
 );
 out();
 
-out('-- Seed images are inline SVG placeholders (data: URLs), exactly as in mock mode.');
+out('-- Bundled photographs (public/art/<name>.jpg in the app) become storage refs: upload each file to');
+out('-- artwork-images/<artist uuid>/<name>.jpg as that artist (supabase/scripts/upload-art.sh) before seeding.');
+out('-- Works without a photograph keep their inline SVG placeholder (data: URL), exactly as in mock mode.');
+const imgSrc = (w, im) => (im.src.startsWith('/art/') ? `storage:artwork-images/${U(w.artistId)}/${im.src.slice('/art/'.length)}` : im.src);
 out('insert into kofi.demo_artwork_images (id, artwork_id, src, alt, is_primary, metadata_stripped, position, created_at) values');
 out(
   seed.artworks
     .flatMap((w) =>
-      w.images.map((im, i) => `  (${uuid(im.id)}, ${uuid(w.id)}, ${s(im.src)}, ${s(im.alt)}, ${b(im.isPrimary)}, ${b(im.metadataStripped)}, ${i}, ${ts(w.createdAt)})`),
+      w.images.map((im, i) => `  (${uuid(im.id)}, ${uuid(w.id)}, ${s(imgSrc(w, im))}, ${s(im.alt)}, ${b(im.isPrimary)}, ${b(im.metadataStripped)}, ${i}, ${ts(w.createdAt)})`),
     )
     .join(',\n') + ';',
 );

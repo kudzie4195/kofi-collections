@@ -16,8 +16,9 @@ function Layout() {
   useEffect(() => {
     if (!isNative()) return;
     import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
-      const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(() => undefined);
+      // The app is dark-only (gallery black), so the status bar is always light-on-dark.
+      StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
+      StatusBar.setBackgroundColor({ color: '#0a0a0a' }).catch(() => undefined);
     });
   }, []);
   return (

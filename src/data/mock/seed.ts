@@ -44,8 +44,15 @@ export const DEMO_USERS = {
   admin: 'user_quincy',
 } as const;
 
+/**
+ * Demo images. Works with a bundled photograph use it (public/art/*.jpg — artwork
+ * photography from koficollections.org, re-encoded without metadata); the rest fall
+ * back to a deterministic generated placeholder so the demo never depends on the network.
+ */
+export const BUNDLED_ART = new Set(['mara1', 'mara2', 'mara3', 'tobias1', 'june1', 'june2', 'june3', 'deshawn1', 'deshawn2', 'priya1', 'priya2']);
 function img(seed: string, medium: Artwork['medium'], alt: string, isPrimary = true): Artwork['images'][number] {
-  return { id: `img_${seed}`, src: placeholderArt(seed, medium), alt, isPrimary, metadataStripped: true };
+  const src = BUNDLED_ART.has(seed) ? `/art/${seed}.jpg` : placeholderArt(seed, medium);
+  return { id: `img_${seed}`, src, alt, isPrimary, metadataStripped: true };
 }
 
 export function buildSeed(): MockState {
@@ -174,8 +181,8 @@ export function buildSeed(): MockState {
       medium: 'painting',
       materials: ['oil on linen'],
       dimensions: { height: 152, width: 122, depth: 4, unit: 'cm' },
-      description: 'A wet street reflecting a row of shop signs. Built from eleven glazes over a cadmium ground.',
-      images: [img('mara1', 'painting', 'Blue and coral ellipses layered over a deep ground')],
+      description: 'A face drawn twice over itself in black brush and red spray, on a ground the colour of wet brick. Eleven passes until the second face reads as the reflection of the first.',
+      images: [img('mara1', 'painting', 'Face painted in black brush strokes and red spray over a brown ground')],
       status: 'available',
       rightsNote: '© Mara Oyelaran. Reproduction by permission only.',
       price: { amount: 9800, currency: 'USD' },
@@ -194,8 +201,8 @@ export function buildSeed(): MockState {
       medium: 'painting',
       materials: ['oil on panel'],
       dimensions: { height: 30, width: 24, unit: 'cm' },
-      description: 'One of a series of studies made in the studio doorway during rain.',
-      images: [img('mara2', 'painting', 'Small warm composition with layered ovals')],
+      description: 'A figure submerged in turquoise, painted wet-into-wet in the studio doorway during rain. One of a series.',
+      images: [img('mara2', 'painting', 'Figure in deep blue against a turquoise ground')],
       status: 'available',
       rightsNote: '© Mara Oyelaran.',
       price: { amount: 1400, currency: 'USD' },
@@ -215,7 +222,7 @@ export function buildSeed(): MockState {
       materials: ['charcoal on paper', 'fixative'],
       dimensions: { height: 22, width: 30, unit: 'in' },
       description: 'Preparatory drawing for a public-art proposal. Not for sale.',
-      images: [img('mara3', 'drawing', 'Gestural charcoal strokes')],
+      images: [img('mara3', 'drawing', 'Line drawing of two figures with washes of yellow and blue')],
       status: 'not for sale',
       rightsNote: '© Mara Oyelaran. Study only.',
       priceVisibility: 'private',
@@ -232,8 +239,8 @@ export function buildSeed(): MockState {
       medium: 'installation',
       materials: ['stoneware', 'ash glaze', 'steel plinth'],
       dimensions: { height: 110, width: 240, depth: 90, unit: 'cm' },
-      description: 'Twelve wood-fired vessels on a single plinth, each leaning toward the one beside it.',
-      images: [img('tobias1', 'installation', 'Tall rounded forms clustered on a base')],
+      description: 'Installation view: a painted mask in a hand-finished frame, one of twelve staged on easels so they stand like a crowd.',
+      images: [img('tobias1', 'installation', 'Installation view: a painted mask in a hand-finished frame on an easel')],
       status: 'on hold',
       rightsNote: '© Tobias Reinholt. Installation requires artist supervision.',
       price: { amount: 24000, currency: 'USD' },
@@ -291,8 +298,8 @@ export function buildSeed(): MockState {
       medium: 'textile',
       materials: ['reclaimed industrial thread', 'hand-dyed wool', 'cedar batten'],
       dimensions: { height: 180, width: 95, depth: 6, unit: 'cm' },
-      description: 'A wall hanging that changes color as it is touched; the lanolin in the wool darkens with hands.',
-      images: [img('june1', 'textile', 'Horizontal woven bands in lime, ink and butter')],
+      description: 'A dress built from hundreds of hand-stitched feathers over a printed ground. It changes as it is touched; the quills lift and settle.',
+      images: [img('june1', 'textile', 'A dress built from hundreds of hand-stitched feathers over a printed ground')],
       status: 'available',
       rightsNote: '© June Takahashi-Bell. Touching encouraged.',
       price: { amount: 2600, currency: 'CAD' },
@@ -311,8 +318,8 @@ export function buildSeed(): MockState {
       medium: 'textile',
       materials: ['cotton', 'linen', 'copper wire'],
       dimensions: { height: 12, width: 12, unit: 'in' },
-      description: 'Four small square studies. Sold as a set.',
-      images: [img('june2', 'textile', 'Small square woven study')],
+      description: 'Mask study in woven and beaded pattern on violet, bordered in a dotted lattice. Four studies, sold as a set.',
+      images: [img('june2', 'textile', 'Mask study in woven and beaded pattern on violet with a dotted border')],
       status: 'available',
       rightsNote: '© June Takahashi-Bell.',
       price: { amount: 900, currency: 'CAD' },
@@ -331,8 +338,8 @@ export function buildSeed(): MockState {
       medium: 'mixed media',
       materials: ['wool', 'found plastic'],
       dimensions: { height: 60, width: 60, unit: 'cm' },
-      description: 'Not ready to show yet.',
-      images: [img('june3', 'mixed media', 'Draft work')],
+      description: 'Figure in a green beaded headdress and patterned robe. Not ready to show yet.',
+      images: [img('june3', 'mixed media', 'Figure in a green beaded headdress and patterned robe, in progress')],
       status: 'not for sale',
       rightsNote: '© June Takahashi-Bell.',
       priceVisibility: 'private',
@@ -349,8 +356,8 @@ export function buildSeed(): MockState {
       medium: 'photography',
       materials: ['archival pigment print', 'Hahnemühle Photo Rag'],
       dimensions: { height: 24, width: 36, unit: 'in' },
-      description: 'Edition of 5. Print 2/5 available.',
-      images: [img('deshawn1', 'photography', 'Two-tone horizon with a bright disc')],
+      description: 'Opening night, photographed from the floor: a visitor between two easels under warm gallery light. Edition of 5, print 2/5 available.',
+      images: [img('deshawn1', 'photography', 'Opening night photographed from the floor: a visitor between two easels under warm gallery light')],
       status: 'available',
       rightsNote: '© DeShawn Ferris. Edition of 5.',
       price: { amount: 2200, currency: 'USD' },
@@ -369,8 +376,8 @@ export function buildSeed(): MockState {
       medium: 'video',
       materials: ['single-channel video', '4K', '11 min loop'],
       dimensions: { height: 55, width: 98, unit: 'in' },
-      description: 'Displayed on a 110-inch screen. Dimensions are the projection size.',
-      images: [img('deshawn2', 'video', 'Wide dark frame with scan lines')],
+      description: 'Ink blooming across wet paper, looped. Displayed on a 110-inch screen; dimensions are the projection size.',
+      images: [img('deshawn2', 'video', 'Still from a loop of ink blooming across wet paper in magenta, olive and gold')],
       status: 'available',
       rightsNote: '© DeShawn Ferris. Licensing available for institutional display.',
       price: { amount: 6500, currency: 'USD' },
@@ -389,8 +396,8 @@ export function buildSeed(): MockState {
       medium: 'printmaking',
       materials: ['screen print', 'Stonehenge paper'],
       dimensions: { height: 70, width: 50, unit: 'cm' },
-      description: 'Edition of 20. Generated grid, hand-pulled.',
-      images: [img('priya1', 'digital', 'Colored grid squares')],
+      description: 'A profile in grey against cyan, butterflies lifting from the mouth. Edition of 20.',
+      images: [img('priya1', 'digital', 'Digital painting of a profile in grey against cyan, butterflies lifting from the mouth')],
       status: 'available',
       rightsNote: '© Priya Venkataraman.',
       price: { amount: 450, currency: 'USD' },
@@ -408,8 +415,8 @@ export function buildSeed(): MockState {
       medium: 'printmaking',
       materials: ['screen print', 'Stonehenge paper'],
       dimensions: { height: 70, width: 50, unit: 'cm' },
-      description: 'Edition of 20.',
-      images: [img('priya2', 'printmaking', 'Angular strokes')],
+      description: 'Soft-ground print in peach, blue and gold; two curved figures folding into one another. Edition of 20.',
+      images: [img('priya2', 'printmaking', 'Soft print in peach, blue and gold of two curved figures folding into one another')],
       status: 'available',
       rightsNote: '© Priya Venkataraman.',
       price: { amount: 450, currency: 'USD' },

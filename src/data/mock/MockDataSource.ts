@@ -755,7 +755,7 @@ export function validateArtwork(input: ArtworkInput): void {
   if (input.price && !/^[A-Z]{3}$/.test(input.price.currency)) throw new ValidationError('Currency must be a 3-letter code (USD, CAD).', 'price');
   if (input.visibility === 'public' && input.images.length === 0) throw new ValidationError('Add at least one image before publishing.', 'images');
   for (const im of input.images) {
-    if (!im.src.startsWith('data:image/') && !im.src.startsWith('storage:')) throw new ValidationError('Unsupported image.', 'images');
+    if (!im.src.startsWith('data:image/') && !im.src.startsWith('storage:') && !im.src.startsWith('/art/')) throw new ValidationError('Unsupported image.', 'images');
     if (im.src.length > MAX_IMAGE_BYTES * 1.37) throw new ValidationError('Images must be under 6 MB.', 'images');
   }
 }
