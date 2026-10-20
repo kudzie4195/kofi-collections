@@ -13,12 +13,13 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useInRouterContext, useNavigate } from 'react-router-dom';
 import type { ArtworkView, Medium, Visibility } from '@/domain/types';
 import { VISIBILITIES, VISIBILITY_HELP, VISIBILITY_LABEL } from '@/domain/types';
 import { formatDimensions, formatPrice } from '@/domain/units';
 import { useToast } from '@/state/toast';
 import { tap } from '@/native/platform';
+import './site.css';
 
 /* ---------- icons (inline, 24px grid) ---------- */
 const I = ({ d, ...rest }: { d: string } & React.SVGProps<SVGSVGElement>) => (
@@ -55,6 +56,16 @@ export const Icon = {
   Sort: (p: React.SVGProps<SVGSVGElement>) => <I d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 4v16" {...p} />,
   Ruler: (p: React.SVGProps<SVGSVGElement>) => <I d="M3 17l14-14 4 4L7 21zM8 10l2 2M11 7l2 2M14 4l2 2M5 13l2 2" {...p} />,
   Sparkle: (p: React.SVGProps<SVGSVGElement>) => <I d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM5 19l.7 2 .7-2 2-.7-2-.7-.7-2-.7 2-2 .7z" {...p} />,
+  Heart: (p: React.SVGProps<SVGSVGElement>) => <I d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z" {...p} />,
+  Discover: (p: React.SVGProps<SVGSVGElement>) => <I d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM16.2 7.8l-2.1 6.3-6.3 2.1 2.1-6.3z" {...p} />,
+  Calendar: (p: React.SVGProps<SVGSVGElement>) => <I d="M3 5h18v16H3zM16 3v4M8 3v4M3 10h18" {...p} />,
+  Megaphone: (p: React.SVGProps<SVGSVGElement>) => <I d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" {...p} />,
+  Journal: (p: React.SVGProps<SVGSVGElement>) => <I d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" {...p} />,
+  External: (p: React.SVGProps<SVGSVGElement>) => <I d="M7 17L17 7M8 7h9v9" {...p} />,
+  ArrowRight: (p: React.SVGProps<SVGSVGElement>) => <I d="M5 12h14M13 6l6 6-6 6" {...p} />,
+  Room: (p: React.SVGProps<SVGSVGElement>) => <I d="M4 18v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5M2 18h20M6 11V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4M5 18v2M19 18v2" {...p} />,
+  Phone: (p: React.SVGProps<SVGSVGElement>) => <I d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z" {...p} />,
+  Pin: (p: React.SVGProps<SVGSVGElement>) => <I d="M12 22s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" {...p} />,
 };
 
 /* ---------- buttons ---------- */
@@ -505,15 +516,113 @@ export function WallLabel({ work, to, unit = 'cm', corner }: { work: ArtworkView
 /* ---------- toasts ---------- */
 export function Toasts() {
   const { toasts, dismiss } = useToast();
+  // Toasts may be mounted outside the router (tests, boot); fall back to a hash link there.
+  const inRouter = useInRouterContext();
   if (!toasts.length) return null;
   return (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
-        <button key={t.id} type="button" className={`toast toast--${t.kind}`} onClick={() => dismiss(t.id)}>
-          {t.message}
-        </button>
-      ))}
+      {toasts.map((t) =>
+        t.action ? (
+          <div key={t.id} className={`toast toast--${t.kind} toast--action`} role="status">
+            <span className="toast__msg">{t.message}</span>
+            {inRouter ? (
+              <Link to={t.action.to} className="toast__link" onClick={() => dismiss(t.id)}>
+                {t.action.label}
+              </Link>
+            ) : (
+              <a href={`#${t.action.to}`} className="toast__link" onClick={() => dismiss(t.id)}>
+                {t.action.label}
+              </a>
+            )}
+            <button type="button" className="toast__x" aria-label="Dismiss" onClick={() => dismiss(t.id)}>
+              <Icon.Close />
+            </button>
+          </div>
+        ) : (
+          <button key={t.id} type="button" className={`toast toast--${t.kind}`} onClick={() => dismiss(t.id)}>
+            {t.message}
+          </button>
+        ),
+      )}
     </div>
+  );
+}
+
+/* ---------- save (heart) toggle ---------- */
+/** Heart toggle for "saved on this device". Purely presentational; the caller owns the state. */
+export function SaveButton({ saved, onToggle, size = 'md', className = '' }: { saved: boolean; onToggle: () => void; size?: 'md' | 'sm'; className?: string }) {
+  return (
+    <button
+      type="button"
+      className={['btn', 'btn--secondary', 'save-btn', size === 'sm' && 'btn--sm', className].filter(Boolean).join(' ')}
+      aria-pressed={saved}
+      onClick={() => {
+        void tap();
+        onToggle();
+      }}
+    >
+      <Icon.Heart fill={saved ? 'currentColor' : 'none'} />
+      {saved ? 'Saved' : 'Save'}
+    </button>
+  );
+}
+
+/* ---------- site footer (public pages) ---------- */
+const FOOTER_LINKS: { to: string; label: string }[] = [
+  { to: '/works', label: 'Works' },
+  { to: '/artists', label: 'Artists' },
+  { to: '/exhibitions', label: 'Exhibitions' },
+  { to: '/calls', label: 'Open calls' },
+  { to: '/journal', label: 'Journal' },
+  { to: '/whats-on', label: 'What’s on' },
+  { to: '/about', label: 'About' },
+  { to: '/saved', label: 'Saved' },
+];
+
+export function SiteFooter() {
+  return (
+    <footer className="site-footer" aria-label="Kofi Collections">
+      <div className="container container--wide site-footer__inner">
+        <div className="site-footer__brand">
+          <Link to="/" className="site-footer__mark" aria-label="Kofi Collections home">
+            <span className="star" aria-hidden="true" />
+            <span>
+              Kofi
+              <small>Collections</small>
+            </span>
+          </Link>
+          <p className="site-footer__tag">Promoting and amplifying underrepresented voices in the art world. Pittsburgh, since 2024.</p>
+          <span className="site-footer__strokes" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        </div>
+        <address className="site-footer__contact">
+          <span className="eyebrow">Visit &amp; contact</span>
+          <span>213 Smithfield St.</span>
+          <span>Pittsburgh, PA 15222</span>
+          <a href="mailto:info@koficollections.org">info@koficollections.org</a>
+          <a href="tel:+14123907677">412.390.7677</a>
+        </address>
+        <nav className="site-footer__nav" aria-label="Footer">
+          <span className="eyebrow">Explore</span>
+          <ul>
+            {FOOTER_LINKS.map((l) => (
+              <li key={l.to}>
+                <Link to={l.to}>{l.label}</Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+      <div className="container container--wide site-footer__base">
+        <p>Sample artists and institutions are fictional. Artwork photography © the artists, via koficollections.org.</p>
+        <a href="https://www.koficollections.org/" target="_blank" rel="noopener noreferrer">
+          koficollections.org ↗
+        </a>
+      </div>
+    </footer>
   );
 }
 

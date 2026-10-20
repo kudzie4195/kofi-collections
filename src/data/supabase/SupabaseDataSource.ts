@@ -2,26 +2,40 @@ import { createClient, type SupabaseClient, type SupabaseClientOptions } from '@
 import { applyFilters, type ArtworkFilters } from '@/domain/filters';
 import { artworksToCsv, buildArtistExport } from '@/domain/export';
 import type {
+  ApplicationRow,
+  ApplicationStatus,
   ArtDocument,
   Artist,
   ArtistView,
   ArtworkView,
   AuditEvent,
+  BuyerInquiryRow,
+  BuyerInquiryStatus,
+  CallPhase,
   CuratorStatus,
   DemoIdentity,
+  Exhibition,
   Inquiry,
   InquiryStatus,
   Institution,
+  OpenCall,
+  ProgrammeBase,
+  ProgrammeEvent,
+  ProgrammeImage,
   Role,
   Shortlist,
+  Story,
   Viewer,
 } from '@/domain/types';
-import { validateArtwork } from '../mock/MockDataSource';
+import { BUYER_INQUIRY_STATUSES } from '@/domain/types';
+import { callPhase, kofiToday, sortExhibitions, validateBuyerInquiry, type BuyerInquiryInput } from '@/domain/programme';
+import { cleanEvent, cleanExhibition, cleanOpenCall, cleanStory, validateArtwork } from '../mock/MockDataSource';
 import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
   type AdminArtistRow,
+  type ApplicationInput,
   type ArtistPatch,
   type ArtworkInput,
   type CuratorRequestInput,
@@ -30,6 +44,7 @@ import {
   type DocumentInput,
   type ExportResult,
   type InquiryRow,
+  type ProgrammeInput,
 } from '../DataSource';
 import { DEMO_PASSWORD, SUPABASE_DEMO_IDENTITIES, demoEmailForUserUuid } from './demo';
 import { mapPgError, SESSION_ENDED_MESSAGE, type PgErrorLike } from './errors';
@@ -38,11 +53,25 @@ import {
   artistPatchToRow,
   artworkInputToJson,
   DB_SCHEMA,
+  eventToRow,
+  exhibitionToRow,
   IMAGE_BUCKET,
   isUuid,
   normalizeImageSrc,
+  normalizeProgrammeImageSrc,
+  openCallToRow,
+  PROGRAMME_BUCKET,
+  PROGRAMME_PREFIX,
+  programmePathOf,
   STORAGE_PREFIX,
   storagePathOf,
+  storyToRow,
+  toApplicationRow,
+  toBuyerInquiryRow,
+  toExhibition,
+  toOpenCall,
+  toProgrammeEvent,
+  toStory,
   toArtist,
   toArtistView,
   toArtwork,
@@ -55,13 +84,19 @@ import {
   toInstitution,
   toShortlist,
   VAULT_BUCKET,
+  type ApplicationViewRow,
   type ArtistRow,
   type ArtistViewRow,
   type ArtworkRow,
   type ArtworkViewRow,
   type AuditRow,
+  type BuyerInquiryViewRow,
   type CuratorRowDb,
   type DocumentRow,
+  type EventRow,
+  type ExhibitionRow,
+  type OpenCallRow,
+  type StoryRow,
   type InquiryViewRow,
   type InstitutionRow,
   type ShortlistRowDb,
@@ -72,8 +107,21 @@ const IMAGE_URL_TTL_S = 3600;
 const VAULT_URL_TTL_S = 60;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** Tables whose changes the app reacts to (published in schema `kofi` by supabase/migrations/0006_realtime.sql). */
-const REALTIME_TABLES = ['artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents'] as const;
+/** Tables whose changes the app reacts to (published in schema `kofi` by supabase/migrations/0006_realtime.sql and 0008_programme.sql). */
+const REALTIME_TABLES = [
+  'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents',
+  'exhibitions', 'open_calls', 'events', 'stories', 'applications', 'buyer_inquiries',
+] as const;
+const GONE = 'That item no longer exists.';
+
+/** Programme tables, the view each is read through, and its folder in the kofi-programme bucket. */
+const PROGRAMME = {
+  exhibition: { table: 'exhibitions', view: 'exhibitions_visible', folder: 'exhibitions' },
+  open_call: { table: 'open_calls', view: 'open_calls_visible', folder: 'open-calls' },
+  event: { table: 'events', view: 'events_visible', folder: 'events' },
+  story: { table: 'stories', view: 'stories_visible', folder: 'stories' },
+} as const;
+type ProgrammeKind = keyof typeof PROGRAMME;
 
 /** Who the server says the caller is (kofi.whoami()). Never taken from the client's Viewer. */
 interface Me {
@@ -121,6 +169,8 @@ function kofi(db: SupabaseClient) {
 const SCHEMA_ARTWORKS = 'artworks_visible';
 const SCHEMA_ARTISTS = 'artists_visible';
 const SCHEMA_INQUIRIES = 'inquiries_visible';
+const SCHEMA_APPLICATIONS = 'applications_visible';
+const SCHEMA_BUYER_INQUIRIES = 'buyer_inquiries_visible';
 
 export class SupabaseDataSource implements DataSource {
   readonly mode = 'supabase' as const;
@@ -903,6 +953,377 @@ export class SupabaseDataSource implements DataSource {
     return rows.map(toInstitution);
   }
 
+  /* ------------------------------------------------------------ programme -- */
+  /*
+   * Reads come from the kofi.*_visible views: RLS returns published items (or
+   * drafts for Kofi admins) and the views have already dropped works, artists
+   * and exhibitions the caller may not see. Writes are admin-only table writes
+   * (RLS); input is validated with the same clean*() functions as mock mode,
+   * and the database re-checks with CHECK constraints / triggers. Images:
+   * data:image/ uploads go to the public kofi-programme bucket and are stored
+   * as 'storage:kofi-programme/<path>'; reads return the public URL.
+   */
+
+  private programmeImageResolver(db: SupabaseClient): (src: string) => string {
+    return (src: string) => {
+      const path = programmePathOf(src);
+      if (!path) return src;
+      return db.storage.from(PROGRAMME_BUCKET).getPublicUrl(path).data.publicUrl;
+    };
+  }
+
+  /**
+   * Normalise an incoming programme image to a storage ref: a public programme-bucket
+   * URL (from a read) → 'storage:kofi-programme/…'; a signed artwork-images URL (an
+   * admin picked a work's image) → 'storage:artwork-images/…', which the save step
+   * then copies into the programme bucket (the database only accepts programme refs).
+   */
+  private programmeInputImage(image: ProgrammeImage | undefined): ProgrammeImage | undefined {
+    if (!image || typeof image.src !== 'string') return image;
+    const programme = normalizeProgrammeImageSrc(image.src);
+    if (programme !== image.src) return { ...image, src: programme };
+    return { ...image, src: this.toRef(image.src) };
+  }
+
+  /** Uploads a data:image/ (JPEG/PNG/WebP) to the programme bucket; other sources are kept as they are. */
+  private async uploadProgrammeImage(db: SupabaseClient, kind: ProgrammeKind, image: ProgrammeImage | undefined): Promise<{ image?: ProgrammeImage; uploaded?: string }> {
+    const artPath = image ? storagePathOf(image.src) : undefined;
+    if (image && artPath) {
+      // A work's image chosen as the programme image: copy it into the public programme bucket,
+      // as mock mode does (it copies the image data). Admins may read every artwork image.
+      const { data, error } = await db.storage.from(IMAGE_BUCKET).download(artPath);
+      if (error || !data) throw new ValidationError('Could not copy that work’s image. Upload the image instead.', 'image');
+      const mime = data.type && UPLOADABLE_IMAGE_EXT[data.type] ? data.type : 'image/jpeg';
+      const path = `${PROGRAMME[kind].folder}/${newUuid()}.${UPLOADABLE_IMAGE_EXT[mime] ?? 'jpg'}`;
+      const up = await db.storage.from(PROGRAMME_BUCKET).upload(path, data, { contentType: mime, upsert: false });
+      if (up.error) throw mapPgError(up.error, 'Could not upload the image. Try again.');
+      return { image: { ...image, src: PROGRAMME_PREFIX + path }, uploaded: path };
+    }
+    if (!image || !image.src.startsWith('data:image/')) return image ? { image } : {};
+    const parsed = parseDataUrl(image.src);
+    const ext = parsed ? UPLOADABLE_IMAGE_EXT[parsed.mime] : undefined;
+    if (!parsed || !ext) return { image }; // e.g. an inline SVG: stored inline, like the seeded placeholders
+    const path = `${PROGRAMME[kind].folder}/${newUuid()}.${ext}`;
+    const { error } = await db.storage
+      .from(PROGRAMME_BUCKET)
+      .upload(path, new Blob([parsed.bytes], { type: parsed.mime }), { contentType: parsed.mime, upsert: false });
+    if (error) throw mapPgError(error, 'Could not upload the image. Try again.');
+    return { image: { ...image, src: PROGRAMME_PREFIX + path }, uploaded: path };
+  }
+
+  private refIdsOrThrow(clean: { artworkIds?: string[]; exhibitionId?: string; artistId?: string }): void {
+    // Ids that are not even UUIDs cannot exist here (same messages as the mock's checkProgrammeRefs()).
+    if ((clean.artworkIds ?? []).some((id) => !isUuid(id))) throw new ValidationError('One of the attached works no longer exists.', 'artworkIds');
+    if (clean.exhibitionId && !isUuid(clean.exhibitionId)) throw new ValidationError('That exhibition no longer exists.', 'exhibitionId');
+    if (clean.artistId && !isUuid(clean.artistId)) throw new ValidationError('That artist no longer exists.', 'artistId');
+  }
+
+  /**
+   * Create (no id) or update (id) one programme row as a Kofi admin. Every
+   * authored column is written, so cleared optional fields are cleared. The
+   * audit row (programme.save) is written by the table trigger.
+   */
+  private async saveProgrammeRow<T extends ProgrammeBase & { image?: ProgrammeImage }>(
+    viewer: Viewer,
+    kind: ProgrammeKind,
+    input: ProgrammeInput<T>,
+    clean: (input: ProgrammeInput<T>) => Omit<T, 'id' | 'createdAt' | 'updatedAt'>,
+    toRow: (clean: Omit<T, 'id' | 'createdAt' | 'updatedAt'>) => Record<string, unknown>,
+  ): Promise<{ db: SupabaseClient; id: string }> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    const prepared = { ...input, image: this.programmeInputImage(input.image) } as ProgrammeInput<T>;
+    const cleaned = clean(prepared);
+    this.refIdsOrThrow(cleaned as { artworkIds?: string[]; exhibitionId?: string; artistId?: string });
+    const { table } = PROGRAMME[kind];
+
+    let previousImage: string | undefined;
+    if (input.id) {
+      if (!isUuid(input.id)) throw new NotFoundError(GONE);
+      // Events have no image column.
+      const prev = await this.run<{ id: string; image?: { src?: string } | null } | null>(
+        kofi(db).from(table).select(kind === 'event' ? 'id' : 'id, image').eq('id', input.id).maybeSingle(),
+      );
+      if (!prev) throw new NotFoundError(GONE);
+      previousImage = prev.image?.src;
+    }
+
+    const { image, uploaded } = await this.uploadProgrammeImage(db, kind, cleaned.image);
+    const row = toRow({ ...cleaned, image } as Omit<T, 'id' | 'createdAt' | 'updatedAt'>);
+    let id: string;
+    try {
+      if (input.id) {
+        const rows = await this.run<{ id: string }[]>(kofi(db).from(table).update(row).eq('id', input.id).select('id'));
+        if (!rows.length) throw new NotFoundError(GONE);
+        id = input.id;
+      } else {
+        id = (await this.run<{ id: string }>(kofi(db).from(table).insert(row).select('id').single())).id;
+      }
+    } catch (e) {
+      if (uploaded) await this.removeObjects(db, PROGRAMME_BUCKET, [uploaded]);
+      throw e;
+    }
+    const oldPath = previousImage ? programmePathOf(previousImage) : undefined;
+    if (oldPath && previousImage !== image?.src) await this.removeObjects(db, PROGRAMME_BUCKET, [oldPath]);
+    this.emit();
+    return { db, id };
+  }
+
+  private async deleteProgrammeRow(viewer: Viewer, kind: ProgrammeKind, id: string): Promise<void> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    if (!isUuid(id)) throw new NotFoundError(GONE);
+    const { table } = PROGRAMME[kind];
+    const rows = await this.run<{ id: string; image?: { src?: string } | null }[]>(
+      kofi(db).from(table).delete().eq('id', id).select(kind === 'event' ? 'id' : 'id, image'),
+    );
+    if (!rows.length) throw new NotFoundError(GONE);
+    const path = rows[0]?.image?.src ? programmePathOf(rows[0].image.src) : undefined;
+    if (path) await this.removeObjects(db, PROGRAMME_BUCKET, [path]);
+    this.emit();
+  }
+
+  private async fetchProgramme<R>(db: SupabaseClient, kind: ProgrammeKind, id: string): Promise<R | undefined> {
+    if (!isUuid(id)) return undefined;
+    const row = await this.run<R | null>(kofi(db).from(PROGRAMME[kind].view).select('*').eq('id', id).maybeSingle());
+    return row ?? undefined;
+  }
+
+  /* ---- exhibitions ---- */
+
+  async listExhibitions(viewer: Viewer): Promise<Exhibition[]> {
+    const { db } = await this.ctx(viewer);
+    const rows = await this.run<ExhibitionRow[]>(kofi(db).from(PROGRAMME.exhibition.view).select('*'));
+    const resolve = this.programmeImageResolver(db);
+    return sortExhibitions(rows.map((r) => toExhibition(r, resolve)), kofiToday());
+  }
+
+  async getExhibition(viewer: Viewer, id: string): Promise<Exhibition | undefined> {
+    const { db } = await this.ctx(viewer);
+    const row = await this.fetchProgramme<ExhibitionRow>(db, 'exhibition', id);
+    return row ? toExhibition(row, this.programmeImageResolver(db)) : undefined;
+  }
+
+  async saveExhibition(viewer: Viewer, input: ProgrammeInput<Exhibition>): Promise<Exhibition> {
+    const { db, id } = await this.saveProgrammeRow<Exhibition>(viewer, 'exhibition', input, cleanExhibition, exhibitionToRow);
+    const row = await this.fetchProgramme<ExhibitionRow>(db, 'exhibition', id);
+    if (!row) throw new NotFoundError(GONE);
+    return toExhibition(row, this.programmeImageResolver(db));
+  }
+
+  async deleteExhibition(viewer: Viewer, id: string): Promise<void> {
+    // Calls and events that pointed at it stay, unlinked (ON DELETE SET NULL).
+    await this.deleteProgrammeRow(viewer, 'exhibition', id);
+  }
+
+  /* ---- open calls ---- */
+
+  async listOpenCalls(viewer: Viewer): Promise<OpenCall[]> {
+    const { db } = await this.ctx(viewer);
+    const rows = await this.run<OpenCallRow[]>(kofi(db).from(PROGRAMME.open_call.view).select('*'));
+    const resolve = this.programmeImageResolver(db);
+    return sortOpenCalls(rows.map((r) => toOpenCall(r, resolve)), kofiToday());
+  }
+
+  async getOpenCall(viewer: Viewer, id: string): Promise<OpenCall | undefined> {
+    const { db } = await this.ctx(viewer);
+    const row = await this.fetchProgramme<OpenCallRow>(db, 'open_call', id);
+    return row ? toOpenCall(row, this.programmeImageResolver(db)) : undefined;
+  }
+
+  async saveOpenCall(viewer: Viewer, input: ProgrammeInput<OpenCall>): Promise<OpenCall> {
+    const { db, id } = await this.saveProgrammeRow<OpenCall>(viewer, 'open_call', input, cleanOpenCall, openCallToRow);
+    const row = await this.fetchProgramme<OpenCallRow>(db, 'open_call', id);
+    if (!row) throw new NotFoundError(GONE);
+    return toOpenCall(row, this.programmeImageResolver(db));
+  }
+
+  /** A call with applications cannot be deleted: the server answers "This call has applications. Unpublish it instead." */
+  async deleteOpenCall(viewer: Viewer, id: string): Promise<void> {
+    await this.deleteProgrammeRow(viewer, 'open_call', id);
+  }
+
+  /* ---- events ---- */
+
+  async listEvents(viewer: Viewer): Promise<ProgrammeEvent[]> {
+    const { db } = await this.ctx(viewer);
+    const rows = await this.run<EventRow[]>(kofi(db).from(PROGRAMME.event.view).select('*'));
+    return rows.map(toProgrammeEvent).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt) || a.title.localeCompare(b.title));
+  }
+
+  async saveEvent(viewer: Viewer, input: ProgrammeInput<ProgrammeEvent>): Promise<ProgrammeEvent> {
+    const { db, id } = await this.saveProgrammeRow<ProgrammeEvent>(viewer, 'event', input, cleanEvent, eventToRow);
+    const row = await this.fetchProgramme<EventRow>(db, 'event', id);
+    if (!row) throw new NotFoundError(GONE);
+    return toProgrammeEvent(row);
+  }
+
+  async deleteEvent(viewer: Viewer, id: string): Promise<void> {
+    await this.deleteProgrammeRow(viewer, 'event', id);
+  }
+
+  /* ---- journal ---- */
+
+  async listStories(viewer: Viewer): Promise<Story[]> {
+    const { db } = await this.ctx(viewer);
+    const rows = await this.run<StoryRow[]>(kofi(db).from(PROGRAMME.story.view).select('*'));
+    const resolve = this.programmeImageResolver(db);
+    return rows
+      .map((r) => toStory(r, resolve))
+      .sort((a, b) => b.publishedOn.localeCompare(a.publishedOn) || b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getStory(viewer: Viewer, id: string): Promise<Story | undefined> {
+    const { db } = await this.ctx(viewer);
+    const row = await this.fetchProgramme<StoryRow>(db, 'story', id);
+    return row ? toStory(row, this.programmeImageResolver(db)) : undefined;
+  }
+
+  async saveStory(viewer: Viewer, input: ProgrammeInput<Story>): Promise<Story> {
+    const { db, id } = await this.saveProgrammeRow<Story>(viewer, 'story', input, cleanStory, storyToRow);
+    const row = await this.fetchProgramme<StoryRow>(db, 'story', id);
+    if (!row) throw new NotFoundError(GONE);
+    return toStory(row, this.programmeImageResolver(db));
+  }
+
+  async deleteStory(viewer: Viewer, id: string): Promise<void> {
+    await this.deleteProgrammeRow(viewer, 'story', id);
+  }
+
+  /* --------------------------------------------------------- applications -- */
+
+  /** Artists only — curators, visitors and admins acting as themselves are refused (as in mock mode). */
+  private requireApplicant(me: Me): string {
+    if (me.role !== 'artist') throw new ForbiddenError('Sign in as an artist to apply.');
+    if (!me.artistId) throw new NotFoundError('Artist profile not found.');
+    return me.artistId;
+  }
+
+  /** Attach the works each application lists, as this viewer may see them (artist: own; admin: all). */
+  private async applicationRows(db: SupabaseClient, rows: ApplicationViewRow[]): Promise<ApplicationRow[]> {
+    const ids = [...new Set(rows.flatMap((r) => r.artwork_ids ?? []))].filter(isUuid);
+    const works = ids.length
+      ? await this.projectArtworks(db, await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').in('id', ids)))
+      : [];
+    const byId = new Map(works.map((w) => [w.id, w]));
+    return rows
+      .map((r) => toApplicationRow(r, (r.artwork_ids ?? []).map((id) => byId.get(id)).filter((w): w is ArtworkView => !!w)))
+      .sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+
+  private async fetchApplication(db: SupabaseClient, id: string): Promise<ApplicationRow> {
+    const row = await this.run<ApplicationViewRow | null>(kofi(db).from(SCHEMA_APPLICATIONS).select('*').eq('id', id).maybeSingle());
+    if (!row) throw new NotFoundError('Application not found.');
+    return (await this.applicationRows(db, [row]))[0]!;
+  }
+
+  async listMyApplications(viewer: Viewer): Promise<ApplicationRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    const artistId = this.requireApplicant(me);
+    const rows = await this.run<ApplicationViewRow[]>(kofi(db).from(SCHEMA_APPLICATIONS).select('*').eq('artist_id', artistId));
+    return this.applicationRows(db, rows);
+  }
+
+  /** kofi.submit_application() re-runs validateApplication() server-side with the same messages and fields. */
+  async submitApplication(viewer: Viewer, input: ApplicationInput): Promise<ApplicationRow> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireApplicant(me);
+    if (!isUuid(input.callId)) throw new NotFoundError('Open call not found.');
+    const requested = Array.isArray(input.artworkIds) ? input.artworkIds.map(String) : [];
+    if (requested.some((id) => !isUuid(id))) throw new ValidationError('You can only attach your own works.', 'artworkIds');
+    const id = await this.rpc<string>(db, 'submit_application', {
+      p_call: input.callId,
+      p_artwork_ids: requested,
+      p_statement: typeof input.statement === 'string' ? input.statement : '',
+    });
+    this.emit();
+    return this.fetchApplication(db, id);
+  }
+
+  async withdrawApplication(viewer: Viewer, id: string): Promise<ApplicationRow> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireApplicant(me);
+    if (!isUuid(id)) throw new NotFoundError('Application not found.');
+    await this.rpc(db, 'withdraw_application', { p_id: id });
+    this.emit();
+    return this.fetchApplication(db, id);
+  }
+
+  async listApplications(viewer: Viewer, callId?: string): Promise<ApplicationRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    let q = kofi(db).from(SCHEMA_APPLICATIONS).select('*');
+    if (callId !== undefined) {
+      if (!isUuid(callId)) return [];
+      q = q.eq('call_id', callId);
+    }
+    return this.applicationRows(db, await this.run<ApplicationViewRow[]>(q));
+  }
+
+  /** Moves allowed by canMoveApplication(); notes: undefined keeps, '' clears. Checked again by kofi.set_application_status(). */
+  async setApplicationStatus(
+    viewer: Viewer,
+    id: string,
+    status: ApplicationStatus,
+    notes: { decisionNote?: string; staffNote?: string } = {},
+  ): Promise<ApplicationRow> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    if (!isUuid(id)) throw new NotFoundError('Application not found.');
+    await this.rpc(db, 'set_application_status', {
+      p_id: id,
+      p_status: status,
+      p_decision_note: notes.decisionNote ?? null,
+      p_staff_note: notes.staffNote ?? null,
+    });
+    this.emit();
+    return this.fetchApplication(db, id);
+  }
+
+  /* -------------------------------------------- collector ("buyer") inquiries -- */
+
+  /**
+   * Anyone may send one (a visitor uses the anon client). Returns only the id.
+   * The server re-validates, checks the work is discoverable by the caller,
+   * derives the artist and enforces BUYER_INQUIRY_DAILY_LIMIT per email.
+   */
+  async submitBuyerInquiry(viewer: Viewer, input: BuyerInquiryInput): Promise<{ id: string }> {
+    const problem = validateBuyerInquiry(input);
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    const { db } = await this.ctx(viewer);
+    if (input.artworkId && !isUuid(input.artworkId)) throw new NotFoundError('Artwork not found.');
+    const id = await this.rpc<string>(db, 'submit_buyer_inquiry', {
+      p_artwork: input.artworkId || null,
+      p_name: input.name,
+      p_email: input.email,
+      p_org: input.organization ?? null,
+      p_intent: input.intent,
+      p_message: input.message,
+      p_consent: input.consent === true,
+    });
+    this.emit();
+    return { id };
+  }
+
+  async listBuyerInquiries(viewer: Viewer): Promise<BuyerInquiryRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    const rows = await this.run<BuyerInquiryViewRow[]>(kofi(db).from(SCHEMA_BUYER_INQUIRIES).select('*'));
+    return rows.map(toBuyerInquiryRow).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+
+  async setBuyerInquiryStatus(viewer: Viewer, id: string, status: BuyerInquiryStatus, staffNote?: string): Promise<BuyerInquiryRow> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    if (!isUuid(id)) throw new NotFoundError('Inquiry not found.');
+    if (!BUYER_INQUIRY_STATUSES.includes(status)) throw new ValidationError('Unknown status.', 'status');
+    await this.rpc(db, 'set_buyer_inquiry_status', { p_id: id, p_status: status, p_staff_note: staffNote ?? null });
+    this.emit();
+    const row = await this.run<BuyerInquiryViewRow | null>(kofi(db).from(SCHEMA_BUYER_INQUIRIES).select('*').eq('id', id).maybeSingle());
+    if (!row) throw new NotFoundError('Inquiry not found.');
+    return toBuyerInquiryRow(row);
+  }
+
   /* ---------------------------------------------------------- demo helpers -- */
 
   /**
@@ -932,6 +1353,20 @@ function statusRank(s: Artist['status']): number {
 }
 function curatorRank(s: CuratorStatus): number {
   return { pending: 0, verified: 1, rejected: 2 }[s];
+}
+
+/** Same order as mock mode: open (closing soonest, no deadline last), upcoming (opening soonest), closed (most recently closed). */
+function sortOpenCalls(list: OpenCall[], today: string): OpenCall[] {
+  const rank: Record<CallPhase, number> = { open: 0, upcoming: 1, closed: 2 };
+  const far = '9999-12-31';
+  return [...list].sort((a, b) => {
+    const pa = callPhase(a, today);
+    const pb = callPhase(b, today);
+    if (pa !== pb) return rank[pa] - rank[pb];
+    if (pa === 'open') return (a.deadline ?? far).localeCompare(b.deadline ?? far) || a.title.localeCompare(b.title);
+    if (pa === 'upcoming') return a.opensOn.localeCompare(b.opensOn) || (a.deadline ?? far).localeCompare(b.deadline ?? far);
+    return (b.deadline ?? '').localeCompare(a.deadline ?? '');
+  });
 }
 
 /** Factory used by src/data/index.ts when VITE_DATA_MODE=supabase. */

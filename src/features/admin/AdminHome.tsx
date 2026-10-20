@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import type { ApplicationRow, BuyerInquiryRow } from '@/domain/types';
 import { useQuery } from '@/state/session';
 import { EmptyState, ErrorState, Icon, LinkButton, Skeleton, TopBar } from '@/ui';
 import { AuditList, loadAuditNames } from './AuditList';
@@ -36,15 +37,40 @@ function QueueTile({ to, n, label, hint, tone, icon }: TileProps) {
   );
 }
 
+function NavRow({ to, icon, title, sub }: { to: string; icon: ReactNode; title: string; sub: string }) {
+  return (
+    <li>
+      <Link to={to} className="list-row">
+        <span className="ad-nav__icon" aria-hidden="true">
+          {icon}
+        </span>
+        <span className="list-row__main">
+          <span className="list-row__title" style={{ display: 'block' }}>
+            {title}
+          </span>
+          <span className="list-row__sub">{sub}</span>
+        </span>
+        <Icon.Back className="row-chev" />
+      </Link>
+    </li>
+  );
+}
+
 export function AdminHome() {
   const q = useQuery(async (ds, v) => {
-    const [artists, curators, inquiries, works, audit, names] = await Promise.all([
+    const [artists, curators, inquiries, works, audit, names, apps, buyers, exhibitions, calls, events, stories] = await Promise.all([
       ds.listAllArtists(v),
       ds.listCurators(v),
       ds.listInquiries(v),
       ds.listArtworks(v),
       ds.listAudit(v, 8),
       loadAuditNames(ds, v),
+      ds.listApplications(v).catch(() => [] as ApplicationRow[]),
+      ds.listBuyerInquiries(v).catch(() => [] as BuyerInquiryRow[]),
+      ds.listExhibitions(v).catch(() => []),
+      ds.listOpenCalls(v).catch(() => []),
+      ds.listEvents(v).catch(() => []),
+      ds.listStories(v).catch(() => []),
     ]);
     return {
       pendingArtists: artists.filter((a) => a.status === 'pending').length,
@@ -54,6 +80,12 @@ export function AdminHome() {
       pendingInquiries: inquiries.filter((i) => i.status === 'pending').length,
       totalInquiries: inquiries.length,
       unreviewed: works.filter((w) => !w.reviewedAt).length,
+      toReview: apps.filter((a) => a.status === 'submitted' || a.status === 'shortlisted').length,
+      totalApps: apps.length,
+      newBuyers: buyers.filter((b) => b.status === 'new').length,
+      totalBuyers: buyers.length,
+      programmeCount: exhibitions.length + calls.length + events.length + stories.length,
+      drafts: [...exhibitions, ...calls, ...events, ...stories].filter((x) => !x.published).length,
       audit,
       names,
     };
@@ -75,7 +107,7 @@ export function AdminHome() {
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
           <div className="tiles admin-tiles" aria-busy="true" aria-label="Loading queue">
-            {[0, 1, 2, 3].map((i) => (
+            {[0, 1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} h={132} />
             ))}
           </div>
@@ -113,6 +145,22 @@ export function AdminHome() {
                 hint="Listings Kofi hasn’t checked yet"
                 tone="lime"
                 icon={<Icon.Gallery />}
+              />
+              <QueueTile
+                to="/admin/applications"
+                n={q.data.toReview}
+                label={q.data.toReview === 1 ? 'application to review' : 'applications to review'}
+                hint="Submitted or shortlisted, waiting on a decision"
+                tone="coral"
+                icon={<Icon.Doc />}
+              />
+              <QueueTile
+                to="/admin/collectors?status=new"
+                n={q.data.newBuyers}
+                label={q.data.newBuyers === 1 ? 'new collector inquiry' : 'new collector inquiries'}
+                hint="Reply from Kofi; artist contact stays private"
+                tone="cobalt"
+                icon={<Icon.Inbox />}
               />
             </nav>
 
@@ -160,6 +208,9 @@ export function AdminHome() {
                     <Icon.Back className="row-chev" />
                   </Link>
                 </li>
+                <NavRow to="/admin/programme" icon={<Icon.Calendar />} title="Programme" sub={`${q.data.programmeCount} exhibitions, calls, events and stories${q.data.drafts ? ` · ${q.data.drafts} ${q.data.drafts === 1 ? 'draft' : 'drafts'}` : ''}`} />
+                <NavRow to="/admin/applications" icon={<Icon.Doc />} title="Applications" sub={`${q.data.totalApps} to open calls`} />
+                <NavRow to="/admin/collectors" icon={<Icon.Inbox />} title="Collector inquiries" sub={`${q.data.totalBuyers} in total`} />
                 <li>
                   <Link to="/admin/activity" className="list-row">
                     <span className="ad-nav__icon" aria-hidden="true">

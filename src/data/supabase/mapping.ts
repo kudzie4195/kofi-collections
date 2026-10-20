@@ -3,6 +3,8 @@
  * types in src/domain/types.ts. No network, no supabase-js — unit-testable.
  */
 import type {
+  ApplicationRow,
+  ApplicationStatus,
   ArtDocument,
   Artist,
   ArtistView,
@@ -12,20 +14,32 @@ import type {
   ArtworkView,
   Artwork,
   AuditEvent,
+  BuyerInquiryRow,
+  BuyerInquiryStatus,
+  BuyerIntent,
   CareerStage,
   Curator,
   CuratorStatus,
   DocumentType,
+  EventKind,
+  Exhibition,
   Inquiry,
   InquiryStatus,
   Institution,
   InstitutionType,
   Medium,
+  OpenCall,
+  ProgrammeBase,
+  ProgrammeEvent,
+  ProgrammeImage,
   Region,
   RegionPrecision,
   Role,
   Shortlist,
+  Story,
+  StoryKind,
   Unit,
+  Venue,
   Visibility,
 } from '@/domain/types';
 import type { ArtistPatch, ArtworkInput, CuratorRow, InquiryRow } from '../DataSource';
@@ -605,4 +619,399 @@ export function artworkInputToJson(input: ArtworkInput): Record<string, unknown>
   };
   if (input.id) out.id = input.id;
   return out;
+}
+
+/* ============================================================ programme ==
+ * supabase/migrations/0008_programme.sql. Reads go through the *_visible
+ * views (artwork / artist / exhibition links already filtered for the caller);
+ * writes go to the base tables (admin, RLS) or the RPCs (applications,
+ * collector inquiries).
+ */
+
+/** Public bucket for programme images (exhibition / call / story heroes). */
+export const PROGRAMME_BUCKET = 'kofi-programme';
+export const PROGRAMME_PREFIX = `storage:${PROGRAMME_BUCKET}/`;
+
+/** 'storage:kofi-programme/<path>' → '<path>', else undefined. */
+export function programmePathOf(src: string): string | undefined {
+  return src.startsWith(PROGRAMME_PREFIX) ? src.slice(PROGRAMME_PREFIX.length) : undefined;
+}
+
+/** A public URL of the programme bucket → its 'storage:' ref (round-trips a read item into a save). */
+export function normalizeProgrammeImageSrc(src: string): string {
+  if (src.startsWith('storage:') || src.startsWith('data:') || src.startsWith('/art/')) return src;
+  const m = /\/storage\/v1\/object\/public\/kofi-programme\/([^?#]+)/.exec(src);
+  if (!m || !m[1]) return src;
+  return PROGRAMME_PREFIX + decodeURIComponent(m[1]);
+}
+
+const KOFI_TZ = 'America/New_York';
+
+/**
+ * timestamptz → ISO-8601 with the Kofi (Pittsburgh) offset, the same shape the
+ * mock seed uses for events: '2026-10-29T18:30:00-04:00'.
+ */
+export function toKofiOffsetIso(ts: Ts): string {
+  const t = Date.parse(ts);
+  if (Number.isNaN(t)) return ts;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: KOFI_TZ,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(t));
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const wall = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  const offsetMin = Math.round((wall - Math.floor(t / 1000) * 1000) / 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const sign = offsetMin < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMin);
+  return (
+    `${get('year')}-${pad(get('month'))}-${pad(get('day'))}T${pad(get('hour') % 24)}:${pad(get('minute'))}:${pad(get('second'))}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}
+
+interface ProgrammeBaseRow {
+  id: string;
+  sample: boolean;
+  published: boolean;
+  created_at: Ts;
+  updated_at: Ts;
+}
+
+interface ImageRowJson {
+  src: string;
+  alt: string;
+  credit?: string | null;
+}
+
+interface VenueRowJson {
+  name: string;
+  address?: string | null;
+  city: string;
+}
+
+/** kofi.exhibitions_visible */
+export interface ExhibitionRow extends ProgrammeBaseRow {
+  title: string;
+  subtitle: string | null;
+  starts_on: string;
+  ends_on: string | null;
+  venue: VenueRowJson | null;
+  summary: string;
+  body: string;
+  image: ImageRowJson | null;
+  artwork_ids: string[] | null;
+  external_url: string | null;
+  curated_by: string | null;
+}
+
+/** kofi.open_calls_visible */
+export interface OpenCallRow extends ProgrammeBaseRow {
+  title: string;
+  partner: string | null;
+  summary: string;
+  body: string;
+  eligibility: string;
+  mediums: Medium[] | null;
+  opens_on: string;
+  deadline: string | null;
+  max_works: number;
+  fee: string;
+  award: string | null;
+  image: ImageRowJson | null;
+  external_url: string | null;
+  exhibition_id: string | null;
+}
+
+/** kofi.events_visible */
+export interface EventRow extends ProgrammeBaseRow {
+  title: string;
+  kind: EventKind;
+  starts_at: Ts;
+  ends_at: Ts | null;
+  venue: VenueRowJson | null;
+  summary: string;
+  rsvp_url: string | null;
+  exhibition_id: string | null;
+}
+
+/** kofi.stories_visible */
+export interface StoryRow extends ProgrammeBaseRow {
+  title: string;
+  dek: string;
+  kind: StoryKind;
+  body: string;
+  author: string;
+  published_on: string;
+  artist_id: string | null;
+  artwork_ids: string[] | null;
+  image: ImageRowJson | null;
+}
+
+/** kofi.applications_visible (staff_note is NULL unless the caller is a Kofi admin). */
+export interface ApplicationViewRow {
+  id: string;
+  call_id: string;
+  artist_id: string;
+  artwork_ids: string[] | null;
+  statement: string;
+  status: ApplicationStatus;
+  decision_note: string | null;
+  staff_note: string | null;
+  created_at: Ts;
+  updated_at: Ts;
+  decided_at: Ts | null;
+  call_title: string | null;
+  call_deadline: string | null;
+  artist_working_name: string | null;
+}
+
+/** kofi.buyer_inquiries_visible (Kofi admins only). */
+export interface BuyerInquiryViewRow {
+  id: string;
+  artwork_id: string | null;
+  artist_id: string | null;
+  name: string;
+  email: string;
+  organization: string | null;
+  intent: BuyerIntent;
+  message: string;
+  status: BuyerInquiryStatus;
+  staff_note: string | null;
+  consented_at?: Ts | null;
+  created_at: Ts;
+  updated_at: Ts;
+  artwork_title: string | null;
+  artist_working_name: string | null;
+}
+
+function base(row: ProgrammeBaseRow): ProgrammeBase {
+  return { id: row.id, sample: !!row.sample, published: !!row.published, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
+}
+
+function toImage(im: ImageRowJson | null | undefined, resolve: (src: string) => string): ProgrammeImage | undefined {
+  if (!im || typeof im.src !== 'string') return undefined;
+  const out: ProgrammeImage = { src: resolve(im.src), alt: im.alt ?? '' };
+  if (im.credit) out.credit = im.credit;
+  return out;
+}
+
+function toVenue(v: VenueRowJson | null | undefined): Venue | undefined {
+  if (!v || typeof v.name !== 'string') return undefined;
+  const out: Venue = { name: v.name, city: v.city ?? '' };
+  if (v.address) out.address = v.address;
+  return out;
+}
+
+export function toExhibition(row: ExhibitionRow, resolve: (src: string) => string = (s) => s): Exhibition {
+  const ex: Exhibition = {
+    ...base(row),
+    title: row.title,
+    startsOn: row.starts_on,
+    summary: row.summary,
+    body: row.body ?? '',
+    artworkIds: [...(row.artwork_ids ?? [])],
+  };
+  if (row.subtitle) ex.subtitle = row.subtitle;
+  if (row.ends_on) ex.endsOn = row.ends_on;
+  const venue = toVenue(row.venue);
+  if (venue) ex.venue = venue;
+  const image = toImage(row.image, resolve);
+  if (image) ex.image = image;
+  if (row.external_url) ex.externalUrl = row.external_url;
+  if (row.curated_by) ex.curatedBy = row.curated_by;
+  return ex;
+}
+
+export function toOpenCall(row: OpenCallRow, resolve: (src: string) => string = (s) => s): OpenCall {
+  const c: OpenCall = {
+    ...base(row),
+    title: row.title,
+    summary: row.summary,
+    body: row.body ?? '',
+    eligibility: row.eligibility,
+    mediums: [...(row.mediums ?? [])],
+    opensOn: row.opens_on,
+    maxWorks: row.max_works,
+    fee: row.fee,
+  };
+  if (row.partner) c.partner = row.partner;
+  if (row.deadline) c.deadline = row.deadline;
+  if (row.award) c.award = row.award;
+  const image = toImage(row.image, resolve);
+  if (image) c.image = image;
+  if (row.external_url) c.externalUrl = row.external_url;
+  if (row.exhibition_id) c.exhibitionId = row.exhibition_id;
+  return c;
+}
+
+export function toProgrammeEvent(row: EventRow): ProgrammeEvent {
+  const e: ProgrammeEvent = {
+    ...base(row),
+    title: row.title,
+    kind: row.kind,
+    startsAt: toKofiOffsetIso(row.starts_at),
+    summary: row.summary,
+  };
+  if (row.ends_at) e.endsAt = toKofiOffsetIso(row.ends_at);
+  const venue = toVenue(row.venue);
+  if (venue) e.venue = venue;
+  if (row.rsvp_url) e.rsvpUrl = row.rsvp_url;
+  if (row.exhibition_id) e.exhibitionId = row.exhibition_id;
+  return e;
+}
+
+export function toStory(row: StoryRow, resolve: (src: string) => string = (s) => s): Story {
+  const s: Story = {
+    ...base(row),
+    title: row.title,
+    dek: row.dek,
+    kind: row.kind,
+    body: row.body,
+    author: row.author,
+    publishedOn: row.published_on,
+    artworkIds: [...(row.artwork_ids ?? [])],
+  };
+  if (row.artist_id) s.artistId = row.artist_id;
+  const image = toImage(row.image, resolve);
+  if (image) s.image = image;
+  return s;
+}
+
+/** applications_visible row → ApplicationRow; `works` are resolved by the caller (artworks_visible). */
+export function toApplicationRow(row: ApplicationViewRow, works: ArtworkView[]): ApplicationRow {
+  const a: ApplicationRow = {
+    id: row.id,
+    callId: row.call_id,
+    artistId: row.artist_id,
+    artworkIds: [...(row.artwork_ids ?? [])],
+    statement: row.statement,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    callTitle: row.call_title ?? 'A call that has been removed',
+    artistWorkingName: row.artist_working_name ?? 'Unknown artist',
+    works,
+  };
+  if (row.decision_note) a.decisionNote = row.decision_note;
+  if (row.staff_note) a.staffNote = row.staff_note;
+  if (row.decided_at) a.decidedAt = iso(row.decided_at);
+  if (row.call_deadline) a.callDeadline = row.call_deadline;
+  return a;
+}
+
+export function toBuyerInquiryRow(row: BuyerInquiryViewRow): BuyerInquiryRow {
+  const b: BuyerInquiryRow = {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    intent: row.intent,
+    message: row.message,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+  if (row.artwork_id) b.artworkId = row.artwork_id;
+  if (row.artist_id) b.artistId = row.artist_id;
+  if (row.organization) b.organization = row.organization;
+  if (row.staff_note) b.staffNote = row.staff_note;
+  if (row.artwork_title) b.artworkTitle = row.artwork_title;
+  if (row.artist_working_name) b.artistWorkingName = row.artist_working_name;
+  return b;
+}
+
+/* -------------------------------------------- programme: domain → database -- */
+// Every authored column is written on update (absent optional → NULL), so a
+// cleared field is really cleared — the mock replaces the whole item the same way.
+
+type Authored<T extends ProgrammeBase> = Omit<T, 'id' | 'createdAt' | 'updatedAt'>;
+
+function imageToJson(im: ProgrammeImage | undefined): ImageRowJson | null {
+  if (!im) return null;
+  const out: ImageRowJson = { src: im.src, alt: im.alt };
+  if (im.credit) out.credit = im.credit;
+  return out;
+}
+
+function venueToJson(v: Venue | undefined): VenueRowJson | null {
+  if (!v) return null;
+  const out: VenueRowJson = { name: v.name, city: v.city };
+  if (v.address) out.address = v.address;
+  return out;
+}
+
+export function exhibitionToRow(e: Authored<Exhibition>): Record<string, unknown> {
+  return {
+    title: e.title,
+    subtitle: e.subtitle ?? null,
+    starts_on: e.startsOn,
+    ends_on: e.endsOn ?? null,
+    venue: venueToJson(e.venue),
+    summary: e.summary,
+    body: e.body ?? '',
+    image: imageToJson(e.image),
+    artwork_ids: e.artworkIds ?? [],
+    external_url: e.externalUrl ?? null,
+    curated_by: e.curatedBy ?? null,
+    sample: !!e.sample,
+    published: !!e.published,
+  };
+}
+
+export function openCallToRow(c: Authored<OpenCall>): Record<string, unknown> {
+  return {
+    title: c.title,
+    partner: c.partner ?? null,
+    summary: c.summary,
+    body: c.body ?? '',
+    eligibility: c.eligibility,
+    mediums: c.mediums ?? [],
+    opens_on: c.opensOn,
+    deadline: c.deadline ?? null,
+    max_works: c.maxWorks,
+    fee: c.fee,
+    award: c.award ?? null,
+    image: imageToJson(c.image),
+    external_url: c.externalUrl ?? null,
+    exhibition_id: c.exhibitionId ?? null,
+    sample: !!c.sample,
+    published: !!c.published,
+  };
+}
+
+export function eventToRow(e: Authored<ProgrammeEvent>): Record<string, unknown> {
+  return {
+    title: e.title,
+    kind: e.kind,
+    starts_at: e.startsAt,
+    ends_at: e.endsAt ?? null,
+    venue: venueToJson(e.venue),
+    summary: e.summary,
+    rsvp_url: e.rsvpUrl ?? null,
+    exhibition_id: e.exhibitionId ?? null,
+    sample: !!e.sample,
+    published: !!e.published,
+  };
+}
+
+export function storyToRow(s: Authored<Story>): Record<string, unknown> {
+  return {
+    title: s.title,
+    dek: s.dek,
+    kind: s.kind,
+    body: s.body,
+    author: s.author,
+    published_on: s.publishedOn,
+    artist_id: s.artistId ?? null,
+    artwork_ids: s.artworkIds ?? [],
+    image: imageToJson(s.image),
+    sample: !!s.sample,
+    published: !!s.published,
+  };
 }

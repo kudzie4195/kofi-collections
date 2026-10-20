@@ -13,9 +13,9 @@ Kofi does share four things, and it names them so they cannot clash:
 | Shared object | What Kofi adds |
 |---|---|
 | `auth.users` | One trigger, `kofi_on_auth_user_created`, which creates a `kofi.profiles` row for **every** new user on the project (other-product sign-ups get Kofi role `public`). A failure in it is logged as a warning and never blocks a sign-up. |
-| `storage.buckets` | Two private buckets, `artwork-images` and `vault` |
-| `storage.objects` | Nine policies, all named `kofi …` |
-| `supabase_realtime` publication | Eight `kofi.*` tables |
+| `storage.buckets` | Two private buckets, `artwork-images` and `vault`, and one public bucket, `kofi-programme` (programme images, 0008) |
+| `storage.objects` | Thirteen policies, all named `kofi …` (nine from 0004, four `kofi programme …` from 0008) |
+| `supabase_realtime` publication | Fourteen `kofi.*` tables (eight from 0006, six programme tables from 0008) |
 
 The app reaches the schema with `supabase.schema('kofi')` for every table, view and RPC call, and subscribes to Realtime with `schema: 'kofi'` (`src/data/supabase/SupabaseDataSource.ts`). Storage calls do not involve a schema.
 
@@ -33,8 +33,9 @@ Migrations live in `supabase/migrations/` and run in filename order:
 | `0005_rpcs.sql` | `whoami`, `describe_access`, `log_audit`, `accept_consent`, `submit_for_review`, `save_artwork`, `export_my_data`, `request_verification`, `set_inquiry_status`, `set_artist_status`, `set_kofi_notes`, `mark_artwork_reviewed`, `set_curator_status` (all in `kofi`) |
 | `0006_realtime.sql` | Adds the eight main `kofi.*` tables to the `supabase_realtime` publication |
 | `0007_expose_schema.sql` | **Does not expose the schema** (see step 2). Grants everything in `kofi` to `service_role` and asks PostgREST to reload its schema cache |
+| `0008_programme.sql` | The programme (§9): six tables, five enums, six views, five RPCs, RLS, the public `kofi-programme` bucket + four storage policies, six realtime tables. Idempotent, one transaction, recorded in `kofi.applied_migrations` |
 
-**On the shared project — psql or the SQL editor (recommended).** Run each file above in order (0000 → 0007):
+**On the shared project — psql or the SQL editor (recommended).** Run each file above in order (0000 → 0008):
 
 ```bash
 for f in supabase/migrations/000*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || break; done
@@ -69,10 +70,11 @@ The seed is **generated** from the TypeScript seed so both modes hold the same r
 | File | Contents |
 |---|---|
 | `supabase/seed_auth.sql` | The 8 demo `auth.users` + `auth.identities` rows. **Creates real, sign-in-able accounts** with a published password in the shared `auth.users` table — do not run it on a project with real users unless you mean to. Inserting them also fires the other product's `auth.users` triggers (for example, it may create 8 `public.profiles` rows). The file header has the `delete from auth.users …` line that removes them again. |
-| `supabase/seed_content.sql` | Everything else, all in `kofi`: the snapshot tables `kofi.demo_*` (RLS on, no API grants), `kofi.kofi_demo_reset()`, then the reset itself, then the append-only consent / audit seed rows. Stops with an error if the demo auth users are missing. |
+| `supabase/seed_content.sql` | Everything else, all in `kofi`: the snapshot tables `kofi.demo_*` (RLS on, no API grants), `kofi.kofi_demo_reset()`, then the reset itself, then the append-only consent / audit seed rows. Includes the programme (§9). Stops with an error if the demo auth users are missing. |
+| `supabase/seed_programme.sql` | **Additive** programme rows only — `insert … on conflict (id) do nothing`, never updates or deletes. For a project whose content was loaded without the snapshot / `kofi_demo_reset()` (the shared production project), where `seed_content.sql` must not run. Stops if 0008 or the referenced demo artists / artworks are missing. |
 
 ```bash
-node supabase/scripts/generate-seed.mjs   # rewrites both files from src/data/mock/seed.ts
+node supabase/scripts/generate-seed.mjs   # rewrites the three seed files from src/data/mock/seed.ts
 ```
 
 Run them **after the migrations, in this order**:
@@ -84,7 +86,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed_content.sql
 
 (or paste them into the SQL editor in that order). For a local CLI stack, point `[db.seed] sql_paths` in `supabase/config.toml` at `./seed_auth.sql` and `./seed_content.sql`, in that order, so `npx supabase db reset` loads both.
 
-Both files are safe to re-run. `seed_auth.sql` leaves existing ids alone. `seed_content.sql` calls `kofi.kofi_demo_reset()`, which **wipes every row in the Kofi content tables** (artists, artworks, images, institutions, curators, shortlists, inquiries, documents — Kofi's only, never `public`) and restores them from `kofi.demo_*`. Audit events and consents are append-only and are never deleted.
+All three files are safe to re-run. `seed_auth.sql` leaves existing ids alone. `seed_content.sql` calls `kofi.kofi_demo_reset()`, which **wipes every row in the Kofi content tables** (artists, artworks, images, institutions, curators, shortlists, inquiries, documents and the programme tables — Kofi's only, never `public`) and restores them from `kofi.demo_*`. Audit events and consents are append-only and are never deleted. `seed_programme.sql` only adds missing programme rows.
 
 Then upload the two fictional vault files (they are Storage objects, not rows):
 
@@ -119,7 +121,7 @@ drop schema kofi cascade;
 
 That one statement removes every Kofi table, view, function, enum and the demo snapshot, and — because they depend on Kofi functions — the `kofi_on_auth_user_created` trigger on `auth.users`, the nine `kofi …` storage policies and the tables' realtime publication membership. It leaves `public`, the other product's triggers and all of `auth.users` untouched (`supabase/tests/isolation_test.sql` runs it inside a savepoint and checks a fingerprint of `public` before and after).
 
-It does **not** remove, because they are rows rather than schema objects: the demo auth accounts (see the `delete` line in the `seed_auth.sql` header), the two storage buckets and their files (empty the buckets, then delete them in the dashboard or with `storage.deleteBucket('artwork-images')` / `('vault')`), and `kofi` in the exposed-schemas list (remove it in the dashboard).
+It does **not** remove, because they are rows rather than schema objects: the demo auth accounts (see the `delete` line in the `seed_auth.sql` header), the three storage buckets and their files (empty the buckets, then delete them in the dashboard or with `storage.deleteBucket('artwork-images')` / `('vault')` / `('kofi-programme')`), and `kofi` in the exposed-schemas list (remove it in the dashboard).
 
 ### Signing in (follow-up for the shell)
 
@@ -188,10 +190,11 @@ Error mapping (`mapPgError`): `42501` → `ForbiddenError`; `P0002`, `PGRST116`,
 
 **Verified** (real PostgreSQL 16.15, local throwaway cluster, `supabase/tests/LAST_RUN.log`):
 
-- All eight migrations (0000–0007) load cleanly on top of `supabase/tests/shim.sql`, a stand-in for Supabase's `auth`, `storage`, `extensions` schemas, the `anon`/`authenticated`/`service_role` roles (with Supabase's default grants in `public`) **and the other product**: a pre-existing `public.profiles`, `public.consent_records`, `public.admin_users`, `public.is_admin()`, an `on_auth_user_created` trigger on `auth.users` and two existing users.
+- All nine migrations (0000–0008) load cleanly (0008 twice, to prove it is idempotent) on top of `supabase/tests/shim.sql`, a stand-in for Supabase's `auth`, `storage`, `extensions` schemas, the `anon`/`authenticated`/`service_role` roles (with Supabase's default grants in `public`) **and the other product**: a pre-existing `public.profiles`, `public.consent_records`, `public.admin_users`, `public.is_admin()`, an `on_auth_user_created` trigger on `auth.users` and two existing users.
 - `seed_auth.sql` + `seed_content.sql` load, and load again (idempotent).
 - `supabase/tests/rls_test.sql` + `supabase/tests/rpc_test.sql`: 100 assertions executed as each demo identity the way PostgREST does it (`set local role …; set local request.jwt.claims = …`), all passing, against `kofi.*`. These include the policies, column privileges, views, guard and audit triggers, the inquiry state machine, every RPC, the storage policies on `storage.objects`, the vault "audited open first" gate, cascades, and `kofi_demo_reset()`.
-- `supabase/tests/isolation_test.sql`: 16 assertions — no Kofi tables in `public`; a fingerprint of `public` (objects, ACLs, policies, triggers, the other product's rows and its auth trigger) is identical before the migrations and after migrations + seed; every Kofi function pins `search_path = kofi, public`, every view is `security_invoker`, every table has RLS; realtime publishes only `kofi.*`; both auth triggers coexist and a failing Kofi profile insert does not block a sign-up; internal helpers and the snapshot are not reachable by API roles; `drop schema kofi cascade` (in a savepoint, rolled back) leaves `public` identical and removes Kofi's auth trigger, storage policies and realtime tables.
+- `supabase/tests/programme_test.sql`: 55 assertions for 0008 — see §9.
+- `supabase/tests/isolation_test.sql`: 16 assertions — no Kofi tables in `public`; a fingerprint of `public` (objects, ACLs, policies, triggers, the other product's rows and its auth trigger) is identical before the migrations and after migrations + seed; every Kofi function pins `search_path = kofi, public`, every view is `security_invoker`, every table has RLS; realtime publishes only `kofi.*` (14 tables); both auth triggers coexist and a failing Kofi profile insert does not block a sign-up; internal helpers and the snapshot are not reachable by API roles; `drop schema kofi cascade` (in a savepoint, rolled back) leaves `public` identical and removes Kofi's auth trigger, storage policies and realtime tables.
 - Run it yourself: `PGHOST=… PGPORT=… PGUSER=postgres supabase/tests/run-local.sh` (it drops and recreates a database — never point it at a Supabase project).
 
 **Not verified against a live Supabase project** (no project or Docker daemon was available):
@@ -218,3 +221,63 @@ Error mapping (`mapPgError`): `42501` → `ForbiddenError`; `P0002`, `PGRST116`,
 ## Demo artwork photographs
 
 `public/art/*.jpg` are bundled for mock mode. For Supabase mode run `SUPABASE_URL=… SUPABASE_ANON_KEY=… supabase/scripts/upload-art.sh` once after `seed_auth.sql`: it signs in as each demo artist and uploads their files to `artwork-images/<artist uuid>/<name>.jpg` (the storage policy only lets an artist write inside their own folder, so this doubles as a policy check). `seed_content.sql` then references them as `storage:artwork-images/…` refs; the app signs URLs at read time and `artwork_visible()` decides who may read each object. Works without a photograph keep an inline SVG placeholder.
+
+## 9. The programme (0008)
+
+Exhibitions, open calls, events and journal stories that Kofi authors, plus the two flows that hang off them — artist **applications** to open calls and collector (**buyer**) **inquiries** routed through Kofi. Shapes mirror the "Programme" section of `src/domain/types.ts`; rules are `src/domain/programme.ts` and the validators in `src/data/mock/MockDataSource.ts`, re-implemented server-side with the **same messages and form fields**, so the UI reads identically in both modes.
+
+### Objects (all in `kofi`)
+
+| Kind | Names |
+|---|---|
+| Tables | `exhibitions`, `open_calls`, `events`, `stories`, `applications`, `buyer_inquiries`, `applied_migrations` (migration ledger, no API access) |
+| Enums | `application_status`, `buyer_inquiry_status`, `event_kind`, `story_kind`, `buyer_intent` |
+| Views (`security_invoker`) | `exhibitions_visible`, `stories_visible`, `open_calls_visible`, `events_visible`, `applications_visible`, `buyer_inquiries_visible` |
+| RPCs | `submit_application`, `withdraw_application`, `set_application_status`, `submit_buyer_inquiry`, `set_buyer_inquiry_status` |
+| Helpers | `artwork_discoverable`, `programme_artwork_ids`, `application_labels`, `buyer_inquiry_labels` (definer, re-check per row); `programme_image_src_ok`, `programme_image_alt_ok`, `venue_ok`, `http_url_ok` (pure, used by CHECKs) |
+| Triggers | `*_touch` (updated_at), `*_keep_created`, `*_audit` (`programme.save` / `programme.delete`), `open_calls_guard_delete`, `*_check_artworks` |
+| Outside `kofi` | bucket `kofi-programme` (public, 6 MB, JPEG/PNG/WebP); storage policies `kofi programme admin read/insert/update/delete`; six tables added to `supabase_realtime` |
+
+### Access model
+
+| | anon | authenticated (artist / curator) | Kofi admin |
+|---|---|---|---|
+| Programme items | read published (views) | read published (views) | read drafts too; insert / update / delete the tables directly (RLS) |
+| `artwork_ids` | only through `*_visible` — filtered to works that may appear on a public surface (`artwork_discoverable`, the gallery rule: never drafts or Kofi-only, approved artists only; admins see all), order kept | same | all works |
+| Links | `open_calls_visible` / `events_visible` drop `exhibition_id` when that exhibition is a draft; `stories_visible` drops `artist_id` when the viewer may not see that artist | same | everything |
+| Applications | nothing | own rows only, **never `staff_note`** (column not granted; the view returns it to admins only); write only through the RPCs | all rows + staff note; decide via `set_application_status` |
+| Collector inquiries | **no table access**; `submit_buyer_inquiry()` only | `submit_buyer_inquiry()` only; cannot read | read `buyer_inquiries_visible`; triage via `set_buyer_inquiry_status` |
+
+Grants follow 0002's least-privilege style: `anon`/`authenticated` get `SELECT` on the programme tables except `artwork_ids`, column-level `INSERT`/`UPDATE` (never `id` / `created_at` / `updated_at`) plus `DELETE` for `authenticated` (RLS lets only admins through), `SELECT` on `applications` except `staff_note`, nothing on `applications` / `buyer_inquiries` writes. Trigger functions are not executable by API roles. **Artwork filtering is server-side** (the views), so a hidden work's id never reaches the client.
+
+### Rules the RPCs enforce
+
+- `submit_application(p_call, p_artwork_ids, p_statement)` — artist role only (`Sign in as an artist to apply.`); a draft or unknown call is `Open call not found.`; then `validateApplication()` in order: partner-form calls, upcoming (`This call opens on Nov 15, 2026.` — date formatted like `formatCalendarDate`), closed (deadline inclusive, compared as a calendar day in `America/New_York`), paused profile, no consent, a live application already exists (also a partial unique index, so parallel submits cannot both win), duplicate / zero / too many works, works not the artist's own, `Only me` works, statement 20–2000 characters (trimmed). Audited `application.submit`.
+- `withdraw_application(p_id)` — own application, `submitted` or `shortlisted` only. Audited.
+- `set_application_status(p_id, p_status, p_decision_note, p_staff_note)` — admin; exactly `canMoveApplication(from, to, 'admin')` (all 25 pairs tested); `decided_at` set on accept/decline, cleared otherwise; a `NULL` note keeps the current one, `''` clears it. Audited.
+- `submit_buyer_inquiry(p_artwork, p_name, p_email, p_org, p_intent, p_message, p_consent)` — callable by anon. `validateBuyerInquiry()`, then the work must be discoverable by the caller (else `Artwork not found.`), the artist is derived server-side, then at most `BUYER_INQUIRY_DAILY_LIMIT` (5) per lower-cased email per rolling 24 h (advisory-locked per address). Returns only the new id. The audit row has no email.
+- `set_buyer_inquiry_status(p_id, p_status, p_staff_note)` — admin.
+- Deleting an open call that has applications raises `This call has applications. Unpublish it instead.` (field `call`). Attached work ids must exist (`One of the attached works no longer exists.`); a deleted linked exhibition / artist maps to `That exhibition no longer exists.` / `That artist no longer exists.` (`FOREIGN_KEY_ERRORS` in `errors.ts`).
+
+### Images
+
+Admin uploads (`data:image/` JPEG/PNG/WebP) go to `kofi-programme/<exhibitions|open-calls|stories>/<uuid>.<ext>` and are stored as `storage:kofi-programme/<path>`; reads return the bucket's public URL (`getPublicUrl`, no signing). Bundled `/art/<file>` paths and other inline `data:image/` URLs are stored as they are. Saving an item converts its public URL back to the ref, so an unchanged image round-trips; a replaced or deleted item's old object is removed (best effort). The bucket is public **on purpose** (editorial images Kofi publishes; artwork photographs stay in the private `artwork-images` bucket). There is no anon `SELECT` policy, so draft images cannot be listed through the API; their URLs contain random UUIDs.
+
+### Applying 0008 to the shared production project
+
+1. Run `supabase/migrations/0008_programme.sql` in the SQL editor (or `psql -v ON_ERROR_STOP=1 -f`). It needs 0000–0007 (it extends the `audit_events` action / entity CHECKs and uses `kofi.is_admin`, `kofi.my_artist_id`, `kofi.artwork_visible`, `kofi.artist_visible`, `kofi.write_audit`, `kofi.touch_updated_at`). It creates `kofi.applied_migrations` only if it does not exist and enables RLS on it.
+2. No exposed-schema change: `kofi` is already exposed. The migration ends with `notify pgrst, 'reload schema'`.
+3. The bucket row is inserted into `storage.buckets` from SQL, as 0004 did. If the project refuses direct inserts there, create bucket `kofi-programme` (public, 6 MB, image/jpeg, image/png, image/webp) in the dashboard and re-run the migration — it is idempotent and only upserts that one bucket.
+4. Content: on the production project run `supabase/seed_programme.sql` (additive). **Not** `seed_content.sql`, which wipes and restores the Kofi content tables.
+
+### Verification
+
+`supabase/tests/programme_test.sql` (55 assertions, in `run-local.sh`) covers: visitors see published items only, admins see drafts; filtered and ordered `artwork_ids`; draft links dropped; base-table `artwork_ids` / `staff_note` not selectable; artists and curators cannot write programme rows or applications; admin writes audited; CHECKs (dates, URLs, image source / alt, venue, limits) and reference checks; the delete guard; `submit_application` happy path and every rejection; who sees which application; withdraw rules; the full admin status matrix; collector inquiries as anon, invisible / draft / pending-artist works refused, the 6th in 24 h refused, no anon reads; storage policies; demo reset; and that every 0008 object is in `kofi`, `public` is still byte-identical, and the grants are as narrow as listed above.
+
+The TypeScript side (`SupabaseDataSource` programme methods) was also run end to end against **PostgREST 12.2.3** on the same local database (39 checks: reads through the views, admin create / update / delete with a storage upload, applications, collector inquiries and the error messages). Not verified: Supabase Storage itself (the upload went through a stand-in that applied the `storage.objects` policies), GoTrue sign-in, Realtime delivery.
+
+### Known differences from mock mode
+
+- Mock-mode audit rows for collector inquiries use the sender's name as the actor name; Supabase records an anonymous visitor as actor `anonymous` / role `public`.
+- Event times come back in Kofi's offset (`2026-10-29T18:30:00-04:00`) whatever offset they were saved with; the instant is the same.
+

@@ -1,0 +1,204 @@
+/* Kit additions (v3): site footer, save toggle, toast with an action.
+   Kofi Noir rules: hairlines, serif titles, tracked caps, brush strokes, no offset shadows.
+   Two-class selectors where a kit class is overridden. */
+
+/* ---------- save button hover (secondary/danger hover ink lives in global.css) ---------- */
+@media (hover: hover) {
+  .btn.save-btn[aria-pressed='true']:hover:not(:disabled) svg {
+    color: var(--red);
+  }
+}
+
+/* ---------- save toggle ---------- */
+.btn.save-btn svg {
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast);
+}
+.btn.save-btn[aria-pressed='true'] {
+  --btn-line: var(--red);
+}
+.btn.save-btn[aria-pressed='true'] svg {
+  color: var(--red-bright);
+  transform: scale(1.08);
+}
+
+/* ---------- toast with a link ---------- */
+.toast.toast--action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 8px;
+  padding-right: 6px;
+}
+.toast--action .toast__msg {
+  flex: 1;
+  min-width: 0;
+}
+.toast--action .toast__link {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--black);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  padding: 12px 2px 2px;
+  min-height: 36px;
+}
+.toast--action .toast__x {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: rgba(10, 10, 10, 0.6);
+}
+.toast--action .toast__x svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- site footer ---------- */
+.site-footer {
+  margin-top: var(--space-9);
+  border-top: 1px solid var(--line);
+  background: var(--black);
+}
+.site-footer__inner {
+  display: grid;
+  gap: var(--space-6);
+  padding-block: var(--space-7) var(--space-6);
+}
+.site-footer__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--cream);
+  text-decoration: none;
+  font-family: var(--font-label);
+  font-weight: 500;
+  font-size: var(--fs-sm);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  line-height: 1;
+}
+.site-footer__mark .star {
+  color: var(--gold);
+  font-size: 16px;
+}
+.site-footer__mark small {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--text-3);
+}
+.site-footer__tag {
+  margin-top: var(--space-4);
+  max-width: 34ch;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+  color: var(--cream-2);
+}
+.site-footer__strokes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: var(--space-5);
+}
+.site-footer__strokes i {
+  display: block;
+  width: 48px;
+  height: 5px;
+  border-radius: 2px 4px 2px 4px;
+  transform: skewX(-14deg);
+  background: var(--red);
+}
+.site-footer__strokes i:nth-child(2) {
+  background: var(--gold);
+  margin-left: 6px;
+}
+.site-footer__strokes i:nth-child(3) {
+  background: var(--green);
+  margin-left: 2px;
+}
+.site-footer__contact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-style: normal;
+  color: var(--cream-2);
+  font-size: var(--fs-sm);
+}
+.site-footer__contact .eyebrow,
+.site-footer__nav .eyebrow {
+  margin-bottom: 6px;
+}
+.site-footer__contact a {
+  color: var(--cream);
+  text-decoration: none;
+  align-self: flex-start;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.site-footer__nav ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-5);
+}
+.site-footer__nav a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--cream-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+@media (hover: hover) {
+  .site-footer__nav a:hover,
+  .site-footer__contact a:hover,
+  .site-footer__base a:hover {
+    color: var(--gold);
+  }
+}
+.site-footer__base {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding-block: var(--space-4) 0;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.site-footer__base p {
+  max-width: 70ch;
+}
+.site-footer__base a {
+  color: var(--cream-2);
+  text-decoration: none;
+}
+@media (min-width: 900px) {
+  .site-footer__inner {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 4fr);
+    gap: var(--space-7);
+    padding-block: var(--space-8) var(--space-7);
+  }
+  .site-footer__nav ul {
+    column-gap: var(--space-6);
+  }
+  .site-footer__nav a {
+    min-height: 38px;
+  }
+}

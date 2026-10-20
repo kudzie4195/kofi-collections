@@ -62,8 +62,22 @@ const INQUIRY_STATUS_VERB: Record<string, string> = {
   pending: 'reopened an introduction request',
 };
 
-/** AuditAction (+ meta) → a plain sentence fragment that follows the actor's name. */
-export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'>): string {
+const PROGRAMME_NOUN: Partial<Record<AuditEvent['entityType'], string>> = {
+  exhibition: 'an exhibition',
+  open_call: 'an open call',
+  event: 'an event',
+  story: 'a journal story',
+};
+
+const APPLICATION_STATUS_VERB: Record<string, string> = {
+  shortlisted: 'shortlisted an application',
+  accepted: 'accepted an application',
+  declined: 'declined an application',
+  withdrawn: 'withdrew an application',
+};
+
+/** AuditAction (+ meta, + entityType for programme rows) → a plain sentence fragment that follows the actor's name. */
+export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'> & Partial<Pick<AuditEvent, 'entityType'>>): string {
   const meta = ev.meta ?? {};
   const status = typeof meta.status === 'string' ? meta.status : '';
   switch (ev.action) {
@@ -111,7 +125,28 @@ export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'>): string {
       return 'requested an introduction';
     case 'inquiry.status':
       return INQUIRY_STATUS_VERB[status] ?? 'changed an introduction request';
+    case 'programme.save': {
+      const noun = (ev.entityType && PROGRAMME_NOUN[ev.entityType]) ?? 'a programme item';
+      if (meta.created) return meta.published ? `published ${noun}` : `drafted ${noun}`;
+      if (meta.publishedChanged) return meta.published ? `published ${noun}` : `unpublished ${noun}`;
+      return `edited ${noun}`;
+    }
+    case 'programme.delete':
+      return `deleted ${(ev.entityType && PROGRAMME_NOUN[ev.entityType]) ?? 'a programme item'}`;
+    case 'application.submit':
+      return 'applied to an open call';
+    case 'application.withdraw':
+      return 'withdrew an application';
+    case 'application.status':
+      return APPLICATION_STATUS_VERB[status] ?? 'changed an application’s status';
+    case 'buyer_inquiry.submit':
+      return 'sent a collector inquiry';
+    case 'buyer_inquiry.status':
+      if (meta.noteOnly) return 'added a staff note to a collector inquiry';
+      return status === 'closed' ? 'closed a collector inquiry' : status === 'in progress' ? 'picked up a collector inquiry' : status === 'new' ? 'reopened a collector inquiry' : 'updated a collector inquiry';
   }
+  // Exhaustive above; a row written by a newer schema still reads as a sentence.
+  return 'made a change';
 }
 
 function visibilityWord(v: string): string {

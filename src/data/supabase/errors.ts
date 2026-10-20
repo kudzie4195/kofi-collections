@@ -40,6 +40,71 @@ export const CONSTRAINT_ERRORS: Record<string, { message: string; field?: string
   curators_work_email_format: { message: 'Use your institutional work email.', field: 'workEmail' },
   curators_purpose_length: { message: 'Tell Kofi what you are looking for (a sentence or two).', field: 'purpose' },
   institutions_name_required: { message: 'Institution name is required.', field: 'institution' },
+  ...programmeConstraintErrors(),
+};
+
+/**
+ * Programme constraints (supabase/migrations/0008_programme.sql) → the
+ * messages cleanExhibition / cleanOpenCall / cleanEvent / cleanStory and the
+ * application / inquiry rules produce in mock mode. The client runs those same
+ * validators before writing, so these only surface if the client is bypassed.
+ */
+function programmeConstraintErrors(): Record<string, { message: string; field?: string }> {
+  const out: Record<string, { message: string; field?: string }> = {};
+  for (const t of ['exhibitions', 'open_calls', 'events', 'stories']) {
+    out[`${t}_title_required`] = { message: 'Title is required.', field: 'title' };
+    out[`${t}_title_length`] = { message: 'Keep the title under 160 characters.', field: 'title' };
+    out[`${t}_image_src`] = { message: 'Unsupported image.', field: 'image' };
+    out[`${t}_image_alt`] = { message: 'Image description is required.', field: 'image' };
+    out[`${t}_summary_required`] = { message: 'Summary is required.', field: 'summary' };
+    out[`${t}_summary_length`] = { message: 'Keep the summary under 600 characters.', field: 'summary' };
+    out[`${t}_body_length`] = { message: 'Keep the body under 20000 characters.', field: 'body' };
+    out[`${t}_external_url_scheme`] = { message: 'Links must start with http:// or https://', field: 'externalUrl' };
+    out[`${t}_venue_shape`] = { message: 'Venue name and city are required.', field: 'venue' };
+    out[`${t}_artworks_limit`] = { message: 'Invalid list of works.', field: 'artworkIds' };
+  }
+  Object.assign(out, {
+    exhibitions_subtitle_length: { message: 'Keep the subtitle under 160 characters.', field: 'subtitle' },
+    exhibitions_curated_by_length: { message: 'Keep the curated by under 160 characters.', field: 'curatedBy' },
+    exhibitions_dates_order: { message: 'The end date is before the start date.', field: 'endsOn' },
+    open_calls_partner_length: { message: 'Keep the partner under 160 characters.', field: 'partner' },
+    open_calls_eligibility_required: { message: 'Eligibility is required.', field: 'eligibility' },
+    open_calls_eligibility_length: { message: 'Keep the eligibility under 600 characters.', field: 'eligibility' },
+    open_calls_fee_required: { message: 'Fee is required.', field: 'fee' },
+    open_calls_fee_length: { message: 'Keep the fee under 160 characters.', field: 'fee' },
+    open_calls_award_length: { message: 'Keep the award under 600 characters.', field: 'award' },
+    open_calls_max_works_range: { message: 'Allow between 1 and 10 works.', field: 'maxWorks' },
+    open_calls_dates_order: { message: 'The deadline is before the call opens.', field: 'deadline' },
+    open_calls_mediums_no_null: { message: 'Unknown medium.', field: 'mediums' },
+    events_times_order: { message: 'The event ends before it starts.', field: 'endsAt' },
+    events_rsvp_url_scheme: { message: 'Links must start with http:// or https://', field: 'rsvpUrl' },
+    stories_dek_required: { message: 'Standfirst is required.', field: 'dek' },
+    stories_dek_length: { message: 'Keep the standfirst under 600 characters.', field: 'dek' },
+    stories_body_required: { message: 'Body is required.', field: 'body' },
+    stories_author_required: { message: 'Author is required.', field: 'author' },
+    stories_author_length: { message: 'Keep the author under 160 characters.', field: 'author' },
+    applications_statement_length: { message: 'Write at least a sentence or two about why these works fit the call.', field: 'statement' },
+    applications_artworks_count: { message: 'Attach at least one work.', field: 'artworkIds' },
+    applications_decision_note_length: { message: 'Keep notes under 2000 characters.', field: 'decisionNote' },
+    applications_staff_note_length: { message: 'Keep notes under 2000 characters.', field: 'staffNote' },
+    buyer_inquiries_name_length: { message: 'Tell us your name.', field: 'name' },
+    buyer_inquiries_email_format: { message: 'Enter an email address we can reply to.', field: 'email' },
+    buyer_inquiries_organization_length: { message: 'Keep the organisation name under 160 characters.', field: 'organization' },
+    buyer_inquiries_message_length: { message: 'Add a line or two so Kofi knows how to help.', field: 'message' },
+    buyer_inquiries_staff_note_length: { message: 'Keep notes under 2000 characters.', field: 'staffNote' },
+  });
+  return out;
+}
+
+/**
+ * Foreign keys whose violation means "the thing you linked was deleted
+ * meanwhile" on a form — reported like the mock's checkProgrammeRefs().
+ * Any other 23503 is a NotFoundError.
+ */
+export const FOREIGN_KEY_ERRORS: Record<string, { message: string; field?: string }> = {
+  open_calls_exhibition_id_fkey: { message: 'That exhibition no longer exists.', field: 'exhibitionId' },
+  events_exhibition_id_fkey: { message: 'That exhibition no longer exists.', field: 'exhibitionId' },
+  stories_artist_id_fkey: { message: 'That artist no longer exists.', field: 'artistId' },
 };
 
 export const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again from Account.';
@@ -59,6 +124,7 @@ function isEngineForbiddenMessage(msg: string): boolean {
  *
  *   42501 insufficient_privilege, RLS violation  → ForbiddenError
  *   P0002 no_data_found (raised by RPCs), PGRST116 (no row), 23503 FK  → NotFoundError
+ *     (except the programme form links in FOREIGN_KEY_ERRORS → ValidationError)
  *   22023 invalid_parameter_value (RPC validation, HINT = field), 23514 CHECK,
  *   23502 NOT NULL, 23505 UNIQUE, 22P02 bad enum/number  → ValidationError
  *   PGRST301/PGRST302 / 401 JWT problems  → ForbiddenError (sign in again)
@@ -78,8 +144,12 @@ export function mapPgError(err: PgErrorLike | null | undefined, fallback = 'Some
       return new NotFoundError(message || 'Not found.');
     case 'PGRST116':
       return new NotFoundError('Not found.');
-    case '23503':
+    case '23503': {
+      const constraint = /constraint "([^"]+)"/.exec(message)?.[1];
+      const known = constraint ? FOREIGN_KEY_ERRORS[constraint] : undefined;
+      if (known) return new ValidationError(known.message, known.field);
       return new NotFoundError('That record no longer exists.');
+    }
     case '22023':
       return new ValidationError(message || 'Check the highlighted field.', err.hint || undefined);
     case '23514': {

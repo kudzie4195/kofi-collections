@@ -10,7 +10,9 @@ import type { DemoIdentity, Viewer } from '@/domain/types';
  * Scheme: <type prefix>0000000-0000-4000-8000-<suffix>
  *   1… auth users · 2… artists · 30… artworks · 31… artwork images ·
  *   4… institutions · 5… curators · 6… shortlists · 7… inquiries ·
- *   8… documents · 9… seed audit events
+ *   8… documents · 9… seed audit events ·
+ *   a1… exhibitions · a2… open calls · a3… applications · a4… events ·
+ *   a5… stories · a6… buyer inquiries
  */
 export const DEMO_UUIDS = {
   // auth.users / profiles
@@ -76,6 +78,30 @@ export const DEMO_UUIDS = {
   ev_2: '90000000-0000-4000-8000-000000000002',
   ev_3: '90000000-0000-4000-8000-000000000003',
   ev_4: '90000000-0000-4000-8000-000000000004',
+  // programme (supabase/migrations/0008_programme.sql)
+  // exhibitions a1… · open calls a2… · applications a3… · events a4… · stories a5… · buyer inquiries a6…
+  ex_being_seen: 'a1000000-0000-4000-8000-000000000001',
+  ex_spirit_west: 'a1000000-0000-4000-8000-000000000002',
+  ex_i_am: 'a1000000-0000-4000-8000-000000000003',
+  ex_night_weather: 'a1000000-0000-4000-8000-000000000004',
+  ex_soft_ground: 'a1000000-0000-4000-8000-000000000005',
+  call_advocacy: 'a2000000-0000-4000-8000-000000000001',
+  call_night_weather: 'a2000000-0000-4000-8000-000000000002',
+  call_soft_ground: 'a2000000-0000-4000-8000-000000000003',
+  call_summer_open: 'a2000000-0000-4000-8000-000000000004',
+  app_mara_summer: 'a3000000-0000-4000-8000-000000000001',
+  app_june_summer: 'a3000000-0000-4000-8000-000000000002',
+  app_deshawn_night: 'a3000000-0000-4000-8000-000000000003',
+  ev_nw_opening: 'a4000000-0000-4000-8000-000000000001',
+  ev_mara_talk: 'a4000000-0000-4000-8000-000000000002',
+  ev_june_open_studio: 'a4000000-0000-4000-8000-000000000003',
+  ev_collector_evening: 'a4000000-0000-4000-8000-000000000004',
+  st_mara_interview: 'a5000000-0000-4000-8000-000000000001',
+  st_june_loom: 'a5000000-0000-4000-8000-000000000002',
+  st_artist_record: 'a5000000-0000-4000-8000-000000000003',
+  st_advocacy_partner: 'a5000000-0000-4000-8000-000000000004',
+  bi_doubling: 'a6000000-0000-4000-8000-000000000001',
+  bi_office_placement: 'a6000000-0000-4000-8000-000000000002',
 } as const;
 
 export type DemoSeedId = keyof typeof DEMO_UUIDS;

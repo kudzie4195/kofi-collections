@@ -1,6 +1,9 @@
 import { applyFilters, type ArtworkFilters } from '@/domain/filters';
 import { artworksToCsv, buildArtistExport } from '@/domain/export';
 import type {
+  Application,
+  ApplicationRow,
+  ApplicationStatus,
   ArtDocument,
   Artist,
   ArtistView,
@@ -8,16 +11,38 @@ import type {
   ArtworkView,
   AuditAction,
   AuditEvent,
+  BuyerInquiry,
+  BuyerInquiryRow,
+  BuyerInquiryStatus,
+  CallPhase,
   CuratorStatus,
   DemoIdentity,
+  Exhibition,
   Inquiry,
   InquiryStatus,
   Institution,
+  OpenCall,
+  ProgrammeEvent,
+  ProgrammeImage,
   Shortlist,
+  Story,
+  Venue,
   Viewer,
 } from '@/domain/types';
-import { CONSENT_VERSION } from '@/domain/types';
-import { artworkVisibleTo, canEdit, projectArtist, projectArtwork } from '@/domain/visibility';
+import { BUYER_INQUIRY_STATUSES, CONSENT_VERSION, EVENT_KINDS, MEDIUMS, STORY_KINDS } from '@/domain/types';
+import { artistVisibleTo, artworkVisibleTo, canEdit, projectArtist, projectArtwork } from '@/domain/visibility';
+import {
+  BUYER_INQUIRY_DAILY_LIMIT,
+  callPhase,
+  canMoveApplication,
+  canSeeProgramme,
+  isIsoDate,
+  kofiToday,
+  sortExhibitions,
+  validateApplication,
+  validateBuyerInquiry,
+  type BuyerInquiryInput,
+} from '@/domain/programme';
 import {
   ForbiddenError,
   NotFoundError,
@@ -32,8 +57,10 @@ import {
   type DocumentInput,
   type ExportResult,
   type InquiryRow,
+  type ApplicationInput,
+  type ProgrammeInput,
 } from '../DataSource';
-import { buildSeed, DEMO_IDENTITIES, type MockState } from './seed';
+import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, PROGRAMME_KEYS, type MockState } from './seed';
 
 const STORAGE_KEY = 'kofi.mock.state.v1';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -103,9 +130,9 @@ export class MockDataSource implements DataSource {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return undefined;
-      const parsed = JSON.parse(raw) as MockState;
+      const parsed = JSON.parse(raw) as Partial<MockState>;
       if (!parsed || !Array.isArray(parsed.artists)) return undefined;
-      return parsed;
+      return migrateState(parsed);
     } catch {
       return undefined;
     }
@@ -700,12 +727,433 @@ export class MockDataSource implements DataSource {
 
   async listAudit(viewer: Viewer, limit = 200): Promise<AuditEvent[]> {
     this.requireAdmin(viewer);
-    return [...this.state.audit].sort((x, y) => y.at.localeCompare(x.at)).slice(0, limit);
+    // Newest first; rows written in the same millisecond keep their write order (latest first).
+    return this.state.audit
+      .map((ev, i) => [ev, i] as const)
+      .sort(([x, i], [y, j]) => y.at.localeCompare(x.at) || j - i)
+      .slice(0, limit)
+      .map(([ev]) => ev);
   }
 
   async listInstitutions(viewer: Viewer): Promise<Institution[]> {
     if (viewer.role !== 'admin' && viewer.role !== 'curator') throw new ForbiddenError();
     return this.state.institutions.map((i) => ({ ...i }));
+  }
+
+  /* ---------- programme: shared helpers ---------- */
+
+  private today(): string {
+    return kofiToday(this.now());
+  }
+
+  /**
+   * The gallery's rule (same as listArtworks): whether a work may appear on a
+   * discovery surface for this viewer. Admins see every existing work so that
+   * editing a programme item never silently drops an attached id.
+   */
+  private discoverable(aw: Artwork, v: Viewer): boolean {
+    if (v.role === 'admin') return true;
+    const artist = this.artistById(aw.artistId);
+    if (!artworkVisibleTo(aw, artist, v)) return false;
+    if (aw.visibility === 'private' || aw.visibility === 'kofi') return false;
+    return artist?.status === 'approved';
+  }
+
+  private visibleWorkIds(ids: string[], v: Viewer): string[] {
+    return ids.filter((id) => {
+      const aw = this.state.artworks.find((x) => x.id === id);
+      return !!aw && this.discoverable(aw, v);
+    });
+  }
+
+  private exhibitionVisible(id: string | undefined, v: Viewer): boolean {
+    if (!id) return false;
+    const ex = this.state.exhibitions.find((x) => x.id === id);
+    return !!ex && canSeeProgramme(ex, v);
+  }
+
+  private viewExhibition(ex: Exhibition, v: Viewer): Exhibition {
+    return { ...clone(ex), artworkIds: this.visibleWorkIds(ex.artworkIds, v) };
+  }
+
+  private viewCall(call: OpenCall, v: Viewer): OpenCall {
+    const out = clone(call);
+    if (out.exhibitionId && !this.exhibitionVisible(out.exhibitionId, v)) delete out.exhibitionId;
+    return out;
+  }
+
+  private viewEvent(ev: ProgrammeEvent, v: Viewer): ProgrammeEvent {
+    const out = clone(ev);
+    if (out.exhibitionId && !this.exhibitionVisible(out.exhibitionId, v)) delete out.exhibitionId;
+    return out;
+  }
+
+  private viewStory(st: Story, v: Viewer): Story {
+    const out: Story = { ...clone(st), artworkIds: this.visibleWorkIds(st.artworkIds, v) };
+    if (out.artistId) {
+      const artist = this.artistById(out.artistId);
+      if (!artist || !artistVisibleTo(artist, v)) delete out.artistId;
+    }
+    return out;
+  }
+
+  private checkProgrammeRefs(input: { artworkIds?: string[]; exhibitionId?: string; artistId?: string }): void {
+    for (const id of input.artworkIds ?? []) {
+      if (!this.state.artworks.some((a) => a.id === id)) throw new ValidationError('One of the attached works no longer exists.', 'artworkIds');
+    }
+    if (input.exhibitionId && !this.state.exhibitions.some((x) => x.id === input.exhibitionId)) throw new ValidationError('That exhibition no longer exists.', 'exhibitionId');
+    if (input.artistId && !this.artistById(input.artistId)) throw new ValidationError('That artist no longer exists.', 'artistId');
+  }
+
+  /** Create or update one programme row. Admin only; id/createdAt/updatedAt are set here, never by the client. */
+  private upsertProgramme<T extends { id: string; createdAt: string; updatedAt: string; published: boolean; title: string }>(
+    viewer: Viewer,
+    list: T[],
+    entityType: 'exhibition' | 'open_call' | 'event' | 'story',
+    idPrefix: string,
+    id: string | undefined,
+    clean: Omit<T, 'id' | 'createdAt' | 'updatedAt'>,
+  ): T {
+    const now = this.iso();
+    if (id) {
+      const existing = list.find((x) => x.id === id);
+      if (!existing) throw new NotFoundError('That item no longer exists.');
+      const publishedChanged = existing.published !== clean.published;
+      // Replace every authored field (so a cleared optional field is really cleared), keep identity and createdAt.
+      for (const k of Object.keys(existing)) if (k !== 'id' && k !== 'createdAt') delete (existing as Record<string, unknown>)[k];
+      Object.assign(existing, clean, { updatedAt: now });
+      this.audit(viewer, 'programme.save', entityType, existing.id, { title: existing.title, created: false, published: existing.published, publishedChanged });
+      this.commit();
+      return existing;
+    }
+    const created = { ...clean, id: this.makeId(idPrefix), createdAt: now, updatedAt: now } as T;
+    list.push(created);
+    this.audit(viewer, 'programme.save', entityType, created.id, { title: created.title, created: true, published: created.published, publishedChanged: false });
+    this.commit();
+    return created;
+  }
+
+  private removeProgramme(viewer: Viewer, list: { id: string; title: string }[], entityType: 'exhibition' | 'open_call' | 'event' | 'story', id: string): void {
+    const idx = list.findIndex((x) => x.id === id);
+    if (idx < 0) throw new NotFoundError('That item no longer exists.');
+    const [gone] = list.splice(idx, 1);
+    this.audit(viewer, 'programme.delete', entityType, id, { title: gone!.title });
+  }
+
+  /* ---------- programme: exhibitions ---------- */
+
+  async listExhibitions(viewer: Viewer): Promise<Exhibition[]> {
+    const v = this.resolve(viewer);
+    const list = this.state.exhibitions.filter((x) => canSeeProgramme(x, v)).map((x) => this.viewExhibition(x, v));
+    return sortExhibitions(list, this.today());
+  }
+
+  async getExhibition(viewer: Viewer, id: string): Promise<Exhibition | undefined> {
+    const v = this.resolve(viewer);
+    const ex = this.state.exhibitions.find((x) => x.id === id);
+    return ex && canSeeProgramme(ex, v) ? this.viewExhibition(ex, v) : undefined;
+  }
+
+  async saveExhibition(viewer: Viewer, input: ProgrammeInput<Exhibition>): Promise<Exhibition> {
+    this.requireAdmin(viewer);
+    const clean = cleanExhibition(input);
+    this.checkProgrammeRefs(clean);
+    const saved = this.upsertProgramme(viewer, this.state.exhibitions, 'exhibition', 'ex', input.id, clean);
+    return this.viewExhibition(saved, viewer);
+  }
+
+  async deleteExhibition(viewer: Viewer, id: string): Promise<void> {
+    this.requireAdmin(viewer);
+    this.removeProgramme(viewer, this.state.exhibitions, 'exhibition', id);
+    // Calls and events that pointed at it stay, unlinked.
+    for (const c of this.state.openCalls) if (c.exhibitionId === id) delete c.exhibitionId;
+    for (const e of this.state.events) if (e.exhibitionId === id) delete e.exhibitionId;
+    this.commit();
+  }
+
+  /* ---------- programme: open calls ---------- */
+
+  async listOpenCalls(viewer: Viewer): Promise<OpenCall[]> {
+    const v = this.resolve(viewer);
+    const today = this.today();
+    const rank: Record<CallPhase, number> = { open: 0, upcoming: 1, closed: 2 };
+    const far = '9999-12-31';
+    return this.state.openCalls
+      .filter((x) => canSeeProgramme(x, v))
+      .map((x) => this.viewCall(x, v))
+      .sort((a, b) => {
+        const pa = callPhase(a, today);
+        const pb = callPhase(b, today);
+        if (pa !== pb) return rank[pa] - rank[pb];
+        // Open: closing soonest first (no deadline last). Upcoming: opening soonest. Closed: most recently closed first.
+        if (pa === 'open') return (a.deadline ?? far).localeCompare(b.deadline ?? far) || a.title.localeCompare(b.title);
+        if (pa === 'upcoming') return a.opensOn.localeCompare(b.opensOn) || (a.deadline ?? far).localeCompare(b.deadline ?? far);
+        return (b.deadline ?? '').localeCompare(a.deadline ?? '');
+      });
+  }
+
+  async getOpenCall(viewer: Viewer, id: string): Promise<OpenCall | undefined> {
+    const v = this.resolve(viewer);
+    const c = this.state.openCalls.find((x) => x.id === id);
+    return c && canSeeProgramme(c, v) ? this.viewCall(c, v) : undefined;
+  }
+
+  async saveOpenCall(viewer: Viewer, input: ProgrammeInput<OpenCall>): Promise<OpenCall> {
+    this.requireAdmin(viewer);
+    const clean = cleanOpenCall(input);
+    this.checkProgrammeRefs(clean);
+    const saved = this.upsertProgramme(viewer, this.state.openCalls, 'open_call', 'call', input.id, clean);
+    return this.viewCall(saved, viewer);
+  }
+
+  async deleteOpenCall(viewer: Viewer, id: string): Promise<void> {
+    this.requireAdmin(viewer);
+    if (!this.state.openCalls.some((c) => c.id === id)) throw new NotFoundError('That item no longer exists.');
+    if (this.state.applications.some((a) => a.callId === id)) throw new ValidationError('This call has applications. Unpublish it instead.', 'call');
+    this.removeProgramme(viewer, this.state.openCalls, 'open_call', id);
+    this.commit();
+  }
+
+  /* ---------- programme: events ---------- */
+
+  async listEvents(viewer: Viewer): Promise<ProgrammeEvent[]> {
+    const v = this.resolve(viewer);
+    return this.state.events
+      .filter((x) => canSeeProgramme(x, v))
+      .map((x) => this.viewEvent(x, v))
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt) || a.title.localeCompare(b.title));
+  }
+
+  async saveEvent(viewer: Viewer, input: ProgrammeInput<ProgrammeEvent>): Promise<ProgrammeEvent> {
+    this.requireAdmin(viewer);
+    const clean = cleanEvent(input);
+    this.checkProgrammeRefs(clean);
+    const saved = this.upsertProgramme(viewer, this.state.events, 'event', 'evt', input.id, clean);
+    return this.viewEvent(saved, viewer);
+  }
+
+  async deleteEvent(viewer: Viewer, id: string): Promise<void> {
+    this.requireAdmin(viewer);
+    this.removeProgramme(viewer, this.state.events, 'event', id);
+    this.commit();
+  }
+
+  /* ---------- programme: journal ---------- */
+
+  async listStories(viewer: Viewer): Promise<Story[]> {
+    const v = this.resolve(viewer);
+    return this.state.stories
+      .filter((x) => canSeeProgramme(x, v))
+      .map((x) => this.viewStory(x, v))
+      .sort((a, b) => b.publishedOn.localeCompare(a.publishedOn) || b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getStory(viewer: Viewer, id: string): Promise<Story | undefined> {
+    const v = this.resolve(viewer);
+    const st = this.state.stories.find((x) => x.id === id);
+    return st && canSeeProgramme(st, v) ? this.viewStory(st, v) : undefined;
+  }
+
+  async saveStory(viewer: Viewer, input: ProgrammeInput<Story>): Promise<Story> {
+    this.requireAdmin(viewer);
+    const clean = cleanStory(input);
+    this.checkProgrammeRefs(clean);
+    const saved = this.upsertProgramme(viewer, this.state.stories, 'story', 'st', input.id, clean);
+    return this.viewStory(saved, viewer);
+  }
+
+  async deleteStory(viewer: Viewer, id: string): Promise<void> {
+    this.requireAdmin(viewer);
+    this.removeProgramme(viewer, this.state.stories, 'story', id);
+    this.commit();
+  }
+
+  /* ---------- applications ---------- */
+
+  private applicationRow(app: Application, v: Viewer): ApplicationRow {
+    const call = this.state.openCalls.find((c) => c.id === app.callId);
+    const artist = this.artistById(app.artistId);
+    const works: ArtworkView[] = [];
+    for (const id of app.artworkIds) {
+      const aw = this.state.artworks.find((x) => x.id === id);
+      const view = aw ? projectArtwork(aw, this.artistById(aw.artistId), v) : undefined;
+      if (view) works.push(view);
+    }
+    const row: ApplicationRow = {
+      ...clone(app),
+      callTitle: call?.title ?? 'A call that has been removed',
+      artistWorkingName: artist?.workingName ?? 'Unknown artist',
+      works,
+    };
+    if (call?.deadline) row.callDeadline = call.deadline;
+    // Reviewer notes are Kofi's own; the artist sees only the decision note.
+    if (v.role !== 'admin') delete row.staffNote;
+    return row;
+  }
+
+  /** Artists only (curators, visitors and admins acting as themselves are refused). Ownership comes from the store. */
+  private requireApplicant(viewer: Viewer): Artist {
+    if (viewer.role !== 'artist') throw new ForbiddenError('Sign in as an artist to apply.');
+    return this.requireMyArtist(viewer);
+  }
+
+  async listMyApplications(viewer: Viewer): Promise<ApplicationRow[]> {
+    const a = this.requireApplicant(viewer);
+    const v = this.resolve(viewer);
+    return this.state.applications
+      .filter((x) => x.artistId === a.id)
+      .map((x) => this.applicationRow(x, v))
+      .sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+
+  async submitApplication(viewer: Viewer, input: ApplicationInput): Promise<ApplicationRow> {
+    const a = this.requireApplicant(viewer);
+    const v = this.resolve(viewer);
+    const call = this.state.openCalls.find((c) => c.id === input.callId);
+    if (!call || !canSeeProgramme(call, v)) throw new NotFoundError('Open call not found.');
+    const requestedIds = Array.isArray(input.artworkIds) ? input.artworkIds.map(String) : [];
+    const statement = typeof input.statement === 'string' ? input.statement : '';
+    const problem = validateApplication({
+      call,
+      artist: a,
+      works: this.state.artworks.filter((w) => requestedIds.includes(w.id)),
+      requestedIds,
+      statement,
+      existing: this.state.applications.filter((x) => x.callId === call.id && x.artistId === a.id),
+      today: this.today(),
+    });
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    const now = this.iso();
+    const app: Application = {
+      id: this.makeId('app'),
+      callId: call.id,
+      artistId: a.id,
+      artworkIds: [...requestedIds],
+      statement: statement.trim(),
+      status: 'submitted',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.applications.push(app);
+    this.audit(v, 'application.submit', 'application', app.id, { callId: call.id, works: app.artworkIds.length });
+    this.commit();
+    return this.applicationRow(app, v);
+  }
+
+  async withdrawApplication(viewer: Viewer, id: string): Promise<ApplicationRow> {
+    const a = this.requireApplicant(viewer);
+    const v = this.resolve(viewer);
+    const app = this.state.applications.find((x) => x.id === id);
+    if (!app) throw new NotFoundError('Application not found.');
+    if (app.artistId !== a.id) throw new ForbiddenError('You can only withdraw your own applications.');
+    if (!canMoveApplication(app.status, 'withdrawn', 'artist')) throw new ValidationError('This application has been decided and can no longer be withdrawn.', 'status');
+    app.status = 'withdrawn';
+    app.updatedAt = this.iso();
+    this.audit(v, 'application.withdraw', 'application', app.id, { callId: app.callId });
+    this.commit();
+    return this.applicationRow(app, v);
+  }
+
+  async listApplications(viewer: Viewer, callId?: string): Promise<ApplicationRow[]> {
+    this.requireAdmin(viewer);
+    return this.state.applications
+      .filter((x) => !callId || x.callId === callId)
+      .map((x) => this.applicationRow(x, viewer))
+      .sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+
+  async setApplicationStatus(viewer: Viewer, id: string, status: ApplicationStatus, notes: { decisionNote?: string; staffNote?: string } = {}): Promise<ApplicationRow> {
+    this.requireAdmin(viewer);
+    const app = this.state.applications.find((x) => x.id === id);
+    if (!app) throw new NotFoundError('Application not found.');
+    if (!canMoveApplication(app.status, status, 'admin')) {
+      throw new ValidationError(app.status === 'withdrawn' ? 'The artist withdrew this application.' : `This application cannot be moved from ${app.status} to ${status}.`, 'status');
+    }
+    for (const key of ['decisionNote', 'staffNote'] as const) {
+      const val = notes[key];
+      if (val === undefined) continue;
+      if (val.length > MAX_NOTE) throw new ValidationError(`Keep notes under ${MAX_NOTE} characters.`, key);
+      if (val.trim()) app[key] = val.trim();
+      else delete app[key];
+    }
+    app.status = status;
+    app.updatedAt = this.iso();
+    if (status === 'accepted' || status === 'declined') app.decidedAt = app.updatedAt;
+    else delete app.decidedAt;
+    this.audit(viewer, 'application.status', 'application', app.id, { status, callId: app.callId });
+    this.commit();
+    return this.applicationRow(app, viewer);
+  }
+
+  /* ---------- collector ("buyer") inquiries ---------- */
+
+  async submitBuyerInquiry(viewer: Viewer, input: BuyerInquiryInput): Promise<{ id: string }> {
+    const v = this.resolve(viewer);
+    const problem = validateBuyerInquiry(input);
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    let artistId: string | undefined;
+    if (input.artworkId) {
+      const aw = this.state.artworks.find((x) => x.id === input.artworkId);
+      // A visitor can only ask about a work they can see; the artist is derived here, never taken from the client.
+      if (!aw || !this.discoverable(aw, v)) throw new NotFoundError('Artwork not found.');
+      artistId = aw.artistId;
+    }
+    const email = input.email.trim();
+    const key = email.toLowerCase();
+    const since = this.now().getTime() - 86_400_000;
+    const recent = this.state.buyerInquiries.filter((b) => b.email.toLowerCase() === key && Date.parse(b.createdAt) > since).length;
+    if (recent >= BUYER_INQUIRY_DAILY_LIMIT) throw new ValidationError('Kofi already has your messages — we’ll reply soon.', 'email');
+    const now = this.iso();
+    const inq: BuyerInquiry = {
+      id: this.makeId('bi'),
+      name: input.name.trim(),
+      email,
+      intent: input.intent,
+      message: input.message.trim(),
+      status: 'new',
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (input.artworkId) inq.artworkId = input.artworkId;
+    if (artistId) inq.artistId = artistId;
+    if (input.organization?.trim()) inq.organization = input.organization.trim();
+    this.state.buyerInquiries.push(inq);
+    // The actor is whoever sent it (often a signed-out visitor); no email in the audit trail.
+    this.audit({ ...v, displayName: inq.name }, 'buyer_inquiry.submit', 'buyer_inquiry', inq.id, { intent: inq.intent, artworkId: inq.artworkId ?? null });
+    this.commit();
+    return { id: inq.id };
+  }
+
+  private buyerInquiryRow(b: BuyerInquiry): BuyerInquiryRow {
+    const row: BuyerInquiryRow = { ...clone(b) };
+    const aw = b.artworkId ? this.state.artworks.find((x) => x.id === b.artworkId) : undefined;
+    if (aw) row.artworkTitle = aw.title;
+    const artist = b.artistId ? this.artistById(b.artistId) : undefined;
+    if (artist) row.artistWorkingName = artist.workingName;
+    return row;
+  }
+
+  async listBuyerInquiries(viewer: Viewer): Promise<BuyerInquiryRow[]> {
+    this.requireAdmin(viewer);
+    return this.state.buyerInquiries.map((b) => this.buyerInquiryRow(b)).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+
+  async setBuyerInquiryStatus(viewer: Viewer, id: string, status: BuyerInquiryStatus, staffNote?: string): Promise<BuyerInquiryRow> {
+    this.requireAdmin(viewer);
+    const b = this.state.buyerInquiries.find((x) => x.id === id);
+    if (!b) throw new NotFoundError('Inquiry not found.');
+    if (!BUYER_INQUIRY_STATUSES.includes(status)) throw new ValidationError('Unknown status.', 'status');
+    if (staffNote !== undefined) {
+      if (staffNote.length > MAX_NOTE) throw new ValidationError(`Keep notes under ${MAX_NOTE} characters.`, 'staffNote');
+      if (staffNote.trim()) b.staffNote = staffNote.trim();
+      else delete b.staffNote;
+    }
+    const noteOnly = b.status === status;
+    b.status = status;
+    b.updatedAt = this.iso();
+    this.audit(viewer, 'buyer_inquiry.status', 'buyer_inquiry', b.id, { status, noteOnly });
+    this.commit();
+    return this.buyerInquiryRow(b);
   }
 
   /** Test-only: peek at raw state. */
@@ -758,4 +1206,215 @@ export function validateArtwork(input: ArtworkInput): void {
     if (!im.src.startsWith('data:image/') && !im.src.startsWith('storage:') && !im.src.startsWith('/art/')) throw new ValidationError('Unsupported image.', 'images');
     if (im.src.length > MAX_IMAGE_BYTES * 1.37) throw new ValidationError('Images must be under 6 MB.', 'images');
   }
+}
+
+/* ---------- programme: persisted-state migration ---------- */
+
+/**
+ * A state persisted by an older build (v2: no programme collections) keeps every
+ * artist, work, document and audit row it has; only the missing collections are
+ * filled from the seed. Collections that exist are never touched.
+ */
+export function migrateState(parsed: Partial<MockState>): MockState {
+  const missing = PROGRAMME_KEYS.filter((k) => !Array.isArray(parsed[k]));
+  if (missing.length === 0) return parsed as MockState;
+  const seed = buildProgrammeSeed();
+  const out = { ...parsed } as MockState;
+  for (const k of missing) (out as unknown as Record<string, unknown>)[k] = seed[k];
+  // Seeded rows must not point at works the user has since deleted.
+  const workIds = new Set((out.artworks ?? []).map((a) => a.id));
+  const artistIds = new Set((out.artists ?? []).map((a) => a.id));
+  if (missing.includes('exhibitions')) for (const x of out.exhibitions) x.artworkIds = x.artworkIds.filter((id) => workIds.has(id));
+  if (missing.includes('stories')) {
+    for (const x of out.stories) {
+      x.artworkIds = x.artworkIds.filter((id) => workIds.has(id));
+      if (x.artistId && !artistIds.has(x.artistId)) delete x.artistId;
+    }
+  }
+  if (missing.includes('applications')) out.applications = out.applications.filter((a) => artistIds.has(a.artistId));
+  if (missing.includes('buyerInquiries')) {
+    for (const b of out.buyerInquiries) {
+      if (b.artworkId && !workIds.has(b.artworkId)) {
+        delete b.artworkId;
+        delete b.artistId;
+      }
+    }
+  }
+  return out;
+}
+
+/* ---------- programme: input validation (server-equivalent; the SQL RPCs mirror these) ---------- */
+
+const MAX_TITLE = 160;
+const MAX_SUMMARY = 600;
+const MAX_BODY = 20_000;
+const MAX_NOTE = 2000;
+const HTTP_URL = /^https?:\/\/[^\s]+$/i;
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+function clone<T>(x: T): T {
+  return JSON.parse(JSON.stringify(x)) as T;
+}
+
+/** Drop undefined keys so stored rows serialize the same way they compare. */
+function compact<T extends object>(o: T): T {
+  for (const k of Object.keys(o)) if ((o as Record<string, unknown>)[k] === undefined) delete (o as Record<string, unknown>)[k];
+  return o;
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function optStr(v: unknown, field: string, max: number, label: string): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string') throw new ValidationError(`${label} must be text.`, field);
+  const t = v.trim();
+  if (t.length > max) throw new ValidationError(`Keep the ${label.toLowerCase()} under ${max} characters.`, field);
+  return t || undefined;
+}
+
+function reqStr(v: unknown, field: string, max: number, label: string): string {
+  const t = optStr(v, field, max, label);
+  if (!t) throw new ValidationError(`${label} is required.`, field);
+  return t;
+}
+
+function title(v: unknown): string {
+  return reqStr(v, 'title', MAX_TITLE, 'Title');
+}
+
+function optUrl(v: unknown, field: string): string | undefined {
+  const t = optStr(v, field, 2000, 'Link');
+  if (t && !HTTP_URL.test(t)) throw new ValidationError('Links must start with http:// or https://', field);
+  return t;
+}
+
+function reqDate(v: unknown, field: string, label: string): string {
+  const t = str(v);
+  if (!isIsoDate(t)) throw new ValidationError(`${label} must be a valid date.`, field);
+  return t;
+}
+
+function optDate(v: unknown, field: string, label: string): string | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  return reqDate(v, field, label);
+}
+
+function dateTime(v: unknown, field: string, label: string, required: boolean): string | undefined {
+  if (!required && (v === undefined || v === null || v === '')) return undefined;
+  const t = str(v);
+  if (!ISO_DATETIME.test(t) || Number.isNaN(Date.parse(t)) || !isIsoDate(t.slice(0, 10))) throw new ValidationError(`${label} must be a valid date and time.`, field);
+  return t;
+}
+
+function image(v: unknown): ProgrammeImage | undefined {
+  if (v === undefined || v === null) return undefined;
+  const im = v as Partial<ProgrammeImage>;
+  const src = typeof im.src === 'string' ? im.src : '';
+  if (!src.startsWith('data:image/') && !src.startsWith('storage:') && !src.startsWith('/art/')) throw new ValidationError('Unsupported image.', 'image');
+  if (src.length > MAX_IMAGE_BYTES * 1.37) throw new ValidationError('Images must be under 6 MB.', 'image');
+  const alt = reqStr(im.alt, 'image', 300, 'Image description');
+  return compact({ src, alt, credit: optStr(im.credit, 'image', 160, 'Image credit') });
+}
+
+function venue(v: unknown): Venue | undefined {
+  if (v === undefined || v === null) return undefined;
+  const ve = v as Partial<Venue>;
+  return compact({
+    name: reqStr(ve.name, 'venue', 160, 'Venue name'),
+    address: optStr(ve.address, 'venue', 200, 'Venue address'),
+    city: reqStr(ve.city, 'venue', 120, 'Venue city'),
+  });
+}
+
+function ids(v: unknown, field: string): string[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new ValidationError('Invalid list of works.', field);
+  return [...new Set(v as string[])];
+}
+
+function flags(input: { sample?: unknown; published?: unknown }): { sample: boolean; published: boolean } {
+  return { sample: input.sample === true, published: input.published === true };
+}
+
+export function cleanExhibition(input: ProgrammeInput<Exhibition>): Omit<Exhibition, 'id' | 'createdAt' | 'updatedAt'> {
+  const startsOn = reqDate(input.startsOn, 'startsOn', 'Start date');
+  const endsOn = optDate(input.endsOn, 'endsOn', 'End date');
+  if (endsOn && endsOn < startsOn) throw new ValidationError('The end date is before the start date.', 'endsOn');
+  return compact({
+    ...flags(input),
+    title: title(input.title),
+    subtitle: optStr(input.subtitle, 'subtitle', MAX_TITLE, 'Subtitle'),
+    startsOn,
+    endsOn,
+    venue: venue(input.venue),
+    summary: reqStr(input.summary, 'summary', MAX_SUMMARY, 'Summary'),
+    body: optStr(input.body, 'body', MAX_BODY, 'Body') ?? '',
+    image: image(input.image),
+    artworkIds: ids(input.artworkIds, 'artworkIds'),
+    externalUrl: optUrl(input.externalUrl, 'externalUrl'),
+    curatedBy: optStr(input.curatedBy, 'curatedBy', MAX_TITLE, 'Curated by'),
+  });
+}
+
+export function cleanOpenCall(input: ProgrammeInput<OpenCall>): Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'> {
+  const opensOn = reqDate(input.opensOn, 'opensOn', 'Opening date');
+  const deadline = optDate(input.deadline, 'deadline', 'Deadline');
+  if (deadline && deadline < opensOn) throw new ValidationError('The deadline is before the call opens.', 'deadline');
+  const maxWorks = input.maxWorks;
+  if (!Number.isInteger(maxWorks) || maxWorks < 1 || maxWorks > 10) throw new ValidationError('Allow between 1 and 10 works.', 'maxWorks');
+  const mediums = Array.isArray(input.mediums) ? [...new Set(input.mediums)] : [];
+  if (mediums.some((m) => !MEDIUMS.includes(m))) throw new ValidationError('Unknown medium.', 'mediums');
+  return compact({
+    ...flags(input),
+    title: title(input.title),
+    partner: optStr(input.partner, 'partner', MAX_TITLE, 'Partner'),
+    summary: reqStr(input.summary, 'summary', MAX_SUMMARY, 'Summary'),
+    body: optStr(input.body, 'body', MAX_BODY, 'Body') ?? '',
+    eligibility: reqStr(input.eligibility, 'eligibility', MAX_SUMMARY, 'Eligibility'),
+    mediums,
+    opensOn,
+    deadline,
+    maxWorks,
+    fee: reqStr(input.fee, 'fee', MAX_TITLE, 'Fee'),
+    award: optStr(input.award, 'award', MAX_SUMMARY, 'Award'),
+    image: image(input.image),
+    externalUrl: optUrl(input.externalUrl, 'externalUrl'),
+    exhibitionId: optStr(input.exhibitionId, 'exhibitionId', 100, 'Exhibition'),
+  });
+}
+
+export function cleanEvent(input: ProgrammeInput<ProgrammeEvent>): Omit<ProgrammeEvent, 'id' | 'createdAt' | 'updatedAt'> {
+  if (!EVENT_KINDS.includes(input.kind)) throw new ValidationError('Choose what kind of event this is.', 'kind');
+  const startsAt = dateTime(input.startsAt, 'startsAt', 'Start', true)!;
+  const endsAt = dateTime(input.endsAt, 'endsAt', 'End', false);
+  if (endsAt && Date.parse(endsAt) < Date.parse(startsAt)) throw new ValidationError('The event ends before it starts.', 'endsAt');
+  return compact({
+    ...flags(input),
+    title: title(input.title),
+    kind: input.kind,
+    startsAt,
+    endsAt,
+    venue: venue(input.venue),
+    summary: reqStr(input.summary, 'summary', MAX_SUMMARY, 'Summary'),
+    rsvpUrl: optUrl(input.rsvpUrl, 'rsvpUrl'),
+    exhibitionId: optStr(input.exhibitionId, 'exhibitionId', 100, 'Exhibition'),
+  });
+}
+
+export function cleanStory(input: ProgrammeInput<Story>): Omit<Story, 'id' | 'createdAt' | 'updatedAt'> {
+  if (!STORY_KINDS.includes(input.kind)) throw new ValidationError('Choose what kind of story this is.', 'kind');
+  return compact({
+    ...flags(input),
+    title: title(input.title),
+    dek: reqStr(input.dek, 'dek', MAX_SUMMARY, 'Standfirst'),
+    kind: input.kind,
+    body: reqStr(input.body, 'body', MAX_BODY, 'Body'),
+    author: reqStr(input.author, 'author', MAX_TITLE, 'Author'),
+    publishedOn: reqDate(input.publishedOn, 'publishedOn', 'Publication date'),
+    artistId: optStr(input.artistId, 'artistId', 100, 'Artist'),
+    artworkIds: ids(input.artworkIds, 'artworkIds'),
+    image: image(input.image),
+  });
 }

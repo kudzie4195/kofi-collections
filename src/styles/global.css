@@ -424,6 +424,11 @@ ol {
     background: var(--surface-2);
     color: var(--text);
   }
+  /* Outline buttons have a transparent fill, so the inverted label needs real ink. */
+  .btn--secondary:hover:not(:disabled),
+  .btn--danger:hover:not(:disabled) {
+    color: var(--black);
+  }
 }
 .btn:active:not(:disabled) {
   transform: translateY(1px);

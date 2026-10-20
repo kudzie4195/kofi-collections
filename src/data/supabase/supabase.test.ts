@@ -8,14 +8,31 @@ import { blobToDataUrl, dataUrlToBlob, newUuid, parseDataUrl } from './files';
 import {
   artistPatchToRow,
   artworkInputToJson,
+  eventToRow,
+  exhibitionToRow,
   isUuid,
   normalizeImageSrc,
+  normalizeProgrammeImageSrc,
+  openCallToRow,
+  programmePathOf,
   storagePathOf,
+  storyToRow,
+  toApplicationRow,
   toArtistView,
   toArtworkView,
+  toExhibition,
+  toKofiOffsetIso,
+  toOpenCall,
+  toProgrammeEvent,
   toShortlist,
+  toStory,
+  type ApplicationViewRow,
   type ArtistViewRow,
   type ArtworkViewRow,
+  type EventRow,
+  type ExhibitionRow,
+  type OpenCallRow,
+  type StoryRow,
 } from './mapping';
 import { createSupabaseDataSource } from './SupabaseDataSource';
 
@@ -309,6 +326,12 @@ describe('demo identities', () => {
       ...seed.inquiries.map((q) => q.id),
       ...seed.documents.map((d) => d.id),
       ...seed.audit.map((e) => e.id),
+      ...seed.exhibitions.map((e) => e.id),
+      ...seed.openCalls.map((c) => c.id),
+      ...seed.applications.map((a) => a.id),
+      ...seed.events.map((e) => e.id),
+      ...seed.stories.map((t) => t.id),
+      ...seed.buyerInquiries.map((q) => q.id),
     ];
     for (const id of ids) expect(demoUuid(id), id).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Set(Object.values(DEMO_UUIDS)).size).toBe(Object.values(DEMO_UUIDS).length);
@@ -392,5 +415,177 @@ describe('SupabaseDataSource (offline)', () => {
       body: { code: 'PGRST106', details: null, hint: 'Only the following schemas are exposed: public, graphql_public', message: 'Invalid schema: kofi' },
     }));
     await expect(makeWith(fetchImpl as typeof fetch).listArtists(visitor)).rejects.toThrow(SCHEMA_NOT_EXPOSED_MESSAGE);
+  });
+});
+
+/* ------------------------------------------------------------ programme -- */
+
+describe('programme error mapping', () => {
+  it('maps programme CHECK constraints to the mock validators\' messages', () => {
+    expect(mapPgError({ code: '23514', message: 'new row for relation "exhibitions" violates check constraint "exhibitions_dates_order"' })).toEqual(
+      new ValidationError('The end date is before the start date.', 'endsOn'),
+    );
+    expect(mapPgError({ code: '23514', message: 'new row for relation "open_calls" violates check constraint "open_calls_max_works_range"' })).toEqual(
+      new ValidationError('Allow between 1 and 10 works.', 'maxWorks'),
+    );
+    expect(mapPgError({ code: '23514', message: 'new row for relation "stories" violates check constraint "stories_image_alt"' })).toEqual(
+      new ValidationError('Image description is required.', 'image'),
+    );
+  });
+
+  it('reports a deleted linked exhibition / artist like checkProgrammeRefs, other FKs as NotFound', () => {
+    const fk = mapPgError({ code: '23503', message: 'insert or update on table "open_calls" violates foreign key constraint "open_calls_exhibition_id_fkey"' });
+    expect(fk).toEqual(new ValidationError('That exhibition no longer exists.', 'exhibitionId'));
+    expect(mapPgError({ code: '23503', message: 'violates foreign key constraint "stories_artist_id_fkey"' })).toEqual(new ValidationError('That artist no longer exists.', 'artistId'));
+    expect(mapPgError({ code: '23503', message: 'violates foreign key constraint "shortlist_items_artwork_id_fkey"' })).toBeInstanceOf(NotFoundError);
+  });
+
+  it('keeps RPC rule messages and fields (22023 + hint)', () => {
+    const e = mapPgError({ code: '22023', message: 'This call has applications. Unpublish it instead.', hint: 'call' });
+    expect(e).toEqual(new ValidationError('This call has applications. Unpublish it instead.', 'call'));
+  });
+});
+
+describe('programme mappers', () => {
+  const seed = buildSeed();
+  const U = (id: string) => demoUuid(id) ?? id;
+  const meta = { sample: true, published: true, created_at: '2026-10-01T14:00:00+00:00', updated_at: '2026-10-02T14:00:00+00:00' };
+
+  it('formats event times in Kofi\'s offset, like the mock seed', () => {
+    expect(toKofiOffsetIso('2026-10-29T22:30:00+00:00')).toBe('2026-10-29T18:30:00-04:00');
+    expect(toKofiOffsetIso('2026-11-08T18:00:00Z')).toBe('2026-11-08T13:00:00-05:00');
+    expect(toKofiOffsetIso('2027-01-01T04:59:59Z')).toBe('2026-12-31T23:59:59-05:00');
+    for (const ev of seed.events) expect(Date.parse(toKofiOffsetIso(ev.startsAt))).toBe(Date.parse(ev.startsAt));
+  });
+
+  it('round-trips programme image refs and public URLs', () => {
+    const url = 'https://abc.supabase.co/storage/v1/object/public/kofi-programme/exhibitions/1f0e.jpg';
+    expect(normalizeProgrammeImageSrc(url)).toBe('storage:kofi-programme/exhibitions/1f0e.jpg');
+    expect(programmePathOf('storage:kofi-programme/exhibitions/1f0e.jpg')).toBe('exhibitions/1f0e.jpg');
+    expect(normalizeProgrammeImageSrc('/art/hero.jpg')).toBe('/art/hero.jpg');
+    expect(normalizeProgrammeImageSrc('https://example.com/x.jpg')).toBe('https://example.com/x.jpg');
+  });
+
+  it('maps every seeded exhibition / call / event / story to a row and back unchanged', () => {
+    for (const ex of seed.exhibitions) {
+      const { id, createdAt, updatedAt, ...authored } = ex;
+      const row = { id, ...meta, ...exhibitionToRow(authored) } as unknown as ExhibitionRow;
+      expect(toExhibition({ ...row, sample: ex.sample, published: ex.published })).toEqual({ ...ex, createdAt: '2026-10-01T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' });
+      void createdAt;
+      void updatedAt;
+    }
+    for (const c of seed.openCalls) {
+      const { id, createdAt: _c, updatedAt: _u, ...authored } = c;
+      const row = { id, ...meta, ...openCallToRow(authored) } as unknown as OpenCallRow;
+      expect(toOpenCall({ ...row, sample: c.sample, published: c.published })).toEqual({ ...c, createdAt: '2026-10-01T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' });
+    }
+    for (const e of seed.events) {
+      const { id, createdAt: _c, updatedAt: _u, ...authored } = e;
+      const row = { id, ...meta, ...eventToRow(authored) } as unknown as EventRow;
+      expect(toProgrammeEvent({ ...row, sample: e.sample, published: e.published })).toEqual({ ...e, createdAt: '2026-10-01T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' });
+    }
+    for (const t of seed.stories) {
+      const { id, createdAt: _c, updatedAt: _u, ...authored } = t;
+      const row = { id, ...meta, ...storyToRow(authored) } as unknown as StoryRow;
+      expect(toStory({ ...row, sample: t.sample, published: t.published })).toEqual({ ...t, createdAt: '2026-10-01T14:00:00.000Z', updatedAt: '2026-10-02T14:00:00.000Z' });
+    }
+  });
+
+  it('writes NULL for cleared optional fields so an update really clears them', () => {
+    const row = exhibitionToRow({ title: 'T', startsOn: '2027-01-01', summary: 'S', body: '', artworkIds: [], sample: false, published: false });
+    expect(row).toMatchObject({ subtitle: null, ends_on: null, venue: null, image: null, external_url: null, curated_by: null });
+    expect(Object.keys(row)).not.toContain('id');
+    expect(Object.keys(row)).not.toContain('created_at');
+  });
+
+  it('builds application rows without the staff note when the view withheld it', () => {
+    const app = seed.applications.find((a) => a.staffNote)!;
+    const row: ApplicationViewRow = {
+      id: U(app.id),
+      call_id: U(app.callId),
+      artist_id: U(app.artistId),
+      artwork_ids: app.artworkIds.map(U),
+      statement: app.statement,
+      status: app.status,
+      decision_note: app.decisionNote ?? null,
+      staff_note: null,
+      created_at: app.createdAt,
+      updated_at: app.updatedAt,
+      decided_at: app.decidedAt ?? null,
+      call_title: null,
+      call_deadline: null,
+      artist_working_name: null,
+    };
+    const out = toApplicationRow(row, []);
+    expect(out).not.toHaveProperty('staffNote');
+    expect(out.decisionNote).toBe(app.decisionNote);
+    expect(out.callTitle).toBe('A call that has been removed');
+    expect(out.artistWorkingName).toBe('Unknown artist');
+  });
+});
+
+describe('SupabaseDataSource programme (offline)', () => {
+  function recordingFetch(respond: (url: string, method: string) => { status: number; body: unknown }) {
+    const calls: { url: string; method: string; headers: Headers; body: string }[] = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push({ url, method, headers: new Headers(init?.headers), body: typeof init?.body === 'string' ? init.body : '' });
+      const r = respond(url, method);
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { calls, fetchImpl };
+  }
+  const makeWith = (fetchImpl: typeof fetch) =>
+    createSupabaseDataSource('http://127.0.0.1:1', 'test-anon-key', {
+      demoAutoSignIn: false,
+      clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl } },
+    });
+  const visitor = SUPABASE_DEMO_IDENTITIES.find((d) => d.viewer.role === 'public')!.viewer;
+
+  it('reads the programme through the kofi *_visible views and serves bucket images by public URL', async () => {
+    const ex = {
+      id: 'a1000000-0000-4000-8000-000000000004', title: 'Night Weather', subtitle: null, starts_on: '2026-10-02', ends_on: '2026-11-22', venue: null,
+      summary: 'S', body: '', image: { src: 'storage:kofi-programme/exhibitions/x.jpg', alt: 'A room' }, artwork_ids: [], external_url: null,
+      curated_by: null, sample: true, published: true, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
+    };
+    const { calls, fetchImpl } = recordingFetch((url) => ({ status: 200, body: url.includes('exhibitions_visible') ? [ex] : [] }));
+    const ds = makeWith(fetchImpl as typeof fetch);
+    const list = await ds.listExhibitions(visitor);
+    expect(list[0]?.image?.src).toBe('http://127.0.0.1:1/storage/v1/object/public/kofi-programme/exhibitions/x.jpg');
+    await ds.listOpenCalls(visitor);
+    await ds.listEvents(visitor);
+    await ds.listStories(visitor);
+    const rest = calls.filter((c) => c.url.includes('/rest/v1/'));
+    expect(rest.map((c) => new URL(c.url).pathname)).toEqual([
+      '/rest/v1/exhibitions_visible', '/rest/v1/open_calls_visible', '/rest/v1/events_visible', '/rest/v1/stories_visible',
+    ]);
+    for (const c of rest) expect(c.headers.get('Accept-Profile')).toBe('kofi');
+  });
+
+  it('validates a collector inquiry client-side with the domain messages, then calls the RPC as anon', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => ({ status: 200, body: 'a6ffffff-0000-4000-8000-000000000001' }));
+    const ds = makeWith(fetchImpl as typeof fetch);
+    const base = { name: 'Ada Visitor', email: 'ada@example.net', intent: 'purchase' as const, message: 'Is this still available?', consent: true };
+    await expect(ds.submitBuyerInquiry(visitor, { ...base, consent: false })).rejects.toEqual(new ValidationError('Tick the box so Kofi can reply to you.', 'consent'));
+    expect(calls).toHaveLength(0);
+    const res = await ds.submitBuyerInquiry(visitor, { ...base, artworkId: DEMO_UUIDS.aw_mara_1 });
+    expect(res).toEqual({ id: 'a6ffffff-0000-4000-8000-000000000001' });
+    const rpc = calls.find((c) => c.url.endsWith('/rest/v1/rpc/submit_buyer_inquiry'))!;
+    expect(rpc.headers.get('Content-Profile')).toBe('kofi');
+    expect(JSON.parse(rpc.body)).toEqual({
+      p_artwork: DEMO_UUIDS.aw_mara_1, p_name: 'Ada Visitor', p_email: 'ada@example.net', p_org: null, p_intent: 'purchase', p_message: 'Is this still available?', p_consent: true,
+    });
+  });
+
+  it('refuses applications and admin desks for a visitor without a network call', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => ({ status: 200, body: [] }));
+    const ds = makeWith(fetchImpl as typeof fetch);
+    await expect(ds.listMyApplications(visitor)).rejects.toEqual(new ForbiddenError('Sign in as an artist to apply.'));
+    await expect(ds.submitApplication(visitor, { callId: DEMO_UUIDS.call_night_weather, artworkIds: [], statement: '' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.listApplications(visitor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.listBuyerInquiries(visitor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.saveExhibition(visitor, {} as never)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(calls).toHaveLength(0);
   });
 });

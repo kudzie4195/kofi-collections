@@ -40,7 +40,7 @@ describe('Artwork detail (/work/:id)', () => {
     renderAt('/work/aw_june_3', VISITOR);
     expect(await screen.findByText("This work isn't available")).toBeInTheDocument();
     expect(screen.queryByText('Untitled (in progress)')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Back to the gallery' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Browse the works' })).toHaveAttribute('href', '/works');
   });
 
   it('a Kofi-only record and an unknown id read exactly like not found', async () => {

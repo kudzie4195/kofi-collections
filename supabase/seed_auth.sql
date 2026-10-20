@@ -12,7 +12,7 @@
 -- (which creates the kofi.profiles rows) and any trigger the other product has
 -- (for example one that creates a public.profiles row per new user).
 --
--- Run order: migrations 0000-0007 → seed_auth.sql → seed_content.sql.
+-- Run order: migrations 0000-0008 → seed_auth.sql → seed_content.sql.
 -- Safe to re-run: existing ids / identities are left alone (on conflict do nothing).
 --
 -- Remove these accounts again (cascades to auth.identities and the kofi

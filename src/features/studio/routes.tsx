@@ -1,5 +1,6 @@
 import type { RouteObject } from 'react-router-dom';
 import './studio.css';
+import './opportunities.css';
 import { StudioHome } from './StudioHome';
 import { ProfileEditor } from './ProfileEditor';
 import { WorkEditorRoute } from './WorkEditor';
@@ -8,6 +9,9 @@ import { ExportScreen } from './ExportScreen';
 import { Inquiries } from './Inquiries';
 import { Consent } from './Consent';
 import { ImportScreen } from './ImportScreen';
+import { Opportunities } from './Opportunities';
+import { ApplyScreen } from './ApplyScreen';
+import { Applications } from './Applications';
 
 /** Relative children of /studio. The artist-only role gate lives in the spine. */
 export const studioRoutes: RouteObject[] = [
@@ -20,4 +24,7 @@ export const studioRoutes: RouteObject[] = [
   { path: 'import', element: <ImportScreen /> },
   { path: 'inquiries', element: <Inquiries /> },
   { path: 'consent', element: <Consent /> },
+  { path: 'opportunities', element: <Opportunities /> },
+  { path: 'apply/:callId', element: <ApplyScreen /> },
+  { path: 'applications', element: <Applications /> },
 ];

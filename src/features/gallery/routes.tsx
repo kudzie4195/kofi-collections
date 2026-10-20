@@ -6,7 +6,7 @@ import { GalleryScreen } from './GalleryScreen';
 import './gallery.css';
 
 export const galleryRoutes: RouteObject[] = [
-  { path: '/', element: <GalleryScreen /> },
+  { path: '/works', element: <GalleryScreen /> },
   { path: '/work/:id', element: <ArtworkScreen /> },
   { path: '/artists', element: <ArtistsScreen /> },
   { path: '/artists/:id', element: <ArtistScreen /> },

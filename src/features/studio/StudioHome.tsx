@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CONSENT_VERSION, VISIBILITY_LABEL } from '@/domain/types';
-import type { ArtworkView } from '@/domain/types';
+import type { ApplicationRow, ApplicationStatus, ArtworkView, OpenCall } from '@/domain/types';
+import { APPLICATION_STATUSES } from '@/domain/types';
+import { callPhase } from '@/domain/programme';
+import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, deadlineLabel } from '@/features/programme/format';
 import { formatPrice } from '@/domain/units';
 import { useSession, useQuery } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
@@ -16,13 +19,15 @@ export function StudioHome() {
 
   const q = useQuery(
     async (ds, v) => {
-      const [artist, works, inquiries, docs] = await Promise.all([
+      const [artist, works, inquiries, docs, calls, apps] = await Promise.all([
         ds.getMyArtist(v),
         v.artistId ? ds.listArtistArtworks(v, v.artistId) : Promise.resolve([] as ArtworkView[]),
         ds.listInquiries(v),
         ds.listMyDocuments(v),
+        ds.listOpenCalls(v).catch(() => [] as OpenCall[]),
+        ds.listMyApplications(v).catch(() => [] as ApplicationRow[]),
       ]);
-      return { artist, works, inquiries, docs };
+      return { artist, works, inquiries, docs, calls, apps };
     },
     [],
   );
@@ -40,7 +45,7 @@ export function StudioHome() {
 
   if (!q.data) return <HomeSkeleton />;
 
-  const { artist, works, inquiries, docs } = q.data;
+  const { artist, works, inquiries, docs, calls, apps } = q.data;
   if (!artist) {
     return (
       <div className="screen">
@@ -147,6 +152,8 @@ export function StudioHome() {
             </Link>
           </li>
         </ul>
+
+        <OpportunitiesBlock calls={calls} apps={apps} />
         </div>
 
         <div className="st-home__main stack--lg">
@@ -196,6 +203,59 @@ export function StudioHome() {
         </div>
       </main>
     </div>
+  );
+}
+
+function OpportunitiesBlock({ calls, apps }: { calls: OpenCall[]; apps: ApplicationRow[] }) {
+  const open = calls.filter((c) => callPhase(c) === 'open');
+  const next = open.find((c) => !c.externalUrl && !apps.some((a) => a.callId === c.id && a.status !== 'withdrawn')) ?? open[0];
+  const counts = APPLICATION_STATUSES.map((s) => [s, apps.filter((a) => a.status === s).length] as [ApplicationStatus, number]).filter(([, n]) => n > 0);
+  return (
+    <section className="st-opps" aria-labelledby="st-opps-title">
+      <h2 className="eyebrow eyebrow--gold" id="st-opps-title">
+        Opportunities
+      </h2>
+      <ul className="list st-opps__list">
+        <li>
+          <Link to="opportunities" className="list-row st-opp">
+            <span className="st-opp__num" aria-hidden="true">
+              {open.length}
+            </span>
+            <span className="list-row__main">
+              <span className="list-row__title st-opp__title">{open.length === 1 ? 'Open call' : 'Open calls'}</span>
+              <span className="list-row__sub">
+                {next ? `${next.title}: ${deadlineLabel(next).toLowerCase()}` : 'Nothing open right now. New calls appear here.'}
+              </span>
+              <span className="sr-only">, {open.length} open now</span>
+            </span>
+            <Icon.Back className="st-chevron" aria-hidden="true" />
+          </Link>
+        </li>
+        <li>
+          <Link to="applications" className="list-row st-opp">
+            <span className="st-opp__num" aria-hidden="true">
+              {apps.length}
+            </span>
+            <span className="list-row__main">
+              <span className="list-row__title st-opp__title">My applications</span>
+              {counts.length ? (
+                <span className="st-opp__counts">
+                  {counts.map(([s, n]) => (
+                    <span key={s} className="st-opp__count">
+                      <StatusDot status={APPLICATION_STATUS_DOT[s]} />
+                      {n} {APPLICATION_STATUS_LABEL[s].toLowerCase()}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span className="list-row__sub">You haven’t applied to a call yet.</span>
+              )}
+            </span>
+            <Icon.Back className="st-chevron" aria-hidden="true" />
+          </Link>
+        </li>
+      </ul>
+    </section>
   );
 }
 

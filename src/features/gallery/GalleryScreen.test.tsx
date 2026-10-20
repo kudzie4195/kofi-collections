@@ -8,9 +8,9 @@ afterEach(() => localStorage.clear());
 const grid = () => screen.getByRole('list', { name: 'Works' });
 const titlesInGrid = () => within(grid()).getAllByRole('link').map((a) => a.querySelector('.label-card__title')?.textContent);
 
-describe('Gallery (/)', () => {
+describe('Works gallery (/works)', () => {
   it('shows published works to a visitor and never drafts, Kofi-only records or pending artists', async () => {
-    renderAt('/');
+    renderAt('/works');
     expect(await screen.findByText('Small Weather No. 4')).toBeInTheDocument();
     expect(screen.getByText('Doubling (Liberty Avenue, 7:40pm)')).toBeInTheDocument();
     expect(screen.queryByText('Charcoal: Bridge Study')).not.toBeInTheDocument();
@@ -18,21 +18,22 @@ describe('Gallery (/)', () => {
     expect(screen.queryByText('Grid Drift 03')).not.toBeInTheDocument();
     expect(screen.queryByText('Grid Drift 04')).not.toBeInTheDocument();
     expect(screen.getByTestId('result-count')).toHaveTextContent('9 works');
-    // Hero headline is present
-    expect(screen.getByRole('heading', { name: /artists keep the record/i })).toBeInTheDocument();
+    // Compact page header (the hero lives on Discover now)
+    expect(screen.getByRole('heading', { level: 1, name: 'Works' })).toBeInTheDocument();
+    expect(screen.getByText(/9 works by 4 artists/)).toBeInTheDocument();
     // Cards link to the detail route
     expect(screen.getByText('Small Weather No. 4').closest('a')).toHaveAttribute('href', '/work/aw_mara_2');
   });
 
   it('painting + size under 40 in from URL params gives exactly Small Weather No. 4', async () => {
-    renderAt('/?medium=painting&unit=in&max=40');
+    renderAt('/works?medium=painting&unit=in&max=40');
     await screen.findByText('Small Weather No. 4');
     expect(titlesInGrid()).toEqual(['Small Weather No. 4']);
     expect(screen.getByRole('button', { name: /^filters \(2\)/i })).toBeInTheDocument();
   });
 
   it('painting chip + "Under 40 in" preset in the filter sheet narrows to Small Weather No. 4 and writes the URL', async () => {
-    renderAt('/');
+    renderAt('/works');
     await screen.findByText('Small Weather No. 4');
     const mediums = screen.getByRole('group', { name: 'Medium' });
     fireEvent.click(within(mediums).getByRole('button', { name: /^painting/i }));
@@ -55,7 +56,7 @@ describe('Gallery (/)', () => {
   });
 
   it('filter state survives back/forward', async () => {
-    const { router } = renderAt('/');
+    const { router } = renderAt('/works');
     await screen.findByText('Small Weather No. 4');
     fireEvent.click(within(screen.getByRole('group', { name: 'Medium' })).getByRole('button', { name: /^textile/i }));
     expect(titlesInGrid()).toHaveLength(2);
@@ -66,7 +67,7 @@ describe('Gallery (/)', () => {
   });
 
   it('zero results shows an empty state whose action clears filters', async () => {
-    renderAt('/?q=nothing-matches-this');
+    renderAt('/works?q=nothing-matches-this');
     expect(await screen.findByText('No works match those filters')).toBeInTheDocument();
     const empty = screen.getByText('No works match those filters').closest('.empty') as HTMLElement;
     fireEvent.click(within(empty).getByRole('button', { name: 'Clear filters' }));
@@ -75,7 +76,7 @@ describe('Gallery (/)', () => {
   });
 
   it('the live count in the sheet tracks the draft and "Clear all" resets it', async () => {
-    renderAt('/?medium=ceramics');
+    renderAt('/works?medium=ceramics');
     await screen.findByText('Lean II');
     fireEvent.click(screen.getByRole('button', { name: /^filters/i }));
     const sheet = screen.getByRole('dialog', { name: /filters/i });

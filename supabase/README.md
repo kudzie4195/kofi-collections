@@ -12,16 +12,19 @@ Backend for Kofi Collections' Supabase mode. Full guide: [`docs/SUPABASE.md`](..
 | `migrations/0005_rpcs.sql` | RPCs: consent, review, save artwork, export, verification, status changes, audit |
 | `migrations/0006_realtime.sql` | Realtime publication for the main `kofi.*` tables |
 | `migrations/0007_expose_schema.sql` | No-op for exposure (exposing `kofi` is a **manual dashboard step**, see docs/SUPABASE.md §2); `service_role` grants; schema-cache reload |
+| `migrations/0008_programme.sql` | The programme: exhibitions, open calls, events, stories, applications, collector inquiries; their views, RPCs, RLS, the public `kofi-programme` image bucket; recorded in `kofi.applied_migrations` (docs/SUPABASE.md §9) |
 | `seed_auth.sql` | **Generated.** 8 demo auth users (password `kofi-demo-2026`). **Creates real auth accounts in the shared `auth.users`** |
 | `seed_content.sql` | **Generated.** Fictional demo content in `kofi`, the `kofi.demo_*` snapshot and `kofi.kofi_demo_reset()`. Run after `seed_auth.sql` |
-| `scripts/generate-seed.mjs` | Regenerates both seed files from `src/data/mock/seed.ts` |
+| `seed_programme.sql` | **Generated.** Additive programme rows only (`on conflict do nothing`, never deletes) — for a project whose content was loaded without the reset snapshot |
+| `scripts/generate-seed.mjs` | Regenerates the three seed files from `src/data/mock/seed.ts` |
 | `scripts/upload-demo-vault.mjs` | Uploads the two fictional vault files (service-role key; `--dry-run` to preview) |
 | `scripts/load-seed.mjs` | Loads the TS seed in Node via Vite's bundled esbuild |
 | `tests/shim.sql` | Minimal `auth` / `storage` / roles stand-in, plus a stand-in for the other product that owns `public`. **Never load into Supabase.** |
 | `tests/rls_test.sql` | Visibility / RLS assertions per demo identity |
 | `tests/rpc_test.sql` | RPC, audit-trigger, cascade and reset assertions |
+| `tests/programme_test.sql` | Programme visibility, admin writes, application + collector-inquiry RPCs (every rule), storage and isolation of the 0008 objects |
 | `tests/isolation_test.sql` | Proves nothing lands in or changes `public`, and that `drop schema kofi cascade` removes Kofi cleanly |
-| `tests/run-local.sh` | Recreates a throwaway database, loads shim + migrations + seeds (content twice) + all three test files; writes `tests/LAST_RUN.log` |
+| `tests/run-local.sh` | Recreates a throwaway database, loads shim + migrations (0008 twice) + seeds (content twice, then the additive programme seed) + all four test files; writes `tests/LAST_RUN.log` |
 
 ```bash
 # local verification against a throwaway Postgres 15+ (drops/recreates the database)

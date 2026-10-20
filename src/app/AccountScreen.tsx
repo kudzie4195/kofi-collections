@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Button, Notice, TopBar, Icon, FictionalFooter } from '@/ui';
 import { useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
@@ -74,6 +74,14 @@ export function AccountScreen() {
               )}
             </div>
           </div>
+          <Link to="/saved" className="identity kg-saved-link">
+            <Icon.Heart />
+            <div style={{ flex: 1 }}>
+              <div className="identity__label">Saved works</div>
+              <div className="identity__caption">Kept on this device</div>
+            </div>
+            <Icon.Back style={{ transform: 'rotate(180deg)', opacity: 0.5 }} />
+          </Link>
           <p className="eyebrow kg-account__foot">Demo identities · nothing here is real</p>
         </section>
 

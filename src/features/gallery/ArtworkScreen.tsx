@@ -3,7 +3,13 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import type { ArtworkView, Unit } from '@/domain/types';
 import { formatDimensions, formatPrice } from '@/domain/units';
 import { useQuery, useViewer } from '@/state/session';
-import { Avatar, Button, EmptyState, ErrorState, FictionalFooter, Icon, LinkButton, Skeleton, Tag, TopBar, VisibilityBadge, WallLabel } from '@/ui';
+import { useToast } from '@/state/toast';
+import { Avatar, Button, EmptyState, ErrorState, FictionalFooter, Icon, LinkButton, SaveButton, Skeleton, Tag, TopBar, VisibilityBadge, WallLabel } from '@/ui';
+import { CollectorInquirySheet } from '@/features/programme/CollectorInquirySheet';
+import { ViewInRoomSheet } from '@/features/programme/ViewInRoomSheet';
+import { useSaved } from '@/features/programme/saved';
+import { formatDateRange } from '@/features/programme/format';
+import { exhibitionPhase } from '@/domain/programme';
 import { cap, isVerifiedCurator, useLoad } from './helpers';
 import { IntroSheet } from './IntroSheet';
 import { CuratorAccessNotice } from './notices';
@@ -23,7 +29,7 @@ export function ArtworkScreen() {
   const pending = q.loading && !work;
   // Deep links have no in-app history; send "Back" to the gallery instead of out of the app.
   const loc = useLocation();
-  const back = loc.key === 'default' ? '/' : true;
+  const back = loc.key === 'default' ? '/works' : true;
 
   return (
     <div className="screen">
@@ -36,8 +42,8 @@ export function ArtworkScreen() {
         ) : !work ? (
           <EmptyState
             title="This work isn't available"
-            body="The link may be wrong, or the work is not published. Browse the gallery for work you can see."
-            actions={<LinkButton to="/">Back to the gallery</LinkButton>}
+            body="The link may be wrong, or the work is not published. Browse the collection for work you can see."
+            actions={<LinkButton to="/works">Browse the works</LinkButton>}
           />
         ) : (
           <ArtworkDetail work={work} />
@@ -65,6 +71,16 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
   const [imageId, setImageId] = useState<string>();
   const [shortlistOpen, setShortlistOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
+  const [roomOpen, setRoomOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const saved = useSaved();
+  const toast = useToast();
+  const isSaved = saved.has(work.id);
+  const toggleSave = () => {
+    const now = saved.toggle(work.id);
+    if (now) toast.push('Saved on this device', 'success', { label: 'View', to: '/saved' });
+    else toast.push('Removed from saved', 'info');
+  };
 
   useEffect(() => setImageId(undefined), [work.id]);
 
@@ -73,10 +89,14 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
   const verified = isVerifiedCurator(viewer);
   const isOwner = work.canEdit && viewer.role === 'artist';
   const isAdmin = work.canEdit && viewer.role === 'admin';
+  // Collectors, visitors, other artists and pending curators ask Kofi; verified curators keep the introduction request as primary.
+  const askPrimary = !isOwner && !isAdmin && !verified;
 
   const artist = useQuery((data, v) => data.getArtist(v, work.artistId), [work.artistId]);
   const more = useQuery((data, v) => data.listArtistArtworks(v, work.artistId), [work.artistId]);
   const others = (more.data ?? []).filter((w) => w.id !== work.id);
+  const shows = useQuery((data, v) => data.listExhibitions(v), []);
+  const onView = (shows.data ?? []).filter((x) => x.published && x.artworkIds.includes(work.id) && exhibitionPhase(x) !== 'past');
 
   return (
     <article className="stack--lg kg-artwork" data-medium={work.medium}>
@@ -115,6 +135,19 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
           ) : work.priceWithheld ? (
             <p className="kg-price kg-price--withheld">Price on request</p>
           ) : null}
+          {onView.map((x) => (
+            <Link key={x.id} to={`/exhibitions/${x.id}`} className="kp-onview">
+              <span className="eyebrow eyebrow--green">{exhibitionPhase(x) === 'current' ? 'On view' : 'Coming up'}</span>
+              <span className="kp-onview__title">{x.title}</span>
+              <span className="kp-meta">{formatDateRange(x.startsOn, x.endsOn)}</span>
+            </Link>
+          ))}
+          <div className="kp-worktools" role="group" aria-label="This work">
+            <SaveButton saved={isSaved} onToggle={toggleSave} size="sm" />
+            <Button tone="secondary" size="sm" icon={<Icon.Room />} onClick={() => setRoomOpen(true)} aria-haspopup="dialog">
+              View in a room
+            </Button>
+          </div>
           {work.canEdit && (
             <div className="row row--wrap" aria-label="Who can see this">
               <VisibilityBadge level={work.visibility} prefix="Record" />
@@ -160,6 +193,13 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
           )}
         </dl>
 
+        {askPrimary && (
+          <div className="sticky-actions kg-actions">
+            <Button icon={<Icon.Mail />} onClick={() => setAskOpen(true)} aria-haspopup="dialog" block>
+              Ask Kofi about this work
+            </Button>
+          </div>
+        )}
         {(isOwner || isAdmin || verified) && (
           <div className="sticky-actions kg-actions">
             {isOwner && (
@@ -183,6 +223,14 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
               </>
             )}
           </div>
+        )}
+        {verified && (
+          <p className="kp-askline">
+            Buying or placing this work rather than showing it?{' '}
+            <button type="button" className="kp-linkbtn" onClick={() => setAskOpen(true)} aria-haspopup="dialog">
+              Ask Kofi about this work
+            </button>
+          </p>
         )}
         {!work.canEdit && <CuratorAccessNotice viewer={viewer} />}
 
@@ -225,6 +273,10 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
         </section>
       )}
 
+      <ViewInRoomSheet open={roomOpen} onClose={() => setRoomOpen(false)} work={work} />
+      {!isOwner && !isAdmin && (
+        <CollectorInquirySheet open={askOpen} onClose={() => setAskOpen(false)} artwork={{ id: work.id, title: work.title, artistName: work.artistWorkingName }} />
+      )}
       {verified && (
         <>
           <ShortlistSheet open={shortlistOpen} onClose={() => setShortlistOpen(false)} artworkId={work.id} artworkTitle={work.title} />

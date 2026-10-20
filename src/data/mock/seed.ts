@@ -1,13 +1,20 @@
 import type {
+  Application,
   ArtDocument,
   Artist,
   Artwork,
   AuditEvent,
+  BuyerInquiry,
   Curator,
   DemoIdentity,
+  Exhibition,
   Inquiry,
   Institution,
+  OpenCall,
+  ProgrammeEvent,
   Shortlist,
+  Story,
+  Venue,
 } from '@/domain/types';
 import { CONSENT_VERSION } from '@/domain/types';
 import { placeholderArt } from './placeholderArt';
@@ -32,7 +39,18 @@ export interface MockState {
   /** Private payloads for documents (data URLs), keyed by fileRef. Never returned without authorization. */
   documentPayloads: Record<string, string>;
   audit: AuditEvent[];
+  /* ---- programme (added in v3; older persisted states are migrated on load) ---- */
+  exhibitions: Exhibition[];
+  openCalls: OpenCall[];
+  applications: Application[];
+  events: ProgrammeEvent[];
+  stories: Story[];
+  buyerInquiries: BuyerInquiry[];
 }
+
+/** The collections added in v3. A persisted v2 state lacks them and gets the seeded programme merged in. */
+export const PROGRAMME_KEYS = ['exhibitions', 'openCalls', 'applications', 'events', 'stories', 'buyerInquiries'] as const;
+export type ProgrammeState = Pick<MockState, (typeof PROGRAMME_KEYS)[number]>;
 
 export const DEMO_USERS = {
   mara: 'user_mara',
@@ -550,7 +568,7 @@ export function buildSeed(): MockState {
     { id: 'ev_4', actorId: DEMO_USERS.admin, actorRole: 'admin', actorName: 'Quincy (Kofi)', action: 'inquiry.status', entityType: 'inquiry', entityId: 'inq_1', at: d(15), meta: { status: 'forwarded' } },
   ];
 
-  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit };
+  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit, ...buildProgrammeSeed() };
 }
 
 export const DEMO_IDENTITIES: DemoIdentity[] = [
@@ -587,3 +605,400 @@ export const DEMO_IDENTITIES: DemoIdentity[] = [
   },
   { id: 'admin', label: 'Quincy (Kofi staff)', caption: 'Admin · reviews & verification', viewer: { role: 'admin', userId: DEMO_USERS.admin, displayName: 'Quincy' } },
 ];
+
+/* =====================================================================
+   Programme seed.
+   - `sample: false` items are Kofi Collections' real programme, paraphrased
+     from koficollections.org (2026-10-20). Dates are the site's; where the
+     site states none, the assumption is marked below. No fictional works are
+     attached to real exhibitions.
+   - `sample: true` items are fictional and use the fictional artists above.
+   All dates are absolute (not relative to "now"), so phases move with the
+   real calendar exactly as they would for live content.
+   ===================================================================== */
+
+const KOFI_VENUE: Venue = { name: 'Kofi Collections', address: '213 Smithfield St.', city: 'Pittsburgh, PA' };
+const bundled = (file: string) => bundledArt[file] ?? `/art/${file}`;
+
+export function buildProgrammeSeed(): ProgrammeState {
+  const exhibitions: Exhibition[] = [
+    {
+      id: 'ex_being_seen',
+      sample: false,
+      published: true,
+      title: 'Being/Seen',
+      startsOn: '2025-05-08',
+      endsOn: '2025-10-25',
+      summary: 'A group exhibition of 36 Pittsburgh artists of colour working across four modalities.',
+      body:
+        'Being/Seen brought together 36 Pittsburgh artists of colour working across four modalities.\n\n' +
+        'The exhibition looked at how Black art and history have been erased or undervalued in exhibitions, and at what it feels like when that history is recognised and celebrated instead.',
+      artworkIds: [],
+      externalUrl: 'https://www.koficollections.org/upcoming-exhibitions',
+      curatedBy: 'Kofi Collections',
+      createdAt: '2026-10-20T13:00:00.000Z',
+      updatedAt: '2026-10-20T13:00:00.000Z',
+    },
+    {
+      id: 'ex_spirit_west',
+      sample: false,
+      published: true,
+      title: 'The Spirit of the West',
+      startsOn: '2024-09-12',
+      summary: 'A one-night exhibition honouring Black and Indigenous heritage in the American West.',
+      body:
+        'The Spirit of the West honoured Black and Indigenous heritage.\n\n' +
+        'Kofi Collections invited artists to submit works about the histories of these communities and their contributions to the American West, including ranching and Western traditions.',
+      image: { src: bundled('hero.jpg'), alt: 'Opening night: visitors among paintings on easels in a high-ceilinged room', credit: 'Kofi Collections' },
+      artworkIds: [],
+      externalUrl: 'https://www.koficollections.org/prior-exhibitions',
+      curatedBy: 'Kofi Collections',
+      createdAt: '2026-10-20T13:00:00.000Z',
+      updatedAt: '2026-10-20T13:00:00.000Z',
+    },
+    {
+      id: 'ex_i_am',
+      sample: false,
+      published: true,
+      title: 'I Am',
+      startsOn: '2024-05-03',
+      summary: 'Overlooked narratives of marginalised groups in the Pittsburgh region, from painting to sculpture.',
+      body:
+        'I Am gave space to narratives of marginalised groups in the Pittsburgh region that are often overlooked.\n\n' +
+        'The work on show ranged from paintings to sculpture.',
+      artworkIds: [],
+      externalUrl: 'https://www.koficollections.org/prior-exhibitions',
+      curatedBy: 'Kofi Collections',
+      createdAt: '2026-10-20T13:00:00.000Z',
+      updatedAt: '2026-10-20T13:00:00.000Z',
+    },
+    {
+      id: 'ex_night_weather',
+      sample: true,
+      published: true,
+      title: 'Night Weather',
+      subtitle: 'Four artists on the city after dark',
+      startsOn: '2026-10-02',
+      endsOn: '2026-11-22',
+      venue: KOFI_VENUE,
+      summary: 'Paintings, textile, photography and print made at night or about it: wet streets, late shifts, rooms after everyone has gone.',
+      body:
+        'Night Weather gathers work by four artists who keep late hours. Mara Oyelaran paints Liberty Avenue in the hour after rain. DeShawn Ferris photographs bakeries and transit yards on the night shift. June Takahashi-Bell weaves with thread salvaged from a closed mill.\n\n' +
+        'The show is hung low and close, so the textile can be touched and the photographs read at arm’s length. Prices are listed on the wall where the artist has chosen to share them.\n\n' +
+        'Every work in the exhibition is documented in the artists’ own records on Kofi Collections. Ask Kofi about any piece and the team will put you in touch.',
+      image: { src: bundled('mara1.jpg'), alt: 'Face painted in black brush strokes and red spray over a brown ground', credit: 'Mara Oyelaran' },
+      artworkIds: ['aw_mara_1', 'aw_mara_2', 'aw_june_1', 'aw_deshawn_1', 'aw_priya_1'],
+      curatedBy: 'Kofi Collections',
+      createdAt: '2026-09-15T14:00:00.000Z',
+      updatedAt: '2026-10-01T14:00:00.000Z',
+    },
+    {
+      id: 'ex_soft_ground',
+      sample: true,
+      published: true,
+      title: 'Soft Ground',
+      subtitle: 'Printmaking and textile',
+      startsOn: '2027-01-15',
+      endsOn: '2027-03-06',
+      venue: KOFI_VENUE,
+      summary: 'Prints and woven work that share a process: layers laid down slowly, one pass at a time.',
+      body:
+        'Soft Ground takes its name from the etching ground that stays tacky, recording anything pressed into it. The exhibition pairs screen prints by Priya Venkataraman with wall textiles by June Takahashi-Bell.\n\n' +
+        'Both artists build an image in passes. The show will add works selected through the Soft Ground open call.',
+      artworkIds: ['aw_priya_2', 'aw_june_1', 'aw_june_2'],
+      curatedBy: 'Kofi Collections',
+      createdAt: '2026-10-05T14:00:00.000Z',
+      updatedAt: '2026-10-05T14:00:00.000Z',
+    },
+  ];
+
+  const openCalls: OpenCall[] = [
+    {
+      id: 'call_advocacy',
+      sample: false,
+      published: true,
+      title: 'The Art of Advocacy: Giving Form and Voice to Justice',
+      partner: 'Neighborhood Legal Services',
+      summary: 'An exhibition for Neighborhood Legal Services’ 60th anniversary. Kofi Collections leads artist selection.',
+      body:
+        'Neighborhood Legal Services is marking its 60th anniversary with an exhibition about how artists and lawyers both use storytelling, interpretation and advocacy to bring lived experiences to light and to inspire change.\n\n' +
+        'Kofi Collections is the curatorial partner and is leading the selection of artists. Applications are taken on the partner’s form; read the call there for eligibility and terms.',
+      eligibility: 'See the call for eligibility',
+      mediums: [],
+      // Assumption: the site does not state an opening date or a deadline.
+      opensOn: '2026-09-01',
+      maxWorks: 3,
+      fee: 'See the call',
+      externalUrl: 'https://docs.google.com/forms/d/e/1FAIpQLSfwGVjQiYX8d0vEphfu4kzVmKifV8SKfQpzBT2qzcmW_y_DiA/viewform',
+      createdAt: '2026-10-20T13:00:00.000Z',
+      updatedAt: '2026-10-20T13:00:00.000Z',
+    },
+    {
+      id: 'call_night_weather',
+      sample: true,
+      published: true,
+      title: 'Night Weather Studio Award',
+      partner: 'Kofi Collections',
+      summary: 'Show us work made at night or about it. One artist receives a solo wall next spring and a studio grant.',
+      body:
+        'The Night Weather Studio Award is open to artists in any medium whose work deals with the city after dark: late shifts, weather, light, the rooms people leave behind.\n\n' +
+        'Attach up to three works from your Kofi portfolio and write a short statement on why they belong together. Works set to Only me cannot be attached; change them to Kofi team only if you want us to see them without publishing.\n\n' +
+        'Kofi reads every application. Shortlisted artists will hear from us within three weeks of the deadline.',
+      eligibility: 'Artists living or working in Western Pennsylvania',
+      mediums: [],
+      opensOn: '2026-10-01',
+      deadline: '2026-11-30',
+      maxWorks: 3,
+      fee: 'No entry fee',
+      award: 'A solo wall in Kofi’s spring 2027 programme and a $1,500 studio grant (sample)',
+      exhibitionId: 'ex_night_weather',
+      createdAt: '2026-09-20T14:00:00.000Z',
+      updatedAt: '2026-10-01T14:00:00.000Z',
+    },
+    {
+      id: 'call_soft_ground',
+      sample: true,
+      published: true,
+      title: 'Soft Ground: Printmakers & Weavers',
+      partner: 'Kofi Collections',
+      summary: 'Printmakers and textile artists: apply to show alongside Soft Ground this winter.',
+      body:
+        'Soft Ground will add a small number of works chosen through this call. We are looking for prints and woven or stitched work where the process is visible in the finished piece.\n\n' +
+        'Editions are welcome; tell us the edition size in the work’s record.',
+      eligibility: 'Printmakers and textile artists in the United States and Canada',
+      mediums: ['printmaking', 'textile'],
+      opensOn: '2026-11-15',
+      deadline: '2027-01-10',
+      maxWorks: 4,
+      fee: 'No entry fee',
+      exhibitionId: 'ex_soft_ground',
+      createdAt: '2026-10-05T14:00:00.000Z',
+      updatedAt: '2026-10-05T14:00:00.000Z',
+    },
+    {
+      id: 'call_summer_open',
+      sample: true,
+      published: true,
+      title: 'Late Summer Open 2026',
+      partner: 'Kofi Collections',
+      summary: 'Kofi’s open call for the autumn hang. Selected works are showing now in Night Weather.',
+      body:
+        'The Late Summer Open is Kofi’s call for new work in any medium. Selected works are hung together in the autumn exhibition.\n\n' +
+        'This call has closed. Thank you to everyone who applied.',
+      eligibility: 'Any artist with an approved Kofi profile',
+      mediums: [],
+      opensOn: '2026-08-20',
+      deadline: '2026-09-20',
+      maxWorks: 3,
+      fee: 'No entry fee',
+      createdAt: '2026-08-12T14:00:00.000Z',
+      updatedAt: '2026-09-21T14:00:00.000Z',
+    },
+  ];
+
+  const applications: Application[] = [
+    {
+      id: 'app_mara_summer',
+      callId: 'call_summer_open',
+      artistId: 'art_mara',
+      artworkIds: ['aw_mara_1', 'aw_mara_2'],
+      statement: 'Two paintings from the same week of rain: one large, one small. I would like them hung on facing walls so the small one reads as a note on the large one.',
+      status: 'accepted',
+      decisionNote: 'Selected for Night Weather, opening October 2.',
+      createdAt: '2026-09-02T15:10:00.000Z',
+      updatedAt: '2026-09-25T16:00:00.000Z',
+      decidedAt: '2026-09-25T16:00:00.000Z',
+    },
+    {
+      id: 'app_june_summer',
+      callId: 'call_summer_open',
+      artistId: 'art_june',
+      artworkIds: ['aw_june_1'],
+      statement: 'A wall textile woven from thread salvaged from a closed mill. It is meant to be touched, and it changes shape a little each time it is.',
+      status: 'declined',
+      decisionNote: 'Thank you — we would love to see the new loom work next time.',
+      staffNote: 'Strong; space-limited.',
+      createdAt: '2026-09-09T18:40:00.000Z',
+      updatedAt: '2026-09-25T16:05:00.000Z',
+      decidedAt: '2026-09-25T16:05:00.000Z',
+    },
+    {
+      id: 'app_deshawn_night',
+      callId: 'call_night_weather',
+      artistId: 'art_deshawn',
+      artworkIds: ['aw_deshawn_1', 'aw_deshawn_2'],
+      statement: 'Both pieces were made between 2 and 5am in workplaces that run all night. The print is a single frame; the video is the same kind of room, held for eleven minutes.',
+      status: 'submitted',
+      createdAt: '2026-10-12T02:15:00.000Z',
+      updatedAt: '2026-10-12T02:15:00.000Z',
+    },
+  ];
+
+  const events: ProgrammeEvent[] = [
+    {
+      id: 'ev_nw_opening',
+      sample: true,
+      published: true,
+      title: 'Night Weather: opening reception',
+      kind: 'opening',
+      startsAt: '2026-10-02T18:00:00-04:00',
+      endsAt: '2026-10-02T21:00:00-04:00',
+      venue: KOFI_VENUE,
+      summary: 'The first evening of Night Weather, with the artists in the room.',
+      exhibitionId: 'ex_night_weather',
+      createdAt: '2026-09-15T14:00:00.000Z',
+      updatedAt: '2026-09-15T14:00:00.000Z',
+    },
+    {
+      id: 'ev_mara_talk',
+      sample: true,
+      published: true,
+      title: 'Artist talk: Mara Oyelaran on glazing',
+      kind: 'talk',
+      startsAt: '2026-10-29T18:30:00-04:00',
+      endsAt: '2026-10-29T20:00:00-04:00',
+      venue: KOFI_VENUE,
+      summary: 'Mara walks through how a painting is built from thin layers, in front of the two works in the show.',
+      exhibitionId: 'ex_night_weather',
+      createdAt: '2026-10-01T14:00:00.000Z',
+      updatedAt: '2026-10-01T14:00:00.000Z',
+    },
+    {
+      id: 'ev_june_open_studio',
+      sample: true,
+      published: true,
+      title: 'Open studio: June Takahashi-Bell',
+      kind: 'studio visit',
+      startsAt: '2026-11-08T13:00:00-05:00',
+      endsAt: '2026-11-08T17:00:00-05:00',
+      venue: KOFI_VENUE,
+      summary: 'June sets up a working loom in the gallery for the afternoon. Drop in, ask questions, try the shuttle.',
+      exhibitionId: 'ex_soft_ground',
+      createdAt: '2026-10-05T14:00:00.000Z',
+      updatedAt: '2026-10-05T14:00:00.000Z',
+    },
+    {
+      id: 'ev_collector_evening',
+      sample: true,
+      published: true,
+      title: 'Collector evening',
+      kind: 'social',
+      startsAt: '2026-11-19T18:00:00-05:00',
+      endsAt: '2026-11-19T20:30:00-05:00',
+      venue: KOFI_VENUE,
+      summary: 'A quiet evening in Night Weather for people thinking about buying or commissioning work. Kofi staff on hand to answer questions.',
+      exhibitionId: 'ex_night_weather',
+      createdAt: '2026-10-10T14:00:00.000Z',
+      updatedAt: '2026-10-10T14:00:00.000Z',
+    },
+  ];
+
+  const stories: Story[] = [
+    {
+      id: 'st_mara_interview',
+      sample: true,
+      published: true,
+      title: 'Mara Oyelaran paints the hour after a storm',
+      dek: 'The Pittsburgh painter on thin glazes, wet streets, and why her work is slow.',
+      kind: 'interview',
+      body:
+        'Mara Oyelaran works from a converted print shop in Pittsburgh. The old press is still there; she uses its bed as a table for mixing glazes.\n\n' +
+        'Her paintings start in the street. After rain she walks Liberty Avenue with a small sketchbook and notes where the reflections fall. Back in the studio she lays down a first thin layer and waits for it to dry before the next. A large canvas can take eleven passes.\n\n' +
+        '> I paint the hour after a storm, when the city is wet enough to double itself.\n\n' +
+        'Doubling (Liberty Avenue, 7:40pm) is the clearest example. A face is painted twice, the second pass slightly offset, so that one reads as the reflection of the other. Small Weather No. 4 was painted in the studio doorway while it was raining, wet-into-wet, in a single afternoon.\n\n' +
+        'Both works are in Night Weather at Kofi Collections until November 22. Mara gives a talk on glazing at the gallery on October 29.',
+      author: 'Kofi Collections editorial',
+      publishedOn: '2026-10-14',
+      artistId: 'art_mara',
+      artworkIds: ['aw_mara_1', 'aw_mara_2'],
+      image: { src: bundled('mara2.jpg'), alt: 'Figure in deep blue against a turquoise ground', credit: 'Mara Oyelaran' },
+      createdAt: '2026-10-14T13:00:00.000Z',
+      updatedAt: '2026-10-14T13:00:00.000Z',
+    },
+    {
+      id: 'st_june_loom',
+      sample: true,
+      published: true,
+      title: 'Inside June Takahashi-Bell’s loom room',
+      dek: 'Reclaimed mill thread, hand-dyed wool, and wall works built to be touched.',
+      kind: 'studio visit',
+      body:
+        'June Takahashi-Bell’s studio is one room with a floor loom, a dye bench and a wall of thread on cones. Most of the thread came from a mill that closed; June bought what was left on the shelves.\n\n' +
+        'The wool is dyed by hand in small batches, so no two lots match. June treats that as part of the work rather than a problem to solve.\n\n' +
+        'Warp / Weft / Wait is made to be handled. Visitors are encouraged to touch it, and the surface shifts a little each time. Small Loom Studies I–IV are dye tests on silk, sold as a set.\n\n' +
+        'June will run an open studio afternoon at Kofi Collections on November 8, ahead of Soft Ground in January.',
+      author: 'Kofi Collections editorial',
+      publishedOn: '2026-09-30',
+      artistId: 'art_june',
+      artworkIds: ['aw_june_1', 'aw_june_2'],
+      image: { src: bundled('june1.jpg'), alt: 'A dress built from hundreds of hand-stitched feathers over a printed ground', credit: 'June Takahashi-Bell' },
+      createdAt: '2026-09-30T13:00:00.000Z',
+      updatedAt: '2026-09-30T13:00:00.000Z',
+    },
+    {
+      id: 'st_artist_record',
+      sample: true,
+      published: true,
+      title: 'What an artist-owned record changes',
+      dek: 'Every field in a Kofi profile has its own visibility. Here is how that works, and why.',
+      kind: 'essay',
+      body:
+        'On Kofi Collections the artist owns the record. Each work, each price and each document has its own setting for who can see it, and the artist can change it at any time.\n\n' +
+        'There are four levels. Public means anyone. Verified institutions means curators whose institution Kofi has checked. Kofi team only means Kofi staff and the artist. Only me means the artist alone.\n\n' +
+        '> A price can be shared with a museum without being published to everyone.\n\n' +
+        'Settings apply to fields, not pages. A painting can be public while its price is shown only to verified institutions. Condition reports and appraisal letters are stored privately and are never shown to the public; when Kofi staff open one, the access is logged and the artist can see it.\n\n' +
+        'Artists can export everything they have entered, as a spreadsheet and as a full data file, whenever they like.',
+      author: 'Kofi Collections editorial',
+      publishedOn: '2026-09-16',
+      artworkIds: [],
+      createdAt: '2026-09-16T13:00:00.000Z',
+      updatedAt: '2026-09-16T13:00:00.000Z',
+    },
+    {
+      id: 'st_advocacy_partner',
+      sample: false,
+      published: true,
+      title: 'Kofi Collections named curatorial partner for The Art of Advocacy',
+      dek: 'An exhibition for Neighborhood Legal Services’ 60th anniversary.',
+      kind: 'news',
+      body:
+        'Neighborhood Legal Services is celebrating its 60th anniversary with The Art of Advocacy: Giving Form and Voice to Justice, an exhibition about how artists and lawyers use storytelling, interpretation and advocacy to bring lived experiences to light and inspire change.\n\n' +
+        'Kofi Collections is the curatorial partner and is leading the selection of artists. The call for artists is open now; applications are taken on the partner’s form.',
+      author: 'Kofi Collections',
+      // Assumption: the site does not date the announcement.
+      publishedOn: '2026-09-01',
+      artworkIds: [],
+      createdAt: '2026-10-20T13:00:00.000Z',
+      updatedAt: '2026-10-20T13:00:00.000Z',
+    },
+  ];
+
+  const buyerInquiries: BuyerInquiry[] = [
+    {
+      id: 'bi_doubling',
+      artworkId: 'aw_mara_1',
+      artistId: 'art_mara',
+      name: 'Dana Whitcomb',
+      email: 'dana.whitcomb@example.com',
+      intent: 'purchase',
+      message: 'I saw Doubling at the opening of Night Weather. Is it still available, and could I see it again on a weekday before deciding? (Sample inquiry.)',
+      status: 'new',
+      createdAt: '2026-10-18T15:20:00.000Z',
+      updatedAt: '2026-10-18T15:20:00.000Z',
+    },
+    {
+      id: 'bi_office_placement',
+      name: 'Ray Castellano',
+      email: 'ray@example.org',
+      organization: 'Riverside Design Office (sample)',
+      intent: 'placement',
+      message: 'We are moving into a new office on the North Shore and want three or four works for the reception and meeting rooms, ideally by local artists. Budget to be discussed.',
+      status: 'in progress',
+      staffNote: 'Sent three options from Night Weather; site visit to be booked.',
+      createdAt: '2026-10-09T14:05:00.000Z',
+      updatedAt: '2026-10-11T17:30:00.000Z',
+    },
+  ];
+
+  return { exhibitions, openCalls, applications, events, stories, buyerInquiries };
+}

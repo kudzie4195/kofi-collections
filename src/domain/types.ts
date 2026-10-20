@@ -314,7 +314,14 @@ export type AuditAction =
   | 'shortlist.remove'
   | 'shortlist.delete'
   | 'inquiry.create'
-  | 'inquiry.status';
+  | 'inquiry.status'
+  | 'programme.save'
+  | 'programme.delete'
+  | 'application.submit'
+  | 'application.withdraw'
+  | 'application.status'
+  | 'buyer_inquiry.submit'
+  | 'buyer_inquiry.status';
 
 /** Append-only. */
 export interface AuditEvent {
@@ -323,7 +330,7 @@ export interface AuditEvent {
   actorRole: Role;
   actorName: string;
   action: AuditAction;
-  entityType: 'artist' | 'artwork' | 'document' | 'curator' | 'shortlist' | 'inquiry';
+  entityType: 'artist' | 'artwork' | 'document' | 'curator' | 'shortlist' | 'inquiry' | 'exhibition' | 'open_call' | 'event' | 'story' | 'application' | 'buyer_inquiry';
   entityId: string;
   at: string;
   consentVersion?: string;
@@ -400,3 +407,184 @@ export interface DemoIdentity {
 }
 
 export const CONSENT_VERSION = '2026-10-v1';
+
+/* =====================================================================
+   Programme — content Kofi authors (exhibitions, open calls, events,
+   journal) and the two flows that hang off it: artist applications to
+   open calls, and collector ("buyer") inquiries routed through Kofi.
+
+   Visibility rules (enforced by both data sources, tested in
+   src/domain/programme.test.ts and supabase/tests):
+   - Programme items: `published` → anyone; unpublished → Kofi admins only.
+     Only admins create/edit/delete them.
+   - `artworkIds` on any programme item are filtered to the works the
+     viewer may see; a hidden work is dropped, never shown as a stub.
+   - Applications: the applying artist and Kofi admins only. `staffNote`
+     is Kofi-only; `decisionNote` is shown to the artist.
+   - Buyer inquiries: anyone may submit (incl. visitors); only admins can
+     list or read them. The artist's contact details are never exposed.
+   ===================================================================== */
+
+export interface ProgrammeImage {
+  /** data:image/*, storage:<bucket>/<path>, or a bundled /art/<file> path. */
+  src: string;
+  alt: string;
+  credit?: string;
+}
+
+export interface Venue {
+  name: string;
+  address?: string;
+  city: string;
+}
+
+/** Fields every programme item carries. */
+export interface ProgrammeBase {
+  id: string;
+  /** Fictional demo content — rendered with a visible "Sample" tag. */
+  sample: boolean;
+  /** Unpublished items are drafts visible to Kofi admins only. */
+  published: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Exhibition extends ProgrammeBase {
+  title: string;
+  subtitle?: string;
+  /** ISO date (YYYY-MM-DD). */
+  startsOn: string;
+  /** ISO date; omitted for a single-day show. */
+  endsOn?: string;
+  venue?: Venue;
+  /** One or two sentences for cards. */
+  summary: string;
+  /** Long text; paragraphs separated by a blank line. */
+  body: string;
+  image?: ProgrammeImage;
+  artworkIds: string[];
+  /** Exhibition page on koficollections.org or a partner site. */
+  externalUrl?: string;
+  curatedBy?: string;
+}
+export type ExhibitionPhase = 'upcoming' | 'current' | 'past';
+
+export interface OpenCall extends ProgrammeBase {
+  title: string;
+  /** Partner organisation, e.g. the institution commissioning the show. */
+  partner?: string;
+  summary: string;
+  body: string;
+  /** Plain-language eligibility, e.g. "Artists living in Allegheny County". */
+  eligibility: string;
+  /** Empty = any medium. */
+  mediums: Medium[];
+  /** ISO date the call opens. */
+  opensOn: string;
+  /** ISO date of the last day to apply (inclusive). Omitted = open until filled. */
+  deadline?: string;
+  /** 1–10. */
+  maxWorks: number;
+  /** e.g. "No entry fee". Kofi calls never charge artists; free text so partners can state terms. */
+  fee: string;
+  award?: string;
+  image?: ProgrammeImage;
+  /** When set, applications are taken on this external form, not in the app. */
+  externalUrl?: string;
+  exhibitionId?: string;
+}
+export type CallPhase = 'upcoming' | 'open' | 'closed';
+
+export type ApplicationStatus = 'submitted' | 'shortlisted' | 'accepted' | 'declined' | 'withdrawn';
+export const APPLICATION_STATUSES: ApplicationStatus[] = ['submitted', 'shortlisted', 'accepted', 'declined', 'withdrawn'];
+
+export interface Application {
+  id: string;
+  callId: string;
+  artistId: string;
+  /** The artist's own works; never 'private' ones (see validateApplication). */
+  artworkIds: string[];
+  statement: string;
+  status: ApplicationStatus;
+  /** Shown to the artist with the decision. */
+  decisionNote?: string;
+  /** Kofi-only reviewer note. Never returned to the artist. */
+  staffNote?: string;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt?: string;
+}
+
+export interface ApplicationRow extends Application {
+  callTitle: string;
+  callDeadline?: string;
+  artistWorkingName: string;
+  /** The attached works as this viewer may see them (artist: own; admin: all). */
+  works: ArtworkView[];
+}
+
+export type EventKind = 'opening' | 'talk' | 'studio visit' | 'workshop' | 'social';
+export const EVENT_KINDS: EventKind[] = ['opening', 'talk', 'studio visit', 'workshop', 'social'];
+
+export interface ProgrammeEvent extends ProgrammeBase {
+  title: string;
+  kind: EventKind;
+  /** ISO datetime with offset. */
+  startsAt: string;
+  endsAt?: string;
+  venue?: Venue;
+  summary: string;
+  rsvpUrl?: string;
+  exhibitionId?: string;
+}
+
+export type StoryKind = 'interview' | 'studio visit' | 'essay' | 'news';
+export const STORY_KINDS: StoryKind[] = ['interview', 'studio visit', 'essay', 'news'];
+
+export interface Story extends ProgrammeBase {
+  title: string;
+  /** Standfirst under the headline. */
+  dek: string;
+  kind: StoryKind;
+  /** Paragraphs separated by a blank line. A line starting with "> " is a pull quote. */
+  body: string;
+  author: string;
+  /** ISO date. */
+  publishedOn: string;
+  artistId?: string;
+  artworkIds: string[];
+  image?: ProgrammeImage;
+}
+
+export type BuyerIntent = 'purchase' | 'commission' | 'placement' | 'exhibition' | 'other';
+export const BUYER_INTENTS: BuyerIntent[] = ['purchase', 'commission', 'placement', 'exhibition', 'other'];
+export const BUYER_INTENT_LABEL: Record<BuyerIntent, string> = {
+  purchase: 'Buying this work',
+  commission: 'Commissioning the artist',
+  placement: 'Art for a home or workplace',
+  exhibition: 'Showing the work',
+  other: 'Something else',
+};
+
+export type BuyerInquiryStatus = 'new' | 'in progress' | 'closed';
+export const BUYER_INQUIRY_STATUSES: BuyerInquiryStatus[] = ['new', 'in progress', 'closed'];
+
+export interface BuyerInquiry {
+  id: string;
+  artworkId?: string;
+  artistId?: string;
+  name: string;
+  email: string;
+  organization?: string;
+  intent: BuyerIntent;
+  message: string;
+  status: BuyerInquiryStatus;
+  staffNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BuyerInquiryRow extends BuyerInquiry {
+  artworkTitle?: string;
+  artistWorkingName?: string;
+}

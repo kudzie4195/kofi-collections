@@ -68,9 +68,10 @@
 .tiles.admin-tiles {
   gap: 12px;
 }
+/* six queues: 2 × 3 on phones, 3 × 2 from tablet up — never an orphan tile */
 @media (min-width: 640px) {
   .tiles.admin-tiles {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 .tile.admin-tile {

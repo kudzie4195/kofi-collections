@@ -9,7 +9,9 @@
 --
 -- Safe to re-run: content tables are restored by kofi.kofi_demo_reset(), which
 -- WIPES every row in the Kofi content tables (artists, artworks, images,
--- institutions, curators, shortlists, inquiries, documents). Audit events and
+-- institutions, curators, shortlists, inquiries, documents and the programme:
+-- exhibitions, open calls, events, stories, applications, collector inquiries).
+-- Audit events and
 -- consents are append-only and are never deleted; seed rows for them are
 -- inserted once.
 --
@@ -71,6 +73,28 @@
 --   ev_2                 90000000-0000-4000-8000-000000000002
 --   ev_3                 90000000-0000-4000-8000-000000000003
 --   ev_4                 90000000-0000-4000-8000-000000000004
+--   ex_being_seen        a1000000-0000-4000-8000-000000000001
+--   ex_spirit_west       a1000000-0000-4000-8000-000000000002
+--   ex_i_am              a1000000-0000-4000-8000-000000000003
+--   ex_night_weather     a1000000-0000-4000-8000-000000000004
+--   ex_soft_ground       a1000000-0000-4000-8000-000000000005
+--   call_advocacy        a2000000-0000-4000-8000-000000000001
+--   call_night_weather   a2000000-0000-4000-8000-000000000002
+--   call_soft_ground     a2000000-0000-4000-8000-000000000003
+--   call_summer_open     a2000000-0000-4000-8000-000000000004
+--   app_mara_summer      a3000000-0000-4000-8000-000000000001
+--   app_june_summer      a3000000-0000-4000-8000-000000000002
+--   app_deshawn_night    a3000000-0000-4000-8000-000000000003
+--   ev_nw_opening        a4000000-0000-4000-8000-000000000001
+--   ev_mara_talk         a4000000-0000-4000-8000-000000000002
+--   ev_june_open_studio  a4000000-0000-4000-8000-000000000003
+--   ev_collector_evening a4000000-0000-4000-8000-000000000004
+--   st_mara_interview    a5000000-0000-4000-8000-000000000001
+--   st_june_loom         a5000000-0000-4000-8000-000000000002
+--   st_artist_record     a5000000-0000-4000-8000-000000000003
+--   st_advocacy_partner  a5000000-0000-4000-8000-000000000004
+--   bi_doubling          a6000000-0000-4000-8000-000000000001
+--   bi_office_placement  a6000000-0000-4000-8000-000000000002
 --   consent:art_mara     c0000000-0000-4000-8000-000000000001   consents row
 --   consent:art_tobias   c0000000-0000-4000-8000-000000000002   consents row
 --   consent:art_june     c0000000-0000-4000-8000-000000000003   consents row
@@ -94,7 +118,7 @@ begin
 end $$;
 
 -- ------------------------------------------------------ demo snapshot -----
-drop table if exists kofi.demo_profiles, kofi.demo_institutions, kofi.demo_artists, kofi.demo_artworks, kofi.demo_artwork_images, kofi.demo_curators, kofi.demo_shortlists, kofi.demo_shortlist_items, kofi.demo_inquiries, kofi.demo_documents;
+drop table if exists kofi.demo_profiles, kofi.demo_institutions, kofi.demo_artists, kofi.demo_artworks, kofi.demo_artwork_images, kofi.demo_curators, kofi.demo_shortlists, kofi.demo_shortlist_items, kofi.demo_inquiries, kofi.demo_documents, kofi.demo_exhibitions, kofi.demo_open_calls, kofi.demo_events, kofi.demo_stories, kofi.demo_applications, kofi.demo_buyer_inquiries;
 create table kofi.demo_profiles (id uuid primary key, role kofi.role not null, display_name text not null);
 create table kofi.demo_institutions (like kofi.institutions including defaults);
 create table kofi.demo_artists (like kofi.artists including defaults);
@@ -105,6 +129,12 @@ create table kofi.demo_shortlists (like kofi.shortlists including defaults);
 create table kofi.demo_shortlist_items (like kofi.shortlist_items including defaults);
 create table kofi.demo_inquiries (like kofi.inquiries including defaults);
 create table kofi.demo_documents (like kofi.documents including defaults);
+create table kofi.demo_exhibitions (like kofi.exhibitions including defaults);
+create table kofi.demo_open_calls (like kofi.open_calls including defaults);
+create table kofi.demo_events (like kofi.events including defaults);
+create table kofi.demo_stories (like kofi.stories including defaults);
+create table kofi.demo_applications (like kofi.applications including defaults);
+create table kofi.demo_buyer_inquiries (like kofi.buyer_inquiries including defaults);
 -- The snapshot is not part of the API: no grants, RLS on with no policies.
 revoke all on kofi.demo_profiles from public, anon, authenticated;
 alter table kofi.demo_profiles enable row level security;
@@ -126,6 +156,18 @@ revoke all on kofi.demo_inquiries from public, anon, authenticated;
 alter table kofi.demo_inquiries enable row level security;
 revoke all on kofi.demo_documents from public, anon, authenticated;
 alter table kofi.demo_documents enable row level security;
+revoke all on kofi.demo_exhibitions from public, anon, authenticated;
+alter table kofi.demo_exhibitions enable row level security;
+revoke all on kofi.demo_open_calls from public, anon, authenticated;
+alter table kofi.demo_open_calls enable row level security;
+revoke all on kofi.demo_events from public, anon, authenticated;
+alter table kofi.demo_events enable row level security;
+revoke all on kofi.demo_stories from public, anon, authenticated;
+alter table kofi.demo_stories enable row level security;
+revoke all on kofi.demo_applications from public, anon, authenticated;
+alter table kofi.demo_applications enable row level security;
+revoke all on kofi.demo_buyer_inquiries from public, anon, authenticated;
+alter table kofi.demo_buyer_inquiries enable row level security;
 
 insert into kofi.demo_profiles (id, role, display_name) values
   ('10000000-0000-4000-8000-000000000001'::uuid, 'artist', 'Mara Oyelaran'),
@@ -202,6 +244,87 @@ insert into kofi.demo_documents (id, artist_id, artwork_id, type, title, custodi
   ('80000000-0000-4000-8000-000000000001'::uuid, '20000000-0000-4000-8000-000000000001'::uuid, '30000000-0000-4000-8000-000000000011'::uuid, 'condition report', 'Condition report — Doubling', 'Artist studio', '2026-08-02', '20000000-0000-4000-8000-000000000001/80000000-0000-4000-8000-000000000001', 'doubling-condition-2026.txt', 412, 'private', '2026-08-02T12:00:00.000Z'::timestamptz),
   ('80000000-0000-4000-8000-000000000002'::uuid, '20000000-0000-4000-8000-000000000001'::uuid, '30000000-0000-4000-8000-000000000011'::uuid, 'appraisal', 'Appraisal letter (human appraiser)', 'Example Appraisals LLC', '2026-08-04', '20000000-0000-4000-8000-000000000001/80000000-0000-4000-8000-000000000002', 'appraisal-letter.txt', 388, 'private', '2026-08-04T12:00:00.000Z'::timestamptz);
 
+-- Programme (0008): exhibitions, open calls, events, stories, applications, collector inquiries.
+insert into kofi.demo_exhibitions (id, title, subtitle, starts_on, ends_on, venue, summary, body, image, artwork_ids, external_url, curated_by, sample, published, created_at, updated_at) values
+  ('a1000000-0000-4000-8000-000000000001'::uuid, 'Being/Seen', null, '2025-05-08'::date, '2025-10-25'::date, null, 'A group exhibition of 36 Pittsburgh artists of colour working across four modalities.', 'Being/Seen brought together 36 Pittsburgh artists of colour working across four modalities.
+
+The exhibition looked at how Black art and history have been erased or undervalued in exhibitions, and at what it feels like when that history is recognised and celebrated instead.', null, '{}'::uuid[], 'https://www.koficollections.org/upcoming-exhibitions', 'Kofi Collections', false, true, '2026-10-20T13:00:00.000Z'::timestamptz, '2026-10-20T13:00:00.000Z'::timestamptz),
+  ('a1000000-0000-4000-8000-000000000002'::uuid, 'The Spirit of the West', null, '2024-09-12'::date, null, null, 'A one-night exhibition honouring Black and Indigenous heritage in the American West.', 'The Spirit of the West honoured Black and Indigenous heritage.
+
+Kofi Collections invited artists to submit works about the histories of these communities and their contributions to the American West, including ranching and Western traditions.', '{"src":"/art/hero.jpg","alt":"Opening night: visitors among paintings on easels in a high-ceilinged room","credit":"Kofi Collections"}'::jsonb, '{}'::uuid[], 'https://www.koficollections.org/prior-exhibitions', 'Kofi Collections', false, true, '2026-10-20T13:00:00.000Z'::timestamptz, '2026-10-20T13:00:00.000Z'::timestamptz),
+  ('a1000000-0000-4000-8000-000000000003'::uuid, 'I Am', null, '2024-05-03'::date, null, null, 'Overlooked narratives of marginalised groups in the Pittsburgh region, from painting to sculpture.', 'I Am gave space to narratives of marginalised groups in the Pittsburgh region that are often overlooked.
+
+The work on show ranged from paintings to sculpture.', null, '{}'::uuid[], 'https://www.koficollections.org/prior-exhibitions', 'Kofi Collections', false, true, '2026-10-20T13:00:00.000Z'::timestamptz, '2026-10-20T13:00:00.000Z'::timestamptz),
+  ('a1000000-0000-4000-8000-000000000004'::uuid, 'Night Weather', 'Four artists on the city after dark', '2026-10-02'::date, '2026-11-22'::date, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'Paintings, textile, photography and print made at night or about it: wet streets, late shifts, rooms after everyone has gone.', 'Night Weather gathers work by four artists who keep late hours. Mara Oyelaran paints Liberty Avenue in the hour after rain. DeShawn Ferris photographs bakeries and transit yards on the night shift. June Takahashi-Bell weaves with thread salvaged from a closed mill.
+
+The show is hung low and close, so the textile can be touched and the photographs read at arm’s length. Prices are listed on the wall where the artist has chosen to share them.
+
+Every work in the exhibition is documented in the artists’ own records on Kofi Collections. Ask Kofi about any piece and the team will put you in touch.', '{"src":"/art/mara1.jpg","alt":"Face painted in black brush strokes and red spray over a brown ground","credit":"Mara Oyelaran"}'::jsonb, array['30000000-0000-4000-8000-000000000011', '30000000-0000-4000-8000-000000000012', '30000000-0000-4000-8000-000000000031', '30000000-0000-4000-8000-000000000041', '30000000-0000-4000-8000-000000000051']::uuid[], null, 'Kofi Collections', true, true, '2026-09-15T14:00:00.000Z'::timestamptz, '2026-10-01T14:00:00.000Z'::timestamptz),
+  ('a1000000-0000-4000-8000-000000000005'::uuid, 'Soft Ground', 'Printmaking and textile', '2027-01-15'::date, '2027-03-06'::date, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'Prints and woven work that share a process: layers laid down slowly, one pass at a time.', 'Soft Ground takes its name from the etching ground that stays tacky, recording anything pressed into it. The exhibition pairs screen prints by Priya Venkataraman with wall textiles by June Takahashi-Bell.
+
+Both artists build an image in passes. The show will add works selected through the Soft Ground open call.', null, array['30000000-0000-4000-8000-000000000052', '30000000-0000-4000-8000-000000000031', '30000000-0000-4000-8000-000000000032']::uuid[], null, 'Kofi Collections', true, true, '2026-10-05T14:00:00.000Z'::timestamptz, '2026-10-05T14:00:00.000Z'::timestamptz);
+
+insert into kofi.demo_open_calls (id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at) values
+  ('a2000000-0000-4000-8000-000000000001'::uuid, 'The Art of Advocacy: Giving Form and Voice to Justice', 'Neighborhood Legal Services', 'An exhibition for Neighborhood Legal Services’ 60th anniversary. Kofi Collections leads artist selection.', 'Neighborhood Legal Services is marking its 60th anniversary with an exhibition about how artists and lawyers both use storytelling, interpretation and advocacy to bring lived experiences to light and to inspire change.
+
+Kofi Collections is the curatorial partner and is leading the selection of artists. Applications are taken on the partner’s form; read the call there for eligibility and terms.', 'See the call for eligibility', '{}'::kofi.medium[], '2026-09-01'::date, null, 3, 'See the call', null, null, 'https://docs.google.com/forms/d/e/1FAIpQLSfwGVjQiYX8d0vEphfu4kzVmKifV8SKfQpzBT2qzcmW_y_DiA/viewform', null, false, true, '2026-10-20T13:00:00.000Z'::timestamptz, '2026-10-20T13:00:00.000Z'::timestamptz),
+  ('a2000000-0000-4000-8000-000000000002'::uuid, 'Night Weather Studio Award', 'Kofi Collections', 'Show us work made at night or about it. One artist receives a solo wall and a studio grant.', 'The Night Weather Studio Award is open to artists in any medium whose work deals with the city after dark: late shifts, weather, light, the rooms people leave behind.
+
+Attach up to three works from your Kofi portfolio and write a short statement on why they belong together. Works set to Only me cannot be attached; change them to Kofi team only if you want us to see them without publishing.
+
+Kofi reads every application. Shortlisted artists will hear from us within three weeks of the deadline.', 'Artists living or working in Western Pennsylvania', '{}'::kofi.medium[], '2026-10-01'::date, '2026-11-30'::date, 3, 'No entry fee', 'A solo wall in Night Weather and a $1,500 studio grant (sample)', null, null, 'a1000000-0000-4000-8000-000000000004'::uuid, true, true, '2026-09-20T14:00:00.000Z'::timestamptz, '2026-10-01T14:00:00.000Z'::timestamptz),
+  ('a2000000-0000-4000-8000-000000000003'::uuid, 'Soft Ground: Printmakers & Weavers', 'Kofi Collections', 'Printmakers and textile artists: apply to show alongside Soft Ground this winter.', 'Soft Ground will add a small number of works chosen through this call. We are looking for prints and woven or stitched work where the process is visible in the finished piece.
+
+Editions are welcome; tell us the edition size in the work’s record.', 'Printmakers and textile artists in the United States and Canada', array['printmaking', 'textile']::kofi.medium[], '2026-11-15'::date, '2027-01-10'::date, 4, 'No entry fee', null, null, null, 'a1000000-0000-4000-8000-000000000005'::uuid, true, true, '2026-10-05T14:00:00.000Z'::timestamptz, '2026-10-05T14:00:00.000Z'::timestamptz),
+  ('a2000000-0000-4000-8000-000000000004'::uuid, 'Summer Open 2026', 'Kofi Collections', 'Kofi’s annual open call for the July hang. Now closed.', 'The Summer Open is Kofi’s yearly call for new work in any medium. Selected artists are hung together in July.
+
+This call has closed. Thank you to everyone who applied.', 'Any artist with an approved Kofi profile', '{}'::kofi.medium[], '2026-05-01'::date, '2026-06-15'::date, 3, 'No entry fee', null, null, null, null, true, true, '2026-04-20T14:00:00.000Z'::timestamptz, '2026-06-16T14:00:00.000Z'::timestamptz);
+
+insert into kofi.demo_events (id, title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published, created_at, updated_at) values
+  ('a4000000-0000-4000-8000-000000000001'::uuid, 'Night Weather: opening reception', 'opening', '2026-10-02T18:00:00-04:00'::timestamptz, '2026-10-02T21:00:00-04:00'::timestamptz, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'The first evening of Night Weather, with the artists in the room.', null, 'a1000000-0000-4000-8000-000000000004'::uuid, true, true, '2026-09-15T14:00:00.000Z'::timestamptz, '2026-09-15T14:00:00.000Z'::timestamptz),
+  ('a4000000-0000-4000-8000-000000000002'::uuid, 'Artist talk: Mara Oyelaran on glazing', 'talk', '2026-10-29T18:30:00-04:00'::timestamptz, '2026-10-29T20:00:00-04:00'::timestamptz, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'Mara walks through how a painting is built from thin layers, in front of the two works in the show.', null, 'a1000000-0000-4000-8000-000000000004'::uuid, true, true, '2026-10-01T14:00:00.000Z'::timestamptz, '2026-10-01T14:00:00.000Z'::timestamptz),
+  ('a4000000-0000-4000-8000-000000000003'::uuid, 'Open studio: June Takahashi-Bell', 'studio visit', '2026-11-08T13:00:00-05:00'::timestamptz, '2026-11-08T17:00:00-05:00'::timestamptz, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'June sets up a working loom in the gallery for the afternoon. Drop in, ask questions, try the shuttle.', null, 'a1000000-0000-4000-8000-000000000005'::uuid, true, true, '2026-10-05T14:00:00.000Z'::timestamptz, '2026-10-05T14:00:00.000Z'::timestamptz),
+  ('a4000000-0000-4000-8000-000000000004'::uuid, 'Collector evening', 'social', '2026-11-19T18:00:00-05:00'::timestamptz, '2026-11-19T20:30:00-05:00'::timestamptz, '{"name":"Kofi Collections","address":"213 Smithfield St.","city":"Pittsburgh, PA"}'::jsonb, 'A quiet evening in Night Weather for people thinking about buying or commissioning work. Kofi staff on hand to answer questions.', null, 'a1000000-0000-4000-8000-000000000004'::uuid, true, true, '2026-10-10T14:00:00.000Z'::timestamptz, '2026-10-10T14:00:00.000Z'::timestamptz);
+
+insert into kofi.demo_stories (id, title, dek, kind, body, author, published_on, artist_id, artwork_ids, image, sample, published, created_at, updated_at) values
+  ('a5000000-0000-4000-8000-000000000001'::uuid, 'Mara Oyelaran paints the hour after a storm', 'The Pittsburgh painter on thin glazes, wet streets, and why her work is slow.', 'interview', 'Mara Oyelaran works from a converted print shop in Pittsburgh. The old press is still there; she uses its bed as a table for mixing glazes.
+
+Her paintings start in the street. After rain she walks Liberty Avenue with a small sketchbook and notes where the reflections fall. Back in the studio she lays down a first thin layer and waits for it to dry before the next. A large canvas can take eleven passes.
+
+> I paint the hour after a storm, when the city is wet enough to double itself.
+
+Doubling (Liberty Avenue, 7:40pm) is the clearest example. A face is painted twice, the second pass slightly offset, so that one reads as the reflection of the other. Small Weather No. 4 was painted in the studio doorway while it was raining, wet-into-wet, in a single afternoon.
+
+Both works are in Night Weather at Kofi Collections until November 22. Mara gives a talk on glazing at the gallery on October 29.', 'Kofi Collections editorial', '2026-10-14'::date, '20000000-0000-4000-8000-000000000001'::uuid, array['30000000-0000-4000-8000-000000000011', '30000000-0000-4000-8000-000000000012']::uuid[], '{"src":"/art/mara2.jpg","alt":"Figure in deep blue against a turquoise ground","credit":"Mara Oyelaran"}'::jsonb, true, true, '2026-10-14T13:00:00.000Z'::timestamptz, '2026-10-14T13:00:00.000Z'::timestamptz),
+  ('a5000000-0000-4000-8000-000000000002'::uuid, 'Inside June Takahashi-Bell’s loom room', 'Reclaimed mill thread, hand-dyed wool, and wall works built to be touched.', 'studio visit', 'June Takahashi-Bell’s studio is one room with a floor loom, a dye bench and a wall of thread on cones. Most of the thread came from a mill that closed; June bought what was left on the shelves.
+
+The wool is dyed by hand in small batches, so no two lots match. June treats that as part of the work rather than a problem to solve.
+
+Warp / Weft / Wait is made to be handled. Visitors are encouraged to touch it, and the surface shifts a little each time. Small Loom Studies I–IV are dye tests on silk, sold as a set.
+
+June will run an open studio afternoon at Kofi Collections on November 8, ahead of Soft Ground in January.', 'Kofi Collections editorial', '2026-09-30'::date, '20000000-0000-4000-8000-000000000003'::uuid, array['30000000-0000-4000-8000-000000000031', '30000000-0000-4000-8000-000000000032']::uuid[], '{"src":"/art/june1.jpg","alt":"A dress built from hundreds of hand-stitched feathers over a printed ground","credit":"June Takahashi-Bell"}'::jsonb, true, true, '2026-09-30T13:00:00.000Z'::timestamptz, '2026-09-30T13:00:00.000Z'::timestamptz),
+  ('a5000000-0000-4000-8000-000000000003'::uuid, 'What an artist-owned record changes', 'Every field in a Kofi profile has its own visibility. Here is how that works, and why.', 'essay', 'On Kofi Collections the artist owns the record. Each work, each price and each document has its own setting for who can see it, and the artist can change it at any time.
+
+There are four levels. Public means anyone. Verified institutions means curators whose institution Kofi has checked. Kofi team only means Kofi staff and the artist. Only me means the artist alone.
+
+> A price can be shared with a museum without being published to everyone.
+
+Settings apply to fields, not pages. A painting can be public while its price is shown only to verified institutions. Condition reports and appraisal letters are stored privately and are never shown to the public; when Kofi staff open one, the access is logged and the artist can see it.
+
+Artists can export everything they have entered, as a spreadsheet and as a full data file, whenever they like.', 'Kofi Collections editorial', '2026-09-16'::date, null, '{}'::uuid[], null, true, true, '2026-09-16T13:00:00.000Z'::timestamptz, '2026-09-16T13:00:00.000Z'::timestamptz),
+  ('a5000000-0000-4000-8000-000000000004'::uuid, 'Kofi Collections named curatorial partner for The Art of Advocacy', 'An exhibition for Neighborhood Legal Services’ 60th anniversary.', 'news', 'Neighborhood Legal Services is celebrating its 60th anniversary with The Art of Advocacy: Giving Form and Voice to Justice, an exhibition about how artists and lawyers use storytelling, interpretation and advocacy to bring lived experiences to light and inspire change.
+
+Kofi Collections is the curatorial partner and is leading the selection of artists. The call for artists is open now; applications are taken on the partner’s form.', 'Kofi Collections', '2026-09-01'::date, null, '{}'::uuid[], null, false, true, '2026-10-20T13:00:00.000Z'::timestamptz, '2026-10-20T13:00:00.000Z'::timestamptz);
+
+insert into kofi.demo_applications (id, call_id, artist_id, artwork_ids, statement, status, decision_note, staff_note, created_at, updated_at, decided_at) values
+  ('a3000000-0000-4000-8000-000000000001'::uuid, 'a2000000-0000-4000-8000-000000000004'::uuid, '20000000-0000-4000-8000-000000000001'::uuid, array['30000000-0000-4000-8000-000000000011', '30000000-0000-4000-8000-000000000012']::uuid[], 'Two paintings from the same week of rain: one large, one small. I would like them hung on facing walls so the small one reads as a note on the large one.', 'accepted', 'Selected for the July hang.', null, '2026-06-02T15:10:00.000Z'::timestamptz, '2026-06-24T16:00:00.000Z'::timestamptz, '2026-06-24T16:00:00.000Z'::timestamptz),
+  ('a3000000-0000-4000-8000-000000000002'::uuid, 'a2000000-0000-4000-8000-000000000004'::uuid, '20000000-0000-4000-8000-000000000003'::uuid, array['30000000-0000-4000-8000-000000000031']::uuid[], 'A wall textile woven from thread salvaged from a closed mill. It is meant to be touched, and it changes shape a little each time it is.', 'declined', 'Thank you — we would love to see the new loom work next time.', 'Strong; space-limited.', '2026-06-09T18:40:00.000Z'::timestamptz, '2026-06-24T16:05:00.000Z'::timestamptz, '2026-06-24T16:05:00.000Z'::timestamptz),
+  ('a3000000-0000-4000-8000-000000000003'::uuid, 'a2000000-0000-4000-8000-000000000002'::uuid, '20000000-0000-4000-8000-000000000004'::uuid, array['30000000-0000-4000-8000-000000000041', '30000000-0000-4000-8000-000000000042']::uuid[], 'Both pieces were made between 2 and 5am in workplaces that run all night. The print is a single frame; the video is the same kind of room, held for eleven minutes.', 'submitted', null, null, '2026-10-12T02:15:00.000Z'::timestamptz, '2026-10-12T02:15:00.000Z'::timestamptz, null);
+
+insert into kofi.demo_buyer_inquiries (id, artwork_id, artist_id, name, email, organization, intent, message, status, staff_note, consented_at, created_at, updated_at) values
+  ('a6000000-0000-4000-8000-000000000001'::uuid, '30000000-0000-4000-8000-000000000011'::uuid, '20000000-0000-4000-8000-000000000001'::uuid, 'Dana Whitcomb', 'dana.whitcomb@example.com', null, 'purchase', 'I saw Doubling at the opening of Night Weather. Is it still available, and could I see it again on a weekday before deciding? (Sample inquiry.)', 'new', null, '2026-10-18T15:20:00.000Z'::timestamptz, '2026-10-18T15:20:00.000Z'::timestamptz, '2026-10-18T15:20:00.000Z'::timestamptz),
+  ('a6000000-0000-4000-8000-000000000002'::uuid, null, null, 'Ray Castellano', 'ray@example.org', 'Riverside Design Office (sample)', 'placement', 'We are moving into a new office on the North Shore and want three or four works for the reception and meeting rooms, ideally by local artists. Budget to be discussed.', 'in progress', 'Sent three options from Night Weather; site visit to be booked.', '2026-10-09T14:05:00.000Z'::timestamptz, '2026-10-09T14:05:00.000Z'::timestamptz, '2026-10-11T17:30:00.000Z'::timestamptz);
+
 -- ------------------------------------------------------- reset function ---
 create or replace function kofi.kofi_demo_reset() returns void
 language plpgsql volatile security definer set search_path = kofi, public as $fn$
@@ -216,6 +339,12 @@ begin
   -- Bulk restore is not a user action: suppress per-row audit triggers for this transaction.
   perform set_config('kofi.seeding', 'on', true);
 
+  delete from kofi.applications;
+  delete from kofi.buyer_inquiries;
+  delete from kofi.events;
+  delete from kofi.open_calls;
+  delete from kofi.stories;
+  delete from kofi.exhibitions;
   delete from kofi.shortlist_items;
   delete from kofi.shortlists;
   delete from kofi.inquiries;
@@ -240,6 +369,12 @@ begin
   insert into kofi.shortlist_items select * from kofi.demo_shortlist_items;
   insert into kofi.inquiries select * from kofi.demo_inquiries;
   insert into kofi.documents select * from kofi.demo_documents;
+  insert into kofi.exhibitions select * from kofi.demo_exhibitions;
+  insert into kofi.open_calls select * from kofi.demo_open_calls;
+  insert into kofi.events select * from kofi.demo_events;
+  insert into kofi.stories select * from kofi.demo_stories;
+  insert into kofi.applications select * from kofi.demo_applications;
+  insert into kofi.buyer_inquiries select * from kofi.demo_buyer_inquiries;
 
   perform set_config('kofi.seeding', 'off', true);
 end $fn$;

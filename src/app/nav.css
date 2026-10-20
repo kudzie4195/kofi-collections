@@ -1,0 +1,59 @@
+/* Main navigation (v3). One list of links drives both bars; items flagged
+   mobile-only / desktop-only are hidden in the other. Two-class selectors so these
+   win over global.css whatever the load order. */
+
+@media (max-width: 899px) {
+  .tab.tab--desktop {
+    display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .tab.tab--mobile {
+    display: none;
+  }
+  .tabbar .tabbar__inner {
+    gap: 0;
+  }
+  .tabbar .tab {
+    padding: 0 11px;
+    letter-spacing: 0.14em;
+  }
+  .tabbar .tab[aria-current='page']::before {
+    left: 11px;
+    right: 11px;
+  }
+  .tabbar .tabbar__brand {
+    margin-right: auto;
+    padding-right: var(--space-4);
+  }
+  .tabbar .tabbar__brand[aria-current='page'] .tabbar__brand-name {
+    color: var(--cream);
+  }
+}
+
+/* 900–1099: About moves to the footer so the bar never wraps */
+@media (min-width: 900px) and (max-width: 1099px) {
+  .tab.tab--roomy {
+    display: none;
+  }
+  .tabbar .tab {
+    padding: 0 9px;
+    letter-spacing: 0.12em;
+  }
+  .tabbar .tab[aria-current='page']::before {
+    left: 9px;
+    right: 9px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .tabbar .tab {
+    padding: 0 14px;
+    letter-spacing: 0.16em;
+  }
+  .tabbar .tab[aria-current='page']::before {
+    left: 14px;
+    right: 14px;
+  }
+}

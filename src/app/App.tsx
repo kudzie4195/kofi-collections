@@ -7,6 +7,7 @@ import { TabBar } from './TabBar';
 import { RoleGate } from './RoleGate';
 import { AccountScreen } from './AccountScreen';
 import { galleryRoutes } from '@/features/gallery/routes';
+import { programmeRoutes } from '@/features/programme/routes';
 import { studioRoutes } from '@/features/studio/routes';
 import { curatorRoutes } from '@/features/curator/routes';
 import { adminRoutes } from '@/features/admin/routes';
@@ -36,6 +37,7 @@ const router = createHashRouter([
   {
     element: <Layout />,
     children: [
+      ...programmeRoutes,
       ...galleryRoutes,
       { path: '/account', element: <AccountScreen /> },
       { path: '/studio', element: <RoleGate roles={['artist']} />, children: studioRoutes },

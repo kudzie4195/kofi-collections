@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import bundledArt from 'virtual:bundled-art';
 import { useSearchParams } from 'react-router-dom';
 import type { ArtworkFilters, SortKey } from '@/domain/filters';
 import { applyFilters, countActiveFilters } from '@/domain/filters';
@@ -7,13 +6,10 @@ import type { Medium, Unit } from '@/domain/types';
 import { MEDIUMS } from '@/domain/types';
 import { useQuery } from '@/state/session';
 import { Button, Chip, EmptyState, ErrorState, FictionalFooter, GallerySkeleton, Icon, LinkButton, Segmented, TopBar, WallLabel } from '@/ui';
+import { PageHead } from '@/features/programme/shared';
 import { FilterSheet } from './FilterSheet';
 import { cap, plural, SearchBox } from './helpers';
 import { clearedFilters, compact, filtersFromParams, paramsFromFilters, SORT_OPTIONS, toggleIn, withUnit } from './params';
-
-// Optional full-bleed photograph behind the hero headline. Empty means no request is made.
-// Exhibition photograph from koficollections.org (public/art/hero.jpg, metadata stripped).
-const heroSrc: string = bundledArt['hero.jpg'] ?? '/art/hero.jpg';
 
 export function GalleryScreen() {
   const [params, setParams] = useSearchParams();
@@ -44,29 +40,19 @@ export function GalleryScreen() {
 
   return (
     <div className="screen">
-      <TopBar title="Kofi Collections" />
+      <TopBar title="Works" home subordinate />
 
-      <section className="band kg-hero" aria-labelledby="kg-hero-title">
-        {heroSrc && <div className="kg-hero--photo" style={{ ['--kg-hero-img' as string]: `url("${heroSrc}")` }} aria-hidden="true" />}
-        <span className="band__stripe band__stripe--1" aria-hidden="true" />
-        <span className="band__stripe band__stripe--2" aria-hidden="true" />
-        <span className="band__stripe band__stripe--3" aria-hidden="true" />
-        <div className="container container--wide band__inner kg-hero__inner">
-          <p className="eyebrow kg-hero__eyebrow">Pittsburgh · Artist-owned records</p>
-          <h2 id="kg-hero-title" className="display kg-hero__title">
-            <span className="kg-hero__line">Artists keep the record.</span> <span className="kg-hero__line kg-hero__line--offset">Curators find the work.</span>
-          </h2>
-          <p className="kg-hero__lede">
-            Every work here was catalogued by the artist who made it, with price and detail shown only to the people they choose.
-            {all && all.length > 0 && (
-              <span className="kg-hero__count">
-                {' '}
-                Browsing {plural(all.length, 'work')} by {plural(artistCount, 'artist')}.
-              </span>
-            )}
-          </p>
-        </div>
-      </section>
+      <div className="container container--wide kg-works-head">
+        <PageHead
+          eyebrow="The collection"
+          title="Works"
+          lede={
+            all && all.length > 0
+              ? `${plural(all.length, 'work')} by ${plural(artistCount, 'artist')}, each catalogued by the artist who made it.`
+              : 'Every work here is catalogued by the artist who made it.'
+          }
+        />
+      </div>
 
       <div className="kg-toolbar kg-toolbar--home">
         <div className="container container--wide stack--sm kg-toolbar__inner">

@@ -64,6 +64,62 @@ function writeOut(name) {
   console.log(`wrote ${path.relative(projectRoot, target)} (${lines.length} lines)`);
 }
 
+// ------------------------------------------------------------- programme ----
+// Rows for the six programme tables (0008_programme.sql). `table(name)` gives
+// the target: kofi.demo_<name> for the snapshot, kofi.<name> for the additive
+// seed_programme.sql. Programme images keep their bundled /art/<file> path
+// (served by the app) or inline data: URL; nothing is uploaded.
+const P = {
+  exhibitions: seed.exhibitions ?? [],
+  openCalls: seed.openCalls ?? [],
+  applications: seed.applications ?? [],
+  events: seed.events ?? [],
+  stories: seed.stories ?? [],
+  buyerInquiries: seed.buyerInquiries ?? [],
+};
+const hasProgramme = Object.values(P).some((l) => l.length > 0);
+if (!hasProgramme) console.warn('warning: src/data/mock/seed.ts has no programme content; programme tables will be empty.');
+const d8 = (v) => (v ? `${s(v)}::date` : 'null');
+const jsonOrNull = (v) => (v === undefined || v === null ? 'null' : json(v));
+const uuidArr = (ids) => arr((ids ?? []).map(U), 'uuid');
+const imageJson = (im) => (im ? json({ src: im.src, alt: im.alt, ...(im.credit ? { credit: im.credit } : {}) }) : 'null');
+function programmeInserts(table, onConflict = '') {
+  const L = [];
+  const end = onConflict ? `\n${onConflict};` : ';';
+  const emit = (name, cols, rows) => {
+    if (!rows.length) return;
+    L.push(`insert into ${table(name)} (${cols}) values`);
+    L.push(rows.join(',\n') + end);
+    L.push('');
+  };
+  emit('exhibitions', 'id, title, subtitle, starts_on, ends_on, venue, summary, body, image, artwork_ids, external_url, curated_by, sample, published, created_at, updated_at',
+    P.exhibitions.map((e) =>
+      `  (${uuid(e.id)}, ${s(e.title)}, ${s(e.subtitle)}, ${d8(e.startsOn)}, ${d8(e.endsOn)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.body)}, ` +
+      `${imageJson(e.image)}, ${uuidArr(e.artworkIds)}, ${s(e.externalUrl)}, ${s(e.curatedBy)}, ${b(e.sample)}, ${b(e.published)}, ${ts(e.createdAt)}, ${ts(e.updatedAt)})`));
+  emit('open_calls', 'id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at',
+    P.openCalls.map((c) =>
+      `  (${uuid(c.id)}, ${s(c.title)}, ${s(c.partner)}, ${s(c.summary)}, ${s(c.body)}, ${s(c.eligibility)}, ${arr(c.mediums ?? [], 'kofi.medium')}, ${d8(c.opensOn)}, ${d8(c.deadline)}, ` +
+      `${n(c.maxWorks)}, ${s(c.fee)}, ${s(c.award)}, ${imageJson(c.image)}, ${s(c.externalUrl)}, ${uuidOrNull(c.exhibitionId)}, ${b(c.sample)}, ${b(c.published)}, ${ts(c.createdAt)}, ${ts(c.updatedAt)})`));
+  emit('events', 'id, title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published, created_at, updated_at',
+    P.events.map((e) =>
+      `  (${uuid(e.id)}, ${s(e.title)}, '${e.kind}', ${ts(e.startsAt)}, ${ts(e.endsAt)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.rsvpUrl)}, ${uuidOrNull(e.exhibitionId)}, ` +
+      `${b(e.sample)}, ${b(e.published)}, ${ts(e.createdAt)}, ${ts(e.updatedAt)})`));
+  emit('stories', 'id, title, dek, kind, body, author, published_on, artist_id, artwork_ids, image, sample, published, created_at, updated_at',
+    P.stories.map((t) =>
+      `  (${uuid(t.id)}, ${s(t.title)}, ${s(t.dek)}, '${t.kind}', ${s(t.body)}, ${s(t.author)}, ${d8(t.publishedOn)}, ${uuidOrNull(t.artistId)}, ${uuidArr(t.artworkIds)}, ` +
+      `${imageJson(t.image)}, ${b(t.sample)}, ${b(t.published)}, ${ts(t.createdAt)}, ${ts(t.updatedAt)})`));
+  emit('applications', 'id, call_id, artist_id, artwork_ids, statement, status, decision_note, staff_note, created_at, updated_at, decided_at',
+    P.applications.map((a) =>
+      `  (${uuid(a.id)}, ${uuid(a.callId)}, ${uuid(a.artistId)}, ${uuidArr(a.artworkIds)}, ${s(a.statement)}, '${a.status}', ${s(a.decisionNote)}, ${s(a.staffNote)}, ` +
+      `${ts(a.createdAt)}, ${ts(a.updatedAt)}, ${ts(a.decidedAt)})`));
+  emit('buyer_inquiries', 'id, artwork_id, artist_id, name, email, organization, intent, message, status, staff_note, consented_at, created_at, updated_at',
+    P.buyerInquiries.map((q) =>
+      `  (${uuid(q.id)}, ${uuidOrNull(q.artworkId)}, ${uuidOrNull(q.artistId)}, ${s(q.name)}, ${s(q.email)}, ${s(q.organization)}, '${q.intent}', ${s(q.message)}, '${q.status}', ` +
+      `${s(q.staffNote)}, ${ts(q.createdAt)}, ${ts(q.createdAt)}, ${ts(q.updatedAt)})`));
+  return L;
+}
+const PROGRAMME_TABLES = ['exhibitions', 'open_calls', 'events', 'stories', 'applications', 'buyer_inquiries'];
+
 // ============================================================ seed_auth.sql ==
 header('demo auth accounts', [
   '!!! CREATES REAL AUTH ACCOUNTS. Do not run this on a project with real users',
@@ -75,7 +131,7 @@ header('demo auth accounts', [
   '(which creates the kofi.profiles rows) and any trigger the other product has',
   '(for example one that creates a public.profiles row per new user).',
   '',
-  'Run order: migrations 0000-0007 → seed_auth.sql → seed_content.sql.',
+  'Run order: migrations 0000-0008 → seed_auth.sql → seed_content.sql.',
   'Safe to re-run: existing ids / identities are left alone (on conflict do nothing).',
   '',
   'Remove these accounts again (cascades to auth.identities and the kofi',
@@ -115,7 +171,9 @@ header('demo content', [
   '',
   'Safe to re-run: content tables are restored by kofi.kofi_demo_reset(), which',
   'WIPES every row in the Kofi content tables (artists, artworks, images,',
-  'institutions, curators, shortlists, inquiries, documents). Audit events and',
+  'institutions, curators, shortlists, inquiries, documents and the programme:',
+  'exhibitions, open calls, events, stories, applications, collector inquiries).',
+  'Audit events and',
   'consents are append-only and are never deleted; seed rows for them are',
   'inserted once.',
   '',
@@ -142,7 +200,7 @@ begin
   end if;
 end $$;`);
 out();
-const SNAP = ['profiles', 'institutions', 'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents'];
+const SNAP = ['profiles', 'institutions', 'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents', ...PROGRAMME_TABLES];
 out('-- ------------------------------------------------------ demo snapshot -----');
 out(`drop table if exists ${SNAP.map((t) => `kofi.demo_${t}`).join(', ')};`);
 out('create table kofi.demo_profiles (id uuid primary key, role kofi.role not null, display_name text not null);');
@@ -253,6 +311,9 @@ out(
 );
 out();
 
+out('-- Programme (0008): exhibitions, open calls, events, stories, applications, collector inquiries.');
+for (const l of programmeInserts((t) => `kofi.demo_${t}`)) out(l);
+
 out('-- ------------------------------------------------------- reset function ---');
 out(`create or replace function kofi.kofi_demo_reset() returns void
 language plpgsql volatile security definer set search_path = kofi, public as $fn$
@@ -267,6 +328,12 @@ begin
   -- Bulk restore is not a user action: suppress per-row audit triggers for this transaction.
   perform set_config('kofi.seeding', 'on', true);
 
+  delete from kofi.applications;
+  delete from kofi.buyer_inquiries;
+  delete from kofi.events;
+  delete from kofi.open_calls;
+  delete from kofi.stories;
+  delete from kofi.exhibitions;
   delete from kofi.shortlist_items;
   delete from kofi.shortlists;
   delete from kofi.inquiries;
@@ -291,6 +358,12 @@ begin
   insert into kofi.shortlist_items select * from kofi.demo_shortlist_items;
   insert into kofi.inquiries select * from kofi.demo_inquiries;
   insert into kofi.documents select * from kofi.demo_documents;
+  insert into kofi.exhibitions select * from kofi.demo_exhibitions;
+  insert into kofi.open_calls select * from kofi.demo_open_calls;
+  insert into kofi.events select * from kofi.demo_events;
+  insert into kofi.stories select * from kofi.demo_stories;
+  insert into kofi.applications select * from kofi.demo_applications;
+  insert into kofi.buyer_inquiries select * from kofi.demo_buyer_inquiries;
 
   perform set_config('kofi.seeding', 'off', true);
 end $fn$;`);
@@ -322,3 +395,51 @@ out(
 out();
 out('commit;');
 writeOut('seed_content.sql');
+
+// ======================================================= seed_programme.sql ==
+// Additive programme seed for a project whose content was loaded WITHOUT the
+// demo snapshot / kofi_demo_reset() (e.g. a shared production project): it only
+// inserts the programme rows that are missing and never deletes anything.
+lines = [];
+header('programme content (additive)', [
+  'Inserts the programme rows (exhibitions, open calls, events, stories,',
+  'applications, collector inquiries) that are not there yet. Never updates or',
+  'deletes. Everything is in schema `kofi`.',
+  '',
+  'Use this where seed_content.sql (which WIPES and restores the Kofi content',
+  'tables) must not run. On a demo project seed_content.sql already includes',
+  'these rows.',
+  '',
+  'Requires migration 0008_programme.sql, and the demo artists / artworks that',
+  'sample rows refer to (fixed UUIDs, see seed_content.sql). Stops with an error',
+  'if either is missing. Re-runnable (on conflict (id) do nothing).',
+]);
+out('begin;');
+out();
+const refArtists = [...new Set([...P.applications.map((a) => a.artistId), ...P.stories.map((t) => t.artistId).filter(Boolean), ...P.buyerInquiries.map((q) => q.artistId).filter(Boolean)])];
+const refWorks = [...new Set([...P.applications.flatMap((a) => a.artworkIds), ...P.buyerInquiries.map((q) => q.artworkId).filter(Boolean)])];
+out(`do $$
+declare
+  missing integer;
+begin
+  if to_regclass('kofi.exhibitions') is null then
+    raise exception 'seed_programme.sql: run supabase/migrations/0008_programme.sql first.';
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refArtists)}) as r (id) where not exists (select 1 from kofi.artists a where a.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_programme.sql: % demo artist(s) referenced by the sample programme are missing.', missing;
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refWorks)}) as r (id) where not exists (select 1 from kofi.artworks w where w.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_programme.sql: % demo artwork(s) referenced by the sample programme are missing.', missing;
+  end if;
+end $$;`);
+out();
+out('-- Seed rows are not staff actions: keep them out of the audit log (this transaction only).');
+out("select set_config('kofi.seeding', 'on', true);");
+out();
+for (const l of programmeInserts((t) => `kofi.${t}`, 'on conflict (id) do nothing')) out(l);
+out("select set_config('kofi.seeding', 'off', true);");
+out();
+out('commit;');
+writeOut('seed_programme.sql');

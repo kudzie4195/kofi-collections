@@ -8,13 +8,22 @@ import type {
   AuditEvent,
   Curator,
   CuratorStatus,
+  ApplicationRow,
+  ApplicationStatus,
+  BuyerInquiryRow,
+  BuyerInquiryStatus,
   DemoIdentity,
+  Exhibition,
   Inquiry,
   InquiryStatus,
   Institution,
+  OpenCall,
+  ProgrammeEvent,
   Shortlist,
+  Story,
   Viewer,
 } from '@/domain/types';
+import type { BuyerInquiryInput } from '@/domain/programme';
 
 /** Thrown by data sources when the viewer is not allowed to do something. */
 export class ForbiddenError extends Error {
@@ -96,6 +105,15 @@ export interface ExportResult {
   fileBaseName: string;
 }
 
+/** Create (no id) or update (id) a programme item. Server sets id/createdAt/updatedAt. */
+export type ProgrammeInput<T extends { id: string; createdAt: string; updatedAt: string }> = Omit<T, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
+
+export interface ApplicationInput {
+  callId: string;
+  artworkIds: string[];
+  statement: string;
+}
+
 export interface AdminArtistRow extends ArtistView {
   artworkCount: number;
 }
@@ -169,6 +187,46 @@ export interface DataSource {
   setCuratorStatus(viewer: Viewer, curatorId: string, status: CuratorStatus, note?: string): Promise<CuratorRow>;
   listAudit(viewer: Viewer, limit?: number): Promise<AuditEvent[]>;
   listInstitutions(viewer: Viewer): Promise<Institution[]>;
+
+  /* ---- programme: exhibitions, open calls, events, journal ----
+   * Reads: published items for everyone, drafts for admins (canSeeProgramme).
+   * `artworkIds` are filtered to the works the viewer may see.
+   * Writes: admins only (ForbiddenError otherwise); every write is audited.
+   * Deleting an open call that has applications throws ValidationError
+   * ("Unpublish it instead") so artists never lose a submitted application. */
+  listExhibitions(viewer: Viewer): Promise<Exhibition[]>;
+  getExhibition(viewer: Viewer, id: string): Promise<Exhibition | undefined>;
+  saveExhibition(viewer: Viewer, input: ProgrammeInput<Exhibition>): Promise<Exhibition>;
+  deleteExhibition(viewer: Viewer, id: string): Promise<void>;
+  listOpenCalls(viewer: Viewer): Promise<OpenCall[]>;
+  getOpenCall(viewer: Viewer, id: string): Promise<OpenCall | undefined>;
+  saveOpenCall(viewer: Viewer, input: ProgrammeInput<OpenCall>): Promise<OpenCall>;
+  deleteOpenCall(viewer: Viewer, id: string): Promise<void>;
+  listEvents(viewer: Viewer): Promise<ProgrammeEvent[]>;
+  saveEvent(viewer: Viewer, input: ProgrammeInput<ProgrammeEvent>): Promise<ProgrammeEvent>;
+  deleteEvent(viewer: Viewer, id: string): Promise<void>;
+  listStories(viewer: Viewer): Promise<Story[]>;
+  getStory(viewer: Viewer, id: string): Promise<Story | undefined>;
+  saveStory(viewer: Viewer, input: ProgrammeInput<Story>): Promise<Story>;
+  deleteStory(viewer: Viewer, id: string): Promise<void>;
+
+  /* ---- applications to open calls ----
+   * Artist: own applications only, staffNote stripped. Admin: all.
+   * Curators/visitors: ForbiddenError. Rules in domain/programme.validateApplication. */
+  listMyApplications(viewer: Viewer): Promise<ApplicationRow[]>;
+  submitApplication(viewer: Viewer, input: ApplicationInput): Promise<ApplicationRow>;
+  withdrawApplication(viewer: Viewer, id: string): Promise<ApplicationRow>;
+  /** Admin. Optionally filter to one call. */
+  listApplications(viewer: Viewer, callId?: string): Promise<ApplicationRow[]>;
+  /** Admin. Moves allowed by domain/programme.canMoveApplication. */
+  setApplicationStatus(viewer: Viewer, id: string, status: ApplicationStatus, notes?: { decisionNote?: string; staffNote?: string }): Promise<ApplicationRow>;
+
+  /* ---- collector ("buyer") inquiries, routed through Kofi ----
+   * Anyone may submit (validateBuyerInquiry; at most BUYER_INQUIRY_DAILY_LIMIT per
+   * email per 24 h). Returns only a receipt — nothing about the artist. Admins list. */
+  submitBuyerInquiry(viewer: Viewer, input: BuyerInquiryInput): Promise<{ id: string }>;
+  listBuyerInquiries(viewer: Viewer): Promise<BuyerInquiryRow[]>;
+  setBuyerInquiryStatus(viewer: Viewer, id: string, status: BuyerInquiryStatus, staffNote?: string): Promise<BuyerInquiryRow>;
 
   /* ---- demo helpers ---- */
   resetDemoData(): Promise<void>;
