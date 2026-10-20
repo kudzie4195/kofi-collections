@@ -2,6 +2,27 @@
 
 Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-20.
 
+## v3 — the programme (2026-10-20)
+
+Client feedback: "looks good, just feels empty with 3 tabs". Benchmarked against Ocula, Artsy, Saatchi Art and open-call platforms (CaFÉ, EntryThingy) and against koficollections.org's own sections, then added the "opportunities" half of the brief:
+
+- **Discover** home (now showing, open call, new works, artist spotlight, journal, what's on, services), **Works** (the gallery; old `/?filters` links redirect), **Exhibitions** (current / upcoming / past, typographic posters when there's no image), **Open calls** with **in-app applications from the artist's portfolio**, **Events / What's on**, **Journal**, **About** (Kofi's real services and contact), **Saved** (per device).
+- Artwork page: **View in a room** at true scale, **Save**, **Ask Kofi about this work** (collector inquiries routed through Kofi; artist contact never exposed; 5 per email per day).
+- Studio: opportunities, apply (Only-me works can't be attached), my applications with decisions and withdraw.
+- Kofi desk: programme editors (exhibitions, calls, events, stories, publish/draft), application review with a note to the artist plus a private staff note, collector inquiry inbox.
+- Real Kofi programme seeded from koficollections.org (Being/Seen, The Spirit of the West, I Am, The Art of Advocacy, now closed: extended deadline Sep 11, 2026, auction Oct 6, 2026), alongside sample content tagged "Sample".
+
+| Check (v3) | Result |
+|---|---|
+| typecheck / unit + screen tests / build / cap sync | clean / 273 / clean (main chunk 447 kB, desks lazy-loaded) / ok |
+| Browser smoke: 107 routes × (375, 900, 1280, 375 dark): errors, overflow, axe, labels, one h1, ≤5 mobile tabs, one active nav item, nav fits | 428 / 428 |
+| v2 demo flow / programme flow / modal focus | 18 / 18 · 16 / 16 · 17 / 17 |
+| SQL suite incl. programme RLS, RPCs, isolation, and a rehearsal of the live apply path run twice | 251 assertions pass |
+| SupabaseDataSource against a real PostgREST 12.2.3 | 48 / 48 |
+| Independent review (fresh Fable reviewer, adversarial) | pass 1 SHIP-WITH-FIXES (3 major, 5 minor) → all fixed → pass 2: every defect verified fixed, design 9/10, 1 new layout regression → fixed and gate-verified |
+
+Open items for Kofi: (1) the artwork photographs come from koficollections.org and are shown on fictional sample artists with a "Sample listing … not by this sample artist" line; get the artists' permission or swap them before any real launch; (2) "painting by Clarence James" is inferred from the site's image file name; (3) the site's History page dates I Am / The Spirit of the West differently from its Exhibitions pages (this build uses the Exhibitions pages); (4) the site still says submissions are open for The Art of Advocacy although its own extended deadline has passed.
+
 ## What is actually running
 
 - Full app in **mock mode** on web, iOS (WebView) and Android (WebView): gallery + filters, artwork and artist pages, artist studio (profile, works with image intake, visibility per record and per price, vault, consent, export, withdraw, inquiry inbox), curator desk (verification request, shortlists, introduction requests), Kofi admin (review queue, curator verification, inquiry forwarding, append-only activity log).
