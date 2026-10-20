@@ -32,7 +32,7 @@ export function ArtistScreen() {
 
   return (
     <div className="screen">
-      <TopBar title="Artist" back={loc.key === 'default' ? '/artists' : true} subordinate />
+      <TopBar title="Artist" back={loc.key === 'default' ? '/artists' : true} subordinate={!!artist} />
       <main className="container container--wide kg-detail">
         {q.error && !artist ? (
           <ErrorState error={q.error} retry={q.reload} />
