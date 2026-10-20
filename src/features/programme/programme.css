@@ -604,8 +604,17 @@
   line-height: 1.65;
   color: var(--cream-2);
 }
+.kp-now__text {
+  min-width: 0;
+}
+/* justify-items:start sizes children to their content; cap them at the column so a long
+   thumbnail strip (admins see every attached work) wraps instead of widening the page. */
+.kp-now__text > * {
+  max-width: 100%;
+}
 .kp-now__thumbs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: var(--space-2) 0 var(--space-3);
 }
