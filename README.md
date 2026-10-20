@@ -2,7 +2,7 @@
 
 Artist-owned documentation, discovery and opportunities. One React codebase, shipped to iOS and Android with Capacitor and to the web with Vite.
 
-> Everything in the demo is fictional sample content. Do not invite real artists or institutions until the release gate in `docs/guide/quincy.md` §07 is cleared.
+> Sample artists and institutions are fictional. Artwork photography in `public/art/` comes from koficollections.org (© the artists; re-encoded without metadata). Do not invite real artists or institutions until the release gate in `docs/guide/quincy.md` §07 is cleared.
 
 ## What's in the box
 
@@ -14,7 +14,7 @@ Artist-owned documentation, discovery and opportunities. One React codebase, shi
 | Kofi admin | `src/features/admin` | Review queue, curator verification, inquiry forwarding, append-only activity log. |
 | Visibility rules | `src/domain/visibility.ts` | The one `canSee` rule every read goes through. Tested in `src/domain/*.test.ts`. |
 | Data layer | `src/data` | `DataSource` contract. `mock/` runs fully on-device (default). `supabase/` talks to Postgres with RLS + redaction views (`supabase/migrations`). |
-| Design system | `src/styles`, `src/ui` | Tokens, components. Syne + Instrument Sans (self-hosted), cobalt/coral/lime/butter palette, hard offset shadows. Light + dark. |
+| Design system | `src/styles`, `src/ui` | "Kofi Noir": the koficollections.org palette — gallery black, warm off-white, red / gold / green brush strokes — with Instrument Serif headlines and tracked-caps Jost labels (self-hosted). Hairlines, no boxes, dark only. Mobile tab bar becomes a top nav at ≥900px. |
 
 ## Run it
 
@@ -46,7 +46,7 @@ App id `org.kofi.collections`. Capacitor plugins: Share, Filesystem (export), Ha
 
 ### Supabase mode
 
-See `docs/SUPABASE.md`. In short: apply `supabase/migrations/*` in order, run `supabase/seed_auth.sql` then `supabase/seed_content.sql`, and expose the `kofi` schema (Settings → API → Exposed schemas), copy `.env.example` → `.env` with `VITE_DATA_MODE=supabase` and your project URL + anon key.
+See `docs/SUPABASE.md`. In short: apply `supabase/migrations/*` in order, run `supabase/seed_auth.sql`, upload the demo photographs with `supabase/scripts/upload-art.sh`, run `supabase/seed_content.sql`, and expose the `kofi` schema (Settings → API → Exposed schemas), copy `.env.example` → `.env` with `VITE_DATA_MODE=supabase` and your project URL + anon key.
 
 ## The visibility model (read this before changing anything)
 

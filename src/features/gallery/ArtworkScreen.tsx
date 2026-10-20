@@ -27,7 +27,7 @@ export function ArtworkScreen() {
 
   return (
     <div className="screen">
-      <TopBar title="Artwork" back={back} />
+      <TopBar title="Artwork" back={back} subordinate />
       <main className="container container--wide kg-detail">
         {q.error && !work ? (
           <ErrorState error={q.error} retry={q.reload} />

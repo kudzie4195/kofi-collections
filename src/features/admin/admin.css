@@ -359,8 +359,10 @@
   color: var(--text);
 }
 .ad-audit .audit-row__time {
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-label);
   font-size: 11px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
   color: var(--text-3);
   padding-top: 3px;
 }

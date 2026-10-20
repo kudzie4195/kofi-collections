@@ -73,7 +73,7 @@ export function AuditList({ events, names, now = new Date() }: { events: AuditEv
           </time>
           <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             <div>
-              <strong>{ev.actorName}</strong> <span className="muted">({ROLE_LABEL[ev.actorRole]})</span> {describeAudit(ev)}
+              <strong>{ev.actorName.replace(/\s*\(Kofi\)$/, '')}</strong> <span className="muted">({ROLE_LABEL[ev.actorRole]})</span> {describeAudit(ev)}
             </div>
             <div className="small">
               <EntityRef ev={ev} names={names} />

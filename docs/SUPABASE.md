@@ -213,3 +213,8 @@ Error mapping (`mapPgError`): `42501` → `ForbiddenError`; `P0002`, `PGRST116`,
 - `exportMyData` inlines stored images as `data:` URLs when it can fetch them; if a fetch fails, that image keeps its `storage:artwork-images/…` reference.
 - `resetDemoData()` is staff-only and does not delete audit events or consents.
 - Two Supabase clients exist (session + session-less visitor), so supabase-js prints a one-time "Multiple GoTrueClient instances" console warning. They use different storage keys.
+
+
+## Demo artwork photographs
+
+`public/art/*.jpg` are bundled for mock mode. For Supabase mode run `SUPABASE_URL=… SUPABASE_ANON_KEY=… supabase/scripts/upload-art.sh` once after `seed_auth.sql`: it signs in as each demo artist and uploads their files to `artwork-images/<artist uuid>/<name>.jpg` (the storage policy only lets an artist write inside their own folder, so this doubles as a policy check). `seed_content.sql` then references them as `storage:artwork-images/…` refs; the app signs URLs at read time and `artwork_visible()` decides who may read each object. Works without a photograph keep an inline SVG placeholder.

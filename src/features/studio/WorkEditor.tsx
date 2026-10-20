@@ -186,7 +186,7 @@ function signature(f: WorkForm): string {
 const EMPTY_IMAGE =
   'data:image/svg+xml;charset=utf-8,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500"><rect width="400" height="500" fill="#e9e6f4"/><rect x="40" y="40" width="320" height="420" fill="none" stroke="#6b6684" stroke-width="4" stroke-dasharray="14 10"/><text x="200" y="258" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#6b6684">Your image here</text></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500"><rect width="400" height="500" fill="#1a1a1a"/><rect x="32" y="32" width="336" height="436" fill="none" stroke="#928b7f" stroke-width="1" stroke-dasharray="6 6"/><polygon points="200,196 211,230 248,230 218,252 229,286 200,265 171,286 182,252 152,230 189,230" fill="#e3b23c"/><text x="200" y="330" text-anchor="middle" font-family="Jost,Futura,Avenir Next,Helvetica,Arial,sans-serif" font-size="13" letter-spacing="3" fill="#cfc8bc">YOUR IMAGE HERE</text></svg>',
   );
 
 type PreviewAs = 'you' | 'public' | 'curator';

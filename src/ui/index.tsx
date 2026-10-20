@@ -247,7 +247,7 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
  * `back` may be `true` (go back, or to `/` when the app was opened on a deep link)
  * or a path string (always go there — use when there is no sensible history).
  */
-export function TopBar({ title, back, right, home }: { title: string; back?: boolean | string; right?: ReactNode; home?: boolean }) {
+export function TopBar({ title, back, right, home, subordinate }: { title: string; back?: boolean | string; right?: ReactNode; home?: boolean; subordinate?: boolean }) {
   const nav = useNavigate();
   const goBack = () => {
     if (typeof back === 'string') return nav(back);
@@ -264,7 +264,7 @@ export function TopBar({ title, back, right, home }: { title: string; back?: boo
             <Icon.Back />
           </button>
         )}
-        <h1 className="topbar__title">{title}</h1>
+        {subordinate ? <p className="topbar__title">{title}</p> : <h1 className="topbar__title">{title}</h1>}
         {right}
       </div>
     </header>

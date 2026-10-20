@@ -22,3 +22,9 @@ Also: three mock-only privilege holes (curator claim matched by id only; profile
 - Supabase code against a live Supabase project (auth sign-in of seeded users, Storage signed-URL policy behaviour, Realtime filtering).
 - Native builds (no Xcode / Android SDK here).
 - Image intake on a real device (HEIC decode varies by WebView).
+
+## Design v2 review (2026-10-20, fresh reviewer, screenshots + own Playwright runs at 375/768/1280/1600)
+
+Verdict: SHIP-WITH-FIXES. All majors fixed in the same session:
+lavender empty-image SVG → brand (WorkEditor); tile hint contrast (opacity removed); duplicate mask painting across two artists → distinct crops of the exhibition photograph; toast layered above sheets → now below; artists index without artwork → lead-work strips; sculpture/ceramics placeholders → object-in-gallery renders; double h1 on detail pages → topbar title subordinate; hero eyebrow contrast → scrim; monospace audit times → tracked sans; "Quincy (Kofi) (Kofi staff)" → de-duplicated; 375 tap targets and shortlist rows.
+Left as-is: 768 home shows no artwork above the fold (hero is the point of the opener); filter apply scrolls to top (hash-router ScrollRestoration; results are one scroll below).

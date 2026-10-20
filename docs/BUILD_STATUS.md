@@ -1,6 +1,6 @@
 # BUILD_STATUS — Kofi Collections
 
-Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-19.
+Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-20.
 
 ## What is actually running
 
@@ -15,7 +15,8 @@ Format from the starter guide §06: working / mocked / blocked / known risk / ne
 - **Accounts.** Mock mode has demo identities, not real sign-in. Supabase mode uses real email/password demo users (`docs/SUPABASE.md`) — **verified live on the shared `colorlabpro` project (schema `kofi`) on 2026-10-19**: sign-in, whoami, verified-curator pricing, contact redaction, studio, vault, admin desk and activity log all load with zero console errors.
 - **Storage.** Mock mode keeps images and vault files on-device (localStorage, ~5 MB practical limit on WebViews — fine for a demo, not for a real catalog). When the device store is full a save now fails loudly and rolls back instead of looking saved. Supabase mode uploads to private buckets with signed URLs; untested live.
 - **Realtime.** The Supabase data source subscribes to `postgres_changes`; untested live.
-- **Fonts** are bundled (fontsource), so the app works offline.
+- **Fonts** are bundled (fontsource: Jost, Instrument Serif), so the app works offline.
+- **Images.** 11 of 13 demo works use artwork photography from koficollections.org (`public/art/`, bundled for mock mode; uploaded to the private `artwork-images` bucket per artist for Supabase mode — storage upload, signed-URL read and the anon/draft read policies are now **verified live**). The two sculpture/ceramics works use generated placeholders.
 
 ## Local demo path
 
@@ -41,10 +42,10 @@ Account tab → pick an identity. Or open `dist-single/index.html` (one self-con
 
 ## Known risks
 
-1. Live-verified: auth, views, RPCs, RLS. Not yet exercised live: storage uploads/signed URLs (artwork images, vault files) and realtime delivery.
+1. Live-verified: auth, views, RPCs, RLS, artwork-image storage (upload as owner, signed read as anon, drafts hidden). Not yet exercised live: vault file uploads and realtime delivery.
 2. iOS project needs `pod install` on a Mac; Android needs Android Studio. Neither was built here (no Xcode / SDK in this environment).
 3. Mock-mode `private.view` audit events are written by the client; the Supabase vault path audits server-side. Anything that must be tamper-proof belongs in Supabase mode.
-4. Google-free fonts, but the display face (Syne) is wide — very long artist names wrap to three lines on 375 px. Acceptable, not pretty.
+4. Design v2 ("Kofi Noir", 2026-10-20) replaced the v1 cobalt/coral look after client feedback ("squashed", not high-end). Independent review pass: SHIP-WITH-FIXES → fixes applied (see `docs/REVIEW.md`). Dark-only by design.
 5. Deleting a work keeps its vault documents (detached) and removes it from shortlists; the UI explains this. Audit rows are never deleted.
 
 ## Biggest blocker / decision needed

@@ -118,8 +118,12 @@
     top: var(--space-7);
     right: var(--gutter);
     margin: 0;
-    padding-top: 10px;
+    padding: 10px 12px 8px;
     border-top: 1px solid var(--line);
+    background: rgba(10, 10, 10, 0.72);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    color: var(--cream-2);
     text-align: right;
   }
   .kg-hero__title {
