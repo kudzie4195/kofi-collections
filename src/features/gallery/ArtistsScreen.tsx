@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { ArtistView, Medium } from '@/domain/types';
+import type { ArtistView, ArtworkImage, Medium } from '@/domain/types';
 import { MEDIUMS } from '@/domain/types';
 import { useQuery } from '@/state/session';
-import { Avatar, Button, Chip, EmptyState, ErrorState, FictionalFooter, Skeleton, Tag, TopBar } from '@/ui';
+import { Button, Chip, EmptyState, ErrorState, FictionalFooter, Skeleton, Tag, TopBar } from '@/ui';
 import { cap, plural, SearchBox } from './helpers';
 
 function matches(a: ArtistView, q: string): boolean {
@@ -18,12 +18,19 @@ export function ArtistsScreen() {
   const selected = params.getAll('medium').filter((m): m is Medium => (MEDIUMS as string[]).includes(m));
 
   const q = useQuery((data, viewer) => data.listArtists(viewer), []);
-  // One extra read to show how many published works each artist has.
+  // One extra read: how many published works each artist has, and their lead works for the row strip.
   const works = useQuery((data, viewer) => data.listArtworks(viewer), []);
-  const workCount = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const w of works.data ?? []) m.set(w.artistId, (m.get(w.artistId) ?? 0) + 1);
-    return m;
+  const { workCount, leadWorks } = useMemo(() => {
+    const count = new Map<string, number>();
+    const lead = new Map<string, ArtworkImage[]>();
+    const sorted = [...(works.data ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    for (const w of sorted) {
+      count.set(w.artistId, (count.get(w.artistId) ?? 0) + 1);
+      const img = w.images.find((i) => i.isPrimary) ?? w.images[0];
+      const list = lead.get(w.artistId) ?? [];
+      if (img && list.length < 3) lead.set(w.artistId, [...list, img]);
+    }
+    return { workCount: count, leadWorks: lead };
   }, [works.data]);
 
   const update = (nextQuery: string, nextMediums: Medium[], replace = false) => {
@@ -102,10 +109,10 @@ export function ArtistsScreen() {
             <ul className="list kg-artists-list" aria-label="Artists">
               {results.map((a) => {
                 const n = workCount.get(a.id);
+                const lead = leadWorks.get(a.id) ?? [];
                 return (
                   <li key={a.id}>
                     <Link to={`/artists/${a.id}`} className="list-row kg-artist-row">
-                      <Avatar name={a.workingName} color={a.avatarColor} />
                       <span className="list-row__main stack--sm">
                         <span className="kg-artist-row__name">
                           <span className="list-row__title">{a.workingName}</span>
@@ -122,6 +129,17 @@ export function ArtistsScreen() {
                           ))}
                         </span>
                       </span>
+                      {lead.length > 0 ? (
+                        <span className="kg-artist-row__strip" aria-hidden="true">
+                          {lead.map((img) => (
+                            <span key={img.id} className="kg-artist-row__thumb">
+                              <img src={img.src} alt="" loading="lazy" />
+                            </span>
+                          ))}
+                        </span>
+                      ) : works.data ? (
+                        <span className="eyebrow kg-artist-row__none">No public works yet</span>
+                      ) : null}
                     </Link>
                   </li>
                 );

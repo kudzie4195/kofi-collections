@@ -404,3 +404,10 @@
     letter-spacing: 0.06em;
   }
 }
+
+/* touch widths: 44px minimum tap targets for row actions (kit sm buttons are 38px) */
+@media (max-width: 899px) {
+  .ops__actions .btn {
+    min-height: 44px;
+  }
+}

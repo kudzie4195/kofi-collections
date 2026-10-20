@@ -265,11 +265,28 @@
   display: grid;
   gap: var(--space-6);
 }
+/* phone: the wall label runs full width (image above its text), actions underneath.
+   Every card is a flex column with the actions pinned to the bottom, so buttons line up across a row. */
 .sl-item {
-  display: grid;
-  grid-template-columns: 136px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
-  align-items: start;
+  min-width: 0;
+}
+.sl-item > .sl-item__actions {
+  margin-top: auto;
+}
+/* large phone / small tablet: side by side */
+@media (min-width: 560px) and (max-width: 679px) {
+  .sl-item {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-5);
+  }
+  .sl-item > .sl-item__actions {
+    margin-top: 0;
+  }
 }
 @media (min-width: 680px) {
   .sl-items {
@@ -277,7 +294,6 @@
     gap: var(--space-7) var(--space-5);
   }
   .sl-item {
-    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
   }
 }
@@ -298,6 +314,13 @@
   text-align: center;
   line-height: 1.15;
   padding-block: 6px;
+}
+/* touch widths: 44px minimum tap targets (kit sm buttons are 38px) */
+@media (max-width: 899px) {
+  .sl-item__actions .btn,
+  .sl-gone .btn {
+    min-height: 44px;
+  }
 }
 .sl-item__note {
   font-family: var(--font-display);
