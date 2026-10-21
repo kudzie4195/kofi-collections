@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { ApplicationRow, BuyerInquiryRow } from '@/domain/types';
+import type { ApplicationRow, BuyerInquiryRow, LotRow, PayoutRow } from '@/domain/types';
 import { useQuery } from '@/state/session';
 import { EmptyState, ErrorState, Icon, LinkButton, Skeleton, TopBar } from '@/ui';
 import { AuditList, loadAuditNames } from './AuditList';
+import { moneyLines, totalsBy } from './salesShared';
+import { DeskIcon } from './icons';
 import './admin.css';
 
 interface TileProps {
@@ -13,12 +15,14 @@ interface TileProps {
   hint: string;
   tone: 'coral' | 'cobalt' | 'butter' | 'lime';
   icon: ReactNode;
+  /** A money amount read out with the count, e.g. "$5,740.00". */
+  amount?: string;
 }
 
-function QueueTile({ to, n, label, hint, tone, icon }: TileProps) {
+function QueueTile({ to, n, label, hint, tone, icon, amount }: TileProps) {
   const clear = n === 0;
   return (
-    <Link to={to} className={`tile admin-tile ${clear ? 'admin-tile--clear' : `tile--${tone}`}`} aria-label={`${n} ${label}`}>
+    <Link to={to} className={`tile admin-tile ${clear ? 'admin-tile--clear' : `tile--${tone}`}`} aria-label={`${n} ${label}${amount && !clear ? `: ${amount}` : ''}`}>
       <span className="admin-tile__corner" aria-hidden="true">
         {clear ? <Icon.Check /> : icon}
       </span>
@@ -29,6 +33,11 @@ function QueueTile({ to, n, label, hint, tone, icon }: TileProps) {
         <span className="tile__label" style={{ display: 'block' }}>
           {label}
         </span>
+        {amount && !clear && (
+          <span className="admin-tile__amount" style={{ display: 'block' }}>
+            {amount}
+          </span>
+        )}
         <span className="admin-tile__hint" style={{ display: 'block' }}>
           {clear ? 'Nothing waiting' : hint}
         </span>
@@ -58,7 +67,7 @@ function NavRow({ to, icon, title, sub }: { to: string; icon: ReactNode; title: 
 
 export function AdminHome() {
   const q = useQuery(async (ds, v) => {
-    const [artists, curators, inquiries, works, audit, names, apps, buyers, exhibitions, calls, events, stories] = await Promise.all([
+    const [artists, curators, inquiries, works, audit, names, apps, buyers, exhibitions, calls, events, stories, payouts, lots] = await Promise.all([
       ds.listAllArtists(v),
       ds.listCurators(v),
       ds.listInquiries(v),
@@ -71,7 +80,10 @@ export function AdminHome() {
       ds.listOpenCalls(v).catch(() => []),
       ds.listEvents(v).catch(() => []),
       ds.listStories(v).catch(() => []),
+      ds.listPayouts(v).catch(() => [] as PayoutRow[]),
+      ds.listLots(v).catch(() => [] as LotRow[]),
     ]);
+    const due = payouts.filter((p) => p.status === 'due');
     return {
       pendingArtists: artists.filter((a) => a.status === 'pending').length,
       totalArtists: artists.length,
@@ -86,6 +98,12 @@ export function AdminHome() {
       totalBuyers: buyers.length,
       programmeCount: exhibitions.length + calls.length + events.length + stories.length,
       drafts: [...exhibitions, ...calls, ...events, ...stories].filter((x) => !x.published).length,
+      payoutsDue: due.length,
+      dueAmount: moneyLines(totalsBy(due, (p) => p.currency, (p) => p.amount)).join(' + '),
+      paidCount: payouts.filter((p) => p.status === 'paid').length,
+      openLots: lots.filter((l) => l.status === 'planned' || l.status === 'live').length,
+      totalLots: lots.length,
+      soldLots: lots.filter((l) => l.status === 'sold').length,
       audit,
       names,
     };
@@ -107,7 +125,7 @@ export function AdminHome() {
           <ErrorState error={q.error} retry={q.reload} />
         ) : !q.data ? (
           <div className="tiles admin-tiles" aria-busy="true" aria-label="Loading queue">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
               <Skeleton key={i} h={132} />
             ))}
           </div>
@@ -162,6 +180,23 @@ export function AdminHome() {
                 tone="cobalt"
                 icon={<Icon.Inbox />}
               />
+              <QueueTile
+                to="/admin/payouts"
+                n={q.data.payoutsDue}
+                label={q.data.payoutsDue === 1 ? 'payout due' : 'payouts due'}
+                amount={q.data.dueAmount}
+                hint="Owed to artists from recorded sales"
+                tone="butter"
+                icon={<DeskIcon.Money />}
+              />
+              <QueueTile
+                to="/admin/lots"
+                n={q.data.openLots}
+                label={q.data.openLots === 1 ? 'lot open for sale' : 'lots open for sale'}
+                hint="Planned or live; record the hammer price"
+                tone="lime"
+                icon={<DeskIcon.Lot />}
+              />
             </nav>
 
             <div className="ad-home-grid">
@@ -211,6 +246,9 @@ export function AdminHome() {
                 <NavRow to="/admin/programme" icon={<Icon.Calendar />} title="Programme" sub={`${q.data.programmeCount} exhibitions, calls, events and stories${q.data.drafts ? ` · ${q.data.drafts} ${q.data.drafts === 1 ? 'draft' : 'drafts'}` : ''}`} />
                 <NavRow to="/admin/applications" icon={<Icon.Doc />} title="Applications" sub={`${q.data.totalApps} to open calls`} />
                 <NavRow to="/admin/collectors" icon={<Icon.Inbox />} title="Collector inquiries" sub={`${q.data.totalBuyers} in total`} />
+                <NavRow to="/admin/lots" icon={<DeskIcon.Lot />} title="Lots" sub={`${q.data.totalLots} on auction calls · ${q.data.soldLots} sold`} />
+                <NavRow to="/admin/payouts" icon={<DeskIcon.Money />} title="Payouts" sub={q.data.payoutsDue ? `${q.data.dueAmount} due · ${q.data.paidCount} paid` : `Nothing due · ${q.data.paidCount} paid`} />
+                <NavRow to="/admin/reports" icon={<DeskIcon.Chart />} title="Reports" sub="Participation, placements and payments, as CSV" />
                 <li>
                   <Link to="/admin/activity" className="list-row">
                     <span className="ad-nav__icon" aria-hidden="true">

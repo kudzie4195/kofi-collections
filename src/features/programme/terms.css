@@ -1,0 +1,71 @@
+/* Call terms block (public call page, apply flow, partner desk).
+   Kofi Noir: hairlines, tracked labels, the plain sentence in the serif. No boxes. */
+.kt-terms {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--gold);
+  min-width: 0;
+}
+.kt-terms__title {
+  font-family: var(--font-label);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.kt-terms__sentence {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.375rem, 4.4vw, 1.875rem);
+  line-height: 1.2;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+}
+.kt-terms--compact .kt-terms__sentence {
+  font-size: var(--fs-lg);
+  line-height: 1.3;
+}
+.kt-terms__facts {
+  display: grid;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.kt-terms__facts > div {
+  display: grid;
+  grid-template-columns: minmax(104px, 36%) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 10px;
+  border-top: 1px solid var(--line);
+}
+.kt-terms__facts dt {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--cream-3);
+  padding-top: 3px;
+  overflow-wrap: anywhere;
+}
+.kt-terms__facts dd {
+  margin: 0;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+}
+.kt-terms__example {
+  font-size: var(--fs-sm);
+  color: var(--cream-2);
+  font-variant-numeric: tabular-nums;
+}
+.kt-terms__fine {
+  font-size: var(--fs-xs);
+  color: var(--cream-3);
+}
+@media (min-width: 900px) {
+  .kt-terms--page .kt-terms__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-6);
+  }
+}

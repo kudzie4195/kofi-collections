@@ -12,7 +12,8 @@ import type { DemoIdentity, Viewer } from '@/domain/types';
  *   4… institutions · 5… curators · 6… shortlists · 7… inquiries ·
  *   8… documents · 9… seed audit events ·
  *   a1… exhibitions · a2… open calls · a3… applications · a4… events ·
- *   a5… stories · a6… buyer inquiries
+ *   a5… stories · a6… buyer inquiries ·
+ *   a7… lots · a8… payouts (supabase/migrations/0009_sales.sql)
  */
 export const DEMO_UUIDS = {
   // auth.users / profiles
@@ -89,9 +90,13 @@ export const DEMO_UUIDS = {
   call_night_weather: 'a2000000-0000-4000-8000-000000000002',
   call_soft_ground: 'a2000000-0000-4000-8000-000000000003',
   call_summer_open: 'a2000000-0000-4000-8000-000000000004',
+  call_cma_auction: 'a2000000-0000-4000-8000-000000000005',
   app_mara_summer: 'a3000000-0000-4000-8000-000000000001',
   app_june_summer: 'a3000000-0000-4000-8000-000000000002',
   app_deshawn_night: 'a3000000-0000-4000-8000-000000000003',
+  app_mara_cma: 'a3000000-0000-4000-8000-000000000004',
+  app_deshawn_cma: 'a3000000-0000-4000-8000-000000000005',
+  app_priya_cma: 'a3000000-0000-4000-8000-000000000006',
   ev_nw_opening: 'a4000000-0000-4000-8000-000000000001',
   ev_mara_talk: 'a4000000-0000-4000-8000-000000000002',
   ev_june_open_studio: 'a4000000-0000-4000-8000-000000000003',
@@ -102,6 +107,12 @@ export const DEMO_UUIDS = {
   st_advocacy_partner: 'a5000000-0000-4000-8000-000000000004',
   bi_doubling: 'a6000000-0000-4000-8000-000000000001',
   bi_office_placement: 'a6000000-0000-4000-8000-000000000002',
+  // sales (supabase/migrations/0009_sales.sql): lots a7… · payouts a8…
+  lot_cma_1: 'a7000000-0000-4000-8000-000000000001',
+  lot_cma_2: 'a7000000-0000-4000-8000-000000000002',
+  lot_cma_3: 'a7000000-0000-4000-8000-000000000003',
+  payout_cma_1: 'a8000000-0000-4000-8000-000000000001',
+  payout_cma_3: 'a8000000-0000-4000-8000-000000000003',
 } as const;
 
 export type DemoSeedId = keyof typeof DEMO_UUIDS;

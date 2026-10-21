@@ -95,10 +95,10 @@ begin
 
   select count(*) into n from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'kofi';
   -- 8 tables from 0006 + 6 programme tables from 0008.
-  if n <> 14 or exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public') then
-    raise exception 'FAIL: realtime should publish the 14 kofi tables and nothing in public (kofi: %)', n;
+  if n <> 16 or exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public') then
+    raise exception 'FAIL: realtime should publish the 16 kofi tables (incl. 0009 lots, payouts) and nothing in public (kofi: %)', n;
   end if;
-  raise notice 'ok: supabase_realtime publishes 14 kofi.* tables, none in public';
+  raise notice 'ok: supabase_realtime publishes 16 kofi.* tables, none in public';
 
   if not exists (select 1 from pg_trigger where tgrelid = 'auth.users'::regclass and tgname = 'on_auth_user_created' and tgfoid = 'public.handle_new_user()'::regprocedure)
      or not exists (select 1 from pg_trigger where tgrelid = 'auth.users'::regclass and tgname = 'kofi_on_auth_user_created' and tgfoid = 'kofi.handle_new_user()'::regprocedure) then

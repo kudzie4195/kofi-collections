@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { ApplicationRow, ArtworkView, EventKind, Exhibition, Medium, OpenCall, ProgrammeEvent, ProgrammeImage, Story, StoryKind, Venue } from '@/domain/types';
-import { EVENT_KINDS, STORY_KINDS } from '@/domain/types';
+import type { ApplicationRow, ArtworkView, CallKind, CallTerms, EventKind, Exhibition, Institution, LotRow, Medium, OpenCall, ProgrammeEvent, ProgrammeImage, Story, StoryKind, Venue } from '@/domain/types';
+import { CALL_KIND_LABEL, CALL_KINDS, EVENT_KINDS, STORY_KINDS } from '@/domain/types';
+import { DEFAULT_TERMS, validateTerms } from '@/domain/sales';
 import { callPhase, exhibitionPhase, kofiToday } from '@/domain/programme';
 import type { AdminArtistRow, ProgrammeInput } from '@/data/DataSource';
 import { ValidationError } from '@/data/DataSource';
@@ -21,10 +22,12 @@ import { Button, Confirm, EmptyState, ErrorState, Icon, Input, LinkButton, Notic
 import { useUnsavedGuard, focusFirstError } from '@/features/studio/shared';
 import { isoToLocalInput, kofiZoneLabel, localInputToIso } from './datetime';
 import { ArtworkPicker, ImageField, MediumChips } from './ProgrammeFields';
+import { formToTerms, LockedTerms, TermsFields, termsToForm, type TermsForm } from './TermsFields';
 import { Badge } from './AdminProgramme';
 import { isProgrammeKind, KIND_LABEL, KIND_SINGULAR, publicPath, type AnyProgrammeItem, type ProgrammeKind } from './programmeShared';
 import './admin.css';
 import './programme.css';
+import './sales.css';
 
 /* ---------------- form model ---------------- */
 
@@ -49,6 +52,12 @@ interface Form {
   fee: string;
   award: string;
   exhibitionId: string;
+  callKind: CallKind;
+  /** '' = Kofi Collections runs the call. */
+  organizerId: string;
+  /** Non-auction calls may publish terms too; auctions always do. */
+  hasTerms: boolean;
+  terms: TermsForm;
   eventKind: EventKind;
   startsAt: string;
   endsAt: string;
@@ -88,6 +97,10 @@ function blankForm(kind: ProgrammeKind): Form {
     fee: 'No entry fee',
     award: '',
     exhibitionId: '',
+    callKind: 'exhibition',
+    organizerId: '',
+    hasTerms: false,
+    terms: termsToForm(DEFAULT_TERMS),
     eventKind: 'talk',
     startsAt: '',
     endsAt: '',
@@ -116,7 +129,26 @@ function fromItem(kind: ProgrammeKind, item: AnyProgrammeItem): Form {
     }
     case 'calls': {
       const c = item as OpenCall;
-      return { ...base, partner: c.partner ?? '', summary: c.summary, body: c.body, eligibility: c.eligibility, mediums: [...c.mediums], opensOn: c.opensOn, deadline: c.deadline ?? '', maxWorks: String(c.maxWorks), fee: c.fee, award: c.award ?? '', image: c.image, externalUrl: c.externalUrl ?? '', exhibitionId: c.exhibitionId ?? '' };
+      return {
+        ...base,
+        partner: c.partner ?? '',
+        summary: c.summary,
+        body: c.body,
+        eligibility: c.eligibility,
+        mediums: [...c.mediums],
+        opensOn: c.opensOn,
+        deadline: c.deadline ?? '',
+        maxWorks: String(c.maxWorks),
+        fee: c.fee,
+        award: c.award ?? '',
+        image: c.image,
+        externalUrl: c.externalUrl ?? '',
+        exhibitionId: c.exhibitionId ?? '',
+        callKind: c.kind ?? 'exhibition',
+        organizerId: c.organizerInstitutionId ?? '',
+        hasTerms: !!c.terms,
+        terms: termsToForm(c.terms ?? DEFAULT_TERMS),
+      };
     }
     case 'events': {
       const e = item as ProgrammeEvent;
@@ -158,7 +190,9 @@ function compact<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
-function toInput(kind: ProgrammeKind, f: Form, id: string | undefined): Input<ProgrammeKind> {
+const usesTerms = (f: Form) => f.callKind === 'auction' || f.hasTerms;
+
+function toInput(kind: ProgrammeKind, f: Form, id: string | undefined, lockedTerms?: CallTerms): Input<ProgrammeKind> {
   const common = { id, title: f.title.trim(), published: f.published, sample: f.sample };
   switch (kind) {
     case 'exhibitions':
@@ -191,6 +225,10 @@ function toInput(kind: ProgrammeKind, f: Form, id: string | undefined): Input<Pr
         image: imageOf(f),
         externalUrl: opt(f.externalUrl),
         exhibitionId: opt(f.exhibitionId),
+        kind: f.callKind,
+        organizerInstitutionId: opt(f.organizerId),
+        // A sale froze the terms: send them back exactly as stored.
+        terms: lockedTerms ?? (usesTerms(f) ? formToTerms(f.terms) : undefined),
       });
     case 'events':
       return compact<ProgrammeInput<ProgrammeEvent>>({
@@ -219,7 +257,7 @@ function toInput(kind: ProgrammeKind, f: Form, id: string | undefined): Input<Pr
 }
 
 /** Instant checks before the server's; the server's answer always wins. */
-function clientErrors(kind: ProgrammeKind, f: Form): Errors {
+function clientErrors(kind: ProgrammeKind, f: Form, termsLocked = false): Errors {
   const e: Errors = {};
   if (!f.title.trim()) e.title = 'Give it a title.';
   if (f.image && !f.image.alt.trim()) e.image = 'Describe the image for people who can’t see it.';
@@ -228,6 +266,10 @@ function clientErrors(kind: ProgrammeKind, f: Form): Errors {
     if (!f.opensOn) e.opensOn = 'Choose the day the call opens.';
     const n = Number(f.maxWorks);
     if (!Number.isInteger(n) || n < 1 || n > 10) e.maxWorks = 'Allow between 1 and 10 works.';
+    if (!termsLocked && usesTerms(f)) {
+      const p = validateTerms(formToTerms(f.terms));
+      if (p) e[p.field] = p.message;
+    }
   }
   if (kind === 'events' && !localInputToIso(f.startsAt)) e.startsAt = 'Choose when the event starts.';
   if (kind === 'stories' && !f.publishedOn) e.publishedOn = 'Choose a publication date.';
@@ -259,7 +301,7 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
 
   const q = useQuery(
     async (ds, v) => {
-      const [item, works, exhibitions, artists, apps] = await Promise.all([
+      const [item, works, exhibitions, artists, apps, institutions, lots] = await Promise.all([
         !id
           ? Promise.resolve(undefined)
           : kind === 'exhibitions'
@@ -273,8 +315,10 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
         kind === 'calls' || kind === 'events' ? ds.listExhibitions(v) : Promise.resolve([] as Exhibition[]),
         kind === 'stories' ? ds.listAllArtists(v) : Promise.resolve([] as AdminArtistRow[]),
         kind === 'calls' && id ? ds.listApplications(v, id) : Promise.resolve([] as ApplicationRow[]),
+        kind === 'calls' ? ds.listInstitutions(v).catch(() => [] as Institution[]) : Promise.resolve([] as Institution[]),
+        kind === 'calls' && id ? ds.listLots(v, id).catch(() => [] as LotRow[]) : Promise.resolve([] as LotRow[]),
       ]);
-      return { item: item as AnyProgrammeItem | undefined, works, exhibitions, artists, apps };
+      return { item: item as AnyProgrammeItem | undefined, works, exhibitions, artists, apps, institutions, lots };
     },
     [kind, id],
   );
@@ -341,9 +385,38 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
   const savedPublished = !isNew && q.data.item?.published;
   const appCount = q.data.apps.length;
   const attached = f.artworkIds.map((x) => worksById.get(x)).filter((w): w is ArtworkView => !!w);
+  const savedCall = kind === 'calls' && !isNew ? (q.data.item as OpenCall | undefined) : undefined;
+  const lots = q.data.lots;
+  const soldLots = lots.filter((l) => l.status === 'sold');
+  // A sale freezes the split it was made under; the server refuses any change (checkCallLocks).
+  const lockedTerms = savedCall?.terms && soldLots.length > 0 ? savedCall.terms : undefined;
+  const lockReason =
+    soldLots.length === 1
+      ? `Locked: lot ${soldLots[0]!.lotNumber} has sold. A sale keeps the terms it was made under, so these can no longer change.`
+      : `Locked: ${soldLots.length} lots have sold. A sale keeps the terms it was made under, so these can no longer change.`;
+  const kindLocked = savedCall?.kind === 'auction' && lots.length > 0;
+  const instName = (iid: string) => q.data!.institutions.find((i) => i.id === iid)?.name;
+  const setTerm = (k: keyof TermsForm, v: string) => {
+    setForm((cur) => (cur ? { ...cur, terms: { ...cur.terms, [k]: v } } : cur));
+    if (errors[k] || errors.terms || errors.general) setErrors((e) => ({ ...e, [k]: undefined, terms: undefined, general: undefined, ...(k.endsWith('SharePct') ? { artistSharePct: undefined } : {}) }));
+  };
+  const setKind = (k: CallKind) => {
+    setForm((cur) => (cur ? { ...cur, callKind: k, hasTerms: k === 'auction' ? true : cur.hasTerms } : cur));
+    if (errors.kind || errors.terms || errors.general) setErrors((e) => ({ ...e, kind: undefined, terms: undefined, general: undefined }));
+  };
+  const setOrganizer = (iid: string) => {
+    setForm((cur) => {
+      if (!cur) return cur;
+      // Keep the public "partner" line in step with the organiser unless it was written by hand.
+      const prev = cur.organizerId ? instName(cur.organizerId) : 'Kofi Collections';
+      const follow = !cur.partner.trim() || cur.partner === prev || cur.partner === 'Kofi Collections';
+      return { ...cur, organizerId: iid, partner: follow ? (iid ? (instName(iid) ?? cur.partner) : 'Kofi Collections') : cur.partner };
+    });
+    if (errors.organizerInstitutionId || errors.general) setErrors((e) => ({ ...e, organizerInstitutionId: undefined, general: undefined }));
+  };
 
   async function save() {
-    const local = clientErrors(kind, f);
+    const local = clientErrors(kind, f, !!lockedTerms);
     if (Object.values(local).some(Boolean)) {
       setErrors(local);
       focusFirstError();
@@ -352,7 +425,7 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
     setSaving(true);
     setErrors({});
     try {
-      const input = toInput(kind, f, id);
+      const input = toInput(kind, f, id, lockedTerms);
       const saved =
         kind === 'exhibitions'
           ? await data.saveExhibition(viewer, input as ProgrammeInput<Exhibition>)
@@ -448,7 +521,41 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
                 <Textarea label="Standfirst" hint="One or two sentences under the headline." rows={2} value={f.dek} error={err('dek')} onChange={(e) => set('dek', e.target.value)} />
               </>
             )}
-            {kind === 'calls' && <Input label="Partner organisation" value={f.partner} error={err('partner')} onChange={(e) => set('partner', e.target.value)} />}
+            {kind === 'calls' && (
+              <>
+                <div className="pg-two">
+                  <Select
+                    label="Kind of call"
+                    hint={kindLocked ? 'This call has lots, so it stays an auction.' : 'Auctions turn selected works into lots.'}
+                    value={f.callKind}
+                    disabled={kindLocked}
+                    error={err('kind')}
+                    onChange={(e) => setKind(e.target.value as CallKind)}
+                  >
+                    {CALL_KINDS.map((k) => (
+                      <option key={k} value={k}>
+                        {CALL_KIND_LABEL[k]}
+                      </option>
+                    ))}
+                  </Select>
+                  <Select
+                    label="Organiser"
+                    hint="A partner institution’s verified curators can edit its draft and review applications."
+                    value={f.organizerId}
+                    error={err('organizerInstitutionId')}
+                    onChange={(e) => setOrganizer(e.target.value)}
+                  >
+                    <option value="">Kofi Collections</option>
+                    {q.data.institutions.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Input label="Partner organisation" hint="The name shown on the public call." value={f.partner} error={err('partner')} onChange={(e) => set('partner', e.target.value)} />
+              </>
+            )}
             {kind !== 'stories' && (
               <Textarea label="Summary" hint="One or two sentences for cards and lists." rows={3} value={f.summary} error={err('summary')} onChange={(e) => set('summary', e.target.value)} />
             )}
@@ -498,6 +605,30 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
                 error={err('externalUrl')}
                 onChange={(e) => set('externalUrl', e.target.value)}
               />
+            </Section>
+          )}
+
+          {kind === 'calls' && (
+            <Section title="Terms">
+              {lockedTerms ? (
+                <LockedTerms terms={lockedTerms} reason={lockReason} />
+              ) : (
+                <>
+                  {f.callKind === 'auction' ? (
+                    <p className="small muted">An auction publishes its terms so artists know their share before they apply.</p>
+                  ) : (
+                    <Toggle
+                      checked={f.hasTerms}
+                      onChange={(v) => {
+                        set('hasTerms', v, 'terms');
+                      }}
+                      label="Add compensation terms"
+                      hint={f.hasTerms ? 'Published on the call with the split of any sale.' : 'Optional for this kind of call.'}
+                    />
+                  )}
+                  {usesTerms(f) && <TermsFields value={f.terms} onChange={setTerm} errors={errors} />}
+                </>
+              )}
             </Section>
           )}
 
@@ -578,6 +709,13 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
               <p className="small muted">
                 {appCount === 0 ? 'No applications yet.' : `${appCount} ${appCount === 1 ? 'application' : 'applications'}. `}
                 {appCount > 0 && <Link to={`/admin/applications?call=${id}`}>Review applications</Link>}
+                {f.callKind === 'auction' && (
+                  <>
+                    {' · '}
+                    {lots.length === 0 ? 'No lots yet. ' : `${lots.length} ${lots.length === 1 ? 'lot' : 'lots'}. `}
+                    <Link to={`/admin/lots?call=${id}`}>Manage lots</Link>
+                  </>
+                )}
               </p>
             )}
           </Section>
@@ -668,7 +806,12 @@ function PreviewCard({ kind, f }: { kind: ProgrammeKind; f: Form }) {
       break;
     }
     case 'calls': {
-      eyebrow = f.partner ? `Open call · ${f.partner}` : 'Open call';
+      const kindWord = f.callKind === 'exhibition' ? 'Open call' : CALL_KIND_LABEL[f.callKind];
+      eyebrow = f.partner ? `${kindWord} · ${f.partner}` : kindWord;
+      if (usesTerms(f)) {
+        const t = formToTerms(f.terms);
+        if (!validateTerms(t)) sub = `Artists receive ${t.artistSharePct}% of the hammer price`;
+      }
       if (f.opensOn) {
         const c = { opensOn: f.opensOn, deadline: f.deadline || undefined };
         const p = callPhase(c, today);

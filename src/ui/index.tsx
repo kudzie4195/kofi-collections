@@ -444,6 +444,23 @@ export function tabbables(root: HTMLElement): HTMLElement[] {
 /** Open sheets, bottom → top. Only the top one traps focus and answers Escape. */
 const sheetStack: HTMLElement[] = [];
 
+/**
+ * The last element focused outside any sheet. A field with autoFocus takes focus during React's
+ * commit, before the Sheet's layout effect runs, so document.activeElement is already inside the
+ * dialog by then; this is the opener to return focus to in that case.
+ */
+let lastOutsideFocus: HTMLElement | null = null;
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'focusin',
+    (e) => {
+      const t = e.target;
+      if (t instanceof HTMLElement && t !== document.body && !t.closest('.sheet-layer')) lastOutsideFocus = t;
+    },
+    true,
+  );
+}
+
 /** Make everything behind the top sheet inert: the app root (#root) and any sheet below it. */
 function syncInert() {
   const app = document.getElementById('root');
@@ -485,7 +502,8 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
     const layer = layerRef.current;
     const dialog = ref.current;
     if (!open || !layer || !dialog) return;
-    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body && !layer.contains(active) ? active : lastOutsideFocus;
     sheetStack.push(layer);
     syncInert();
     const isTop = () => sheetStack[sheetStack.length - 1] === layer;

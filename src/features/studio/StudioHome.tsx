@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CONSENT_VERSION, VISIBILITY_LABEL } from '@/domain/types';
-import type { ApplicationRow, ApplicationStatus, ArtworkView, OpenCall } from '@/domain/types';
+import type { ApplicationRow, ApplicationStatus, ArtworkView, LotRow, OpenCall, PayoutRow } from '@/domain/types';
 import { APPLICATION_STATUSES } from '@/domain/types';
 import { callPhase } from '@/domain/programme';
 import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, deadlineLabel } from '@/features/programme/format';
@@ -10,6 +10,7 @@ import { useSession, useQuery } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
 import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Panel, Skeleton, StatusDot, TopBar, VisibilityBadge } from '@/ui';
 import { STATUS_COPY, VisibilityIcon, capitalize } from './shared';
+import { payoutTotals, totalsText } from './salesShared';
 
 export function StudioHome() {
   const { viewer, data } = useSession();
@@ -19,15 +20,17 @@ export function StudioHome() {
 
   const q = useQuery(
     async (ds, v) => {
-      const [artist, works, inquiries, docs, calls, apps] = await Promise.all([
+      const [artist, works, inquiries, docs, calls, apps, lots, payouts] = await Promise.all([
         ds.getMyArtist(v),
         v.artistId ? ds.listArtistArtworks(v, v.artistId) : Promise.resolve([] as ArtworkView[]),
         ds.listInquiries(v),
         ds.listMyDocuments(v),
         ds.listOpenCalls(v).catch(() => [] as OpenCall[]),
         ds.listMyApplications(v).catch(() => [] as ApplicationRow[]),
+        ds.listMyLots(v).catch(() => [] as LotRow[]),
+        ds.listPayouts(v).catch(() => [] as PayoutRow[]),
       ]);
-      return { artist, works, inquiries, docs, calls, apps };
+      return { artist, works, inquiries, docs, calls, apps, lots, payouts };
     },
     [],
   );
@@ -45,7 +48,7 @@ export function StudioHome() {
 
   if (!q.data) return <HomeSkeleton />;
 
-  const { artist, works, inquiries, docs, calls, apps } = q.data;
+  const { artist, works, inquiries, docs, calls, apps, lots, payouts } = q.data;
   if (!artist) {
     return (
       <div className="screen">
@@ -153,7 +156,7 @@ export function StudioHome() {
           </li>
         </ul>
 
-        <OpportunitiesBlock calls={calls} apps={apps} />
+        <OpportunitiesBlock calls={calls} apps={apps} lots={lots} payouts={payouts} />
         </div>
 
         <div className="st-home__main stack--lg">
@@ -206,7 +209,10 @@ export function StudioHome() {
   );
 }
 
-function OpportunitiesBlock({ calls, apps }: { calls: OpenCall[]; apps: ApplicationRow[] }) {
+function OpportunitiesBlock({ calls, apps, lots, payouts }: { calls: OpenCall[]; apps: ApplicationRow[]; lots: LotRow[]; payouts: PayoutRow[] }) {
+  const due = payoutTotals(payouts, 'due');
+  const paid = payoutTotals(payouts, 'paid');
+  const sold = lots.filter((l) => l.status === 'sold').length;
   const open = calls.filter((c) => callPhase(c) === 'open');
   const next = open.find((c) => !c.externalUrl && !apps.some((a) => a.callId === c.id && a.status !== 'withdrawn')) ?? open[0];
   const counts = APPLICATION_STATUSES.map((s) => [s, apps.filter((a) => a.status === s).length] as [ApplicationStatus, number]).filter(([, n]) => n > 0);
@@ -250,6 +256,23 @@ function OpportunitiesBlock({ calls, apps }: { calls: OpenCall[]; apps: Applicat
               ) : (
                 <span className="list-row__sub">You haven’t applied to a call yet.</span>
               )}
+            </span>
+            <Icon.Back className="st-chevron" aria-hidden="true" />
+          </Link>
+        </li>
+        <li>
+          <Link to="sales" className="list-row st-opp">
+            <span className="st-opp__num" aria-hidden="true">
+              {sold}
+            </span>
+            <span className="list-row__main">
+              <span className="list-row__title st-opp__title">Sales</span>
+              <span className="list-row__sub" data-testid="studio-sales-totals">
+                {lots.length === 0
+                  ? 'No auction lots yet.'
+                  : `${totalsText(due, 'Nothing')} due · ${totalsText(paid, 'nothing')} paid`}
+              </span>
+              <span className="sr-only">, {sold === 1 ? '1 work sold' : `${sold} works sold`}</span>
             </span>
             <Icon.Back className="st-chevron" aria-hidden="true" />
           </Link>

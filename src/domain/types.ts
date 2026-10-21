@@ -321,7 +321,12 @@ export type AuditAction =
   | 'application.withdraw'
   | 'application.status'
   | 'buyer_inquiry.submit'
-  | 'buyer_inquiry.status';
+  | 'buyer_inquiry.status'
+  | 'lot.save'
+  | 'lot.sale'
+  | 'lot.delete'
+  | 'payout.status'
+  | 'report.export';
 
 /** Append-only. */
 export interface AuditEvent {
@@ -330,7 +335,7 @@ export interface AuditEvent {
   actorRole: Role;
   actorName: string;
   action: AuditAction;
-  entityType: 'artist' | 'artwork' | 'document' | 'curator' | 'shortlist' | 'inquiry' | 'exhibition' | 'open_call' | 'event' | 'story' | 'application' | 'buyer_inquiry';
+  entityType: 'artist' | 'artwork' | 'document' | 'curator' | 'shortlist' | 'inquiry' | 'exhibition' | 'open_call' | 'event' | 'story' | 'application' | 'buyer_inquiry' | 'lot' | 'payout' | 'report';
   entityId: string;
   at: string;
   consentVersion?: string;
@@ -492,8 +497,44 @@ export interface OpenCall extends ProgrammeBase {
   /** When set, applications are taken on this external form, not in the app. */
   externalUrl?: string;
   exhibitionId?: string;
+  /** What the call leads to. 'auction' calls can have lots (see Lot). Default 'exhibition'. */
+  kind: CallKind;
+  /**
+   * The institution running this call, if not Kofi. Verified curators of that
+   * institution ("partners") may edit the call while it is a draft, review its
+   * applications and record selections; Kofi publishes it and sees everything.
+   */
+  organizerInstitutionId?: string;
+  /** Published money terms. Required for 'auction' calls; optional otherwise. */
+  terms?: CallTerms;
 }
 export type CallPhase = 'upcoming' | 'open' | 'closed';
+
+export type CallKind = 'exhibition' | 'auction' | 'commission' | 'award';
+export const CALL_KINDS: CallKind[] = ['exhibition', 'auction', 'commission', 'award'];
+export const CALL_KIND_LABEL: Record<CallKind, string> = {
+  exhibition: 'Exhibition',
+  auction: 'Auction',
+  commission: 'Commission',
+  award: 'Award',
+};
+
+/**
+ * How money from a sale is shared. Whole percentages; artist + kofi + partner = 100.
+ * buyerPremiumPct is charged on top of the hammer price and kept by the organiser;
+ * resaleRoyaltyPct is the artist's share of any later resale (recorded on the sale,
+ * from Kofi's open-source seller's contract). Never estimates value — artists set prices.
+ */
+export interface CallTerms {
+  artistSharePct: number;
+  kofiSharePct: number;
+  partnerSharePct: number;
+  buyerPremiumPct: number;
+  resaleRoyaltyPct: number;
+  currency: string;
+  /** Free text shown to artists before they apply, e.g. "Paid within 30 days of the sale." */
+  paymentNote?: string;
+}
 
 export type ApplicationStatus = 'submitted' | 'shortlisted' | 'accepted' | 'declined' | 'withdrawn';
 export const APPLICATION_STATUSES: ApplicationStatus[] = ['submitted', 'shortlisted', 'accepted', 'declined', 'withdrawn'];
@@ -508,7 +549,7 @@ export interface Application {
   status: ApplicationStatus;
   /** Shown to the artist with the decision. */
   decisionNote?: string;
-  /** Kofi-only reviewer note. Never returned to the artist. */
+  /** Reviewers' note (Kofi and the call's organiser). Never returned to the artist. */
   staffNote?: string;
   createdAt: string;
   updatedAt: string;
@@ -587,4 +628,156 @@ export interface BuyerInquiry {
 export interface BuyerInquiryRow extends BuyerInquiry {
   artworkTitle?: string;
   artistWorkingName?: string;
+}
+
+/* =====================================================================
+   Sales — a selected work on an auction call becomes a Lot. Recording the
+   hammer price creates the Sale (the split, computed once from the call's
+   terms and frozen) and the artist's Payout. Kofi admins manage lots and
+   payouts; the call's organiser may create lots and record sales for its
+   own call; artists see their own lots and payouts; nobody else sees them.
+   Rules in src/domain/sales.ts.
+   ===================================================================== */
+
+export type LotStatus = 'planned' | 'live' | 'sold' | 'unsold' | 'withdrawn';
+export const LOT_STATUSES: LotStatus[] = ['planned', 'live', 'sold', 'unsold', 'withdrawn'];
+
+export interface Lot {
+  id: string;
+  callId: string;
+  applicationId: string;
+  artworkId: string;
+  artistId: string;
+  lotNumber: number;
+  /** Lowest acceptable hammer price (the artist's floor), in the call's currency. */
+  reserve?: number;
+  startingBid?: number;
+  status: LotStatus;
+  sale?: Sale;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Frozen at the moment of sale so later changes to the call's terms never rewrite history. */
+export interface Sale {
+  hammerPrice: number;
+  currency: string;
+  buyerPremium: number;
+  artistAmount: number;
+  kofiAmount: number;
+  partnerAmount: number;
+  terms: CallTerms;
+  soldAt: string;
+  /** Kofi/organiser-only. e.g. "Paddle 14" or a buyer's organisation. Never shown to artists. */
+  buyerRef?: string;
+}
+
+export interface LotRow extends Lot {
+  callTitle: string;
+  callKind: CallKind;
+  artworkTitle: string;
+  artistWorkingName: string;
+  /** The work as this viewer may see it. */
+  work?: ArtworkView;
+  payout?: Payout;
+}
+
+export type PayoutStatus = 'due' | 'paid' | 'void';
+export const PAYOUT_STATUSES: PayoutStatus[] = ['due', 'paid', 'void'];
+
+/** What Kofi owes an artist from one lot. Created with the sale; Kofi marks it paid. */
+export interface Payout {
+  id: string;
+  lotId: string;
+  artistId: string;
+  amount: number;
+  currency: string;
+  status: PayoutStatus;
+  /** Set when paid: e.g. "Bank transfer", "Check #1042". */
+  method?: string;
+  reference?: string;
+  paidAt?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayoutRow extends Payout {
+  artistWorkingName: string;
+  artworkTitle: string;
+  callTitle: string;
+  lotNumber: number;
+}
+
+/* ---------- Reports (Kofi-wide, admin only) ---------- */
+
+export interface ReportRange {
+  /** ISO dates, inclusive, in Kofi's time zone. */
+  from: string;
+  to: string;
+}
+
+export interface ParticipationRow {
+  artistId: string;
+  artistWorkingName: string;
+  callId: string;
+  callTitle: string;
+  callKind: CallKind;
+  organizer: string;
+  applicationId: string;
+  status: ApplicationStatus;
+  worksAttached: number;
+  submittedOn: string;
+  decidedOn?: string;
+}
+
+export type PlacementKind = 'exhibition' | 'selection' | 'lot' | 'sale';
+export interface PlacementRow {
+  artistId: string;
+  artistWorkingName: string;
+  artworkId: string;
+  artworkTitle: string;
+  kind: PlacementKind;
+  /** Exhibition or call title. */
+  where: string;
+  on: string;
+  amount?: number;
+  currency?: string;
+}
+
+export interface PaymentRow {
+  payoutId: string;
+  artistId: string;
+  artistWorkingName: string;
+  artworkTitle: string;
+  callTitle: string;
+  lotNumber: number;
+  hammerPrice: number;
+  artistAmount: number;
+  kofiAmount: number;
+  partnerAmount: number;
+  buyerPremium: number;
+  currency: string;
+  status: PayoutStatus;
+  soldOn: string;
+  paidOn?: string;
+  method?: string;
+  reference?: string;
+}
+
+export interface KofiReport {
+  range: ReportRange;
+  generatedAt: string;
+  participation: ParticipationRow[];
+  placements: PlacementRow[];
+  payments: PaymentRow[];
+  totals: {
+    applications: number;
+    selected: number;
+    artistsParticipating: number;
+    lotsSold: number;
+    hammerTotal: Record<string, number>;
+    artistPaid: Record<string, number>;
+    artistDue: Record<string, number>;
+  };
 }

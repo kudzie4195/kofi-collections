@@ -14,22 +14,32 @@ import type {
   BuyerInquiry,
   BuyerInquiryRow,
   BuyerInquiryStatus,
+  CallKind,
   CallPhase,
+  CallTerms,
   CuratorStatus,
   DemoIdentity,
   Exhibition,
   Inquiry,
   InquiryStatus,
   Institution,
+  KofiReport,
+  Lot,
+  LotRow,
+  LotStatus,
   OpenCall,
+  Payout,
+  PayoutRow,
+  PayoutStatus,
   ProgrammeEvent,
   ProgrammeImage,
+  ReportRange,
   Shortlist,
   Story,
   Venue,
   Viewer,
 } from '@/domain/types';
-import { BUYER_INQUIRY_STATUSES, CONSENT_VERSION, EVENT_KINDS, MEDIUMS, STORY_KINDS } from '@/domain/types';
+import { BUYER_INQUIRY_STATUSES, CALL_KINDS, CONSENT_VERSION, EVENT_KINDS, LOT_STATUSES, MEDIUMS, PAYOUT_STATUSES, STORY_KINDS } from '@/domain/types';
 import { artistVisibleTo, artworkVisibleTo, canEdit, projectArtist, projectArtwork } from '@/domain/visibility';
 import {
   BUYER_INQUIRY_DAILY_LIMIT,
@@ -42,7 +52,9 @@ import {
   validateApplication,
   validateBuyerInquiry,
   type BuyerInquiryInput,
+  KOFI_TIME_ZONE,
 } from '@/domain/programme';
+import { canMoveLot, canMovePayout, isCallOrganizer, projectLotForArtist, splitSale, validateCallTerms, validateLot, validateSale, type LotInput, type SaleInput } from '@/domain/sales';
 import {
   ForbiddenError,
   NotFoundError,
@@ -60,7 +72,7 @@ import {
   type ApplicationInput,
   type ProgrammeInput,
 } from '../DataSource';
-import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, PROGRAMME_KEYS, type MockState } from './seed';
+import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, PROGRAMME_KEYS, SALES_KEYS, type MockState, type ProgrammeState } from './seed';
 
 const STORAGE_KEY = 'kofi.mock.state.v1';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -215,6 +227,54 @@ export class MockDataSource implements DataSource {
     const c = this.requireMyCurator(viewer);
     if (c.status !== 'verified') throw new ForbiddenError('Your institution has not been verified yet.');
     return c;
+  }
+
+  /* ---------- partners (verified curators of a call's organiser institution) ---------- */
+
+  /** The institution a viewer can organise for: a verified curator record from the store, never the client's claim. */
+  private organiserOf(viewer: Viewer): string | undefined {
+    if (viewer.role !== 'curator' || !viewer.userId || !viewer.curatorId) return undefined;
+    const c = this.state.curators.find((x) => x.id === viewer.curatorId && x.userId === viewer.userId);
+    return c?.status === 'verified' ? c.institutionId : undefined;
+  }
+
+  private requireOrganiser(viewer: Viewer): string {
+    const inst = this.organiserOf(viewer);
+    if (!inst) throw new ForbiddenError(viewer.role === 'curator' ? 'Your institution has not been verified yet.' : 'You do not have access to this.');
+    return inst;
+  }
+
+  /** A partner of this call (admins are not "partners" — they pass their own checks). */
+  private isPartnerOf(viewer: Viewer, call: Pick<OpenCall, 'organizerInstitutionId'> | undefined): boolean {
+    if (!call || viewer.role !== 'curator') return false;
+    const v = this.resolve(viewer);
+    return isCallOrganizer(v, call, this.organiserOf(v));
+  }
+
+  /** Admin, or the call's partner. Returns the call. */
+  private requireCallManager(v: Viewer, callId: string): OpenCall {
+    const call = this.state.openCalls.find((c) => c.id === callId);
+    if (v.role === 'admin') {
+      if (!call) throw new NotFoundError('Open call not found.');
+      return call;
+    }
+    this.requireOrganiser(v);
+    if (!call || !this.isPartnerOf(v, call)) throw new ForbiddenError('You can only manage calls your institution runs.');
+    return call;
+  }
+
+  /**
+   * A work attached to an application, as a reviewer sees it. Applying is consent to the
+   * call's reviewers seeing the attached work (never an Only me work), even if it is not
+   * on public view; the price still follows its own visibility for this viewer.
+   */
+  private reviewerWork(aw: Artwork, v: Viewer): ArtworkView | undefined {
+    const artist = this.artistById(aw.artistId);
+    if (v.role === 'admin') return projectArtwork(aw, artist, v);
+    if (!artist || aw.visibility === 'private') return undefined;
+    const view = projectArtwork({ ...aw, visibility: 'public' }, { ...artist, status: 'approved', visibility: 'public' }, v);
+    if (view) view.visibility = aw.visibility;
+    return view;
   }
 
   /* ---------- identities ---------- */
@@ -879,7 +939,7 @@ export class MockDataSource implements DataSource {
     const rank: Record<CallPhase, number> = { open: 0, upcoming: 1, closed: 2 };
     const far = '9999-12-31';
     return this.state.openCalls
-      .filter((x) => canSeeProgramme(x, v))
+      .filter((x) => canSeeProgramme(x, v) || this.isPartnerOf(v, x))
       .map((x) => this.viewCall(x, v))
       .sort((a, b) => {
         const pa = callPhase(a, today);
@@ -895,15 +955,59 @@ export class MockDataSource implements DataSource {
   async getOpenCall(viewer: Viewer, id: string): Promise<OpenCall | undefined> {
     const v = this.resolve(viewer);
     const c = this.state.openCalls.find((x) => x.id === id);
-    return c && canSeeProgramme(c, v) ? this.viewCall(c, v) : undefined;
+    return c && (canSeeProgramme(c, v) || this.isPartnerOf(v, c)) ? this.viewCall(c, v) : undefined;
   }
 
+  /**
+   * Admin: any call (kind/terms validated; terms frozen once a lot has sold).
+   * Partner: creates a draft for their own institution, and edits it only while
+   * Kofi has not published it. Never sets published, sample or the organiser.
+   */
   async saveOpenCall(viewer: Viewer, input: ProgrammeInput<OpenCall>): Promise<OpenCall> {
-    this.requireAdmin(viewer);
-    const clean = cleanOpenCall(input);
+    const v = this.resolve(viewer);
+    const existing = input.id ? this.state.openCalls.find((c) => c.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundError('That item no longer exists.');
+    let clean: Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'>;
+    if (v.role === 'admin') {
+      clean = cleanOpenCall(input, existing?.kind);
+      if (clean.organizerInstitutionId && !this.state.institutions.some((i) => i.id === clean.organizerInstitutionId)) {
+        throw new ValidationError('That institution no longer exists.', 'organizerInstitutionId');
+      }
+    } else {
+      const inst = this.organiserOf(v);
+      if (!inst) throw new ForbiddenError(v.role === 'curator' ? 'Your institution has not been verified yet.' : 'Kofi staff only.');
+      if (existing) {
+        if (existing.organizerInstitutionId !== inst) throw new ForbiddenError('You can only edit calls your institution runs.');
+        if (existing.published) throw new ForbiddenError('Kofi has published this call. Ask Kofi to make changes.');
+      }
+      clean = cleanOpenCall({ ...input, organizerInstitutionId: inst }, existing?.kind);
+      clean.published = existing?.published ?? false;
+      clean.sample = existing?.sample ?? false;
+    }
+    if (existing) this.checkCallLocks(existing, clean);
     this.checkProgrammeRefs(clean);
-    const saved = this.upsertProgramme(viewer, this.state.openCalls, 'open_call', 'call', input.id, clean);
-    return this.viewCall(saved, viewer);
+    const saved = this.upsertProgramme(v, this.state.openCalls, 'open_call', 'call', input.id, clean);
+    return this.viewCall(saved, v);
+  }
+
+  /** A sale freezes the terms; a call with lots stays an auction. */
+  private checkCallLocks(existing: OpenCall, next: Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'>): void {
+    const lots = this.state.lots.filter((l) => l.callId === existing.id);
+    if (lots.length > 0 && next.kind !== 'auction' && existing.kind === 'auction') throw new ValidationError('This call has lots, so it stays an auction.', 'kind');
+    const sold = lots.some((l) => l.status === 'sold');
+    if (sold && canonical(existing.terms) !== canonical(next.terms)) throw new ValidationError('Terms are locked once a lot has sold.', 'terms');
+  }
+
+  /** Calls this viewer runs: a partner's own (drafts included); admin: every call with an organiser. */
+  async listMyCalls(viewer: Viewer): Promise<OpenCall[]> {
+    const v = this.resolve(viewer);
+    let calls: OpenCall[];
+    if (v.role === 'admin') calls = this.state.openCalls.filter((c) => !!c.organizerInstitutionId);
+    else {
+      const inst = this.requireOrganiser(v);
+      calls = this.state.openCalls.filter((c) => c.organizerInstitutionId === inst);
+    }
+    return calls.map((c) => this.viewCall(c, v)).sort((a, b) => b.opensOn.localeCompare(a.opensOn) || a.title.localeCompare(b.title));
   }
 
   async deleteOpenCall(viewer: Viewer, id: string): Promise<void> {
@@ -973,10 +1077,11 @@ export class MockDataSource implements DataSource {
   private applicationRow(app: Application, v: Viewer): ApplicationRow {
     const call = this.state.openCalls.find((c) => c.id === app.callId);
     const artist = this.artistById(app.artistId);
+    const reviewer = v.role === 'admin' || this.isPartnerOf(v, call);
     const works: ArtworkView[] = [];
     for (const id of app.artworkIds) {
       const aw = this.state.artworks.find((x) => x.id === id);
-      const view = aw ? projectArtwork(aw, this.artistById(aw.artistId), v) : undefined;
+      const view = aw ? (reviewer ? this.reviewerWork(aw, v) : projectArtwork(aw, this.artistById(aw.artistId), v)) : undefined;
       if (view) works.push(view);
     }
     const row: ApplicationRow = {
@@ -986,8 +1091,8 @@ export class MockDataSource implements DataSource {
       works,
     };
     if (call?.deadline) row.callDeadline = call.deadline;
-    // Reviewer notes are Kofi's own; the artist sees only the decision note.
-    if (v.role !== 'admin') delete row.staffNote;
+    // The reviewers' note is shared by Kofi and the call's organiser; the artist sees only the decision note.
+    if (!reviewer) delete row.staffNote;
     return row;
   }
 
@@ -1054,20 +1159,32 @@ export class MockDataSource implements DataSource {
     return this.applicationRow(app, v);
   }
 
+  /** Admin: all (optionally one call). Partner: applications to calls its institution runs only. */
   async listApplications(viewer: Viewer, callId?: string): Promise<ApplicationRow[]> {
-    this.requireAdmin(viewer);
+    const v = this.resolve(viewer);
+    if (v.role !== 'admin') {
+      this.requireOrganiser(v);
+      if (callId) this.requireCallManager(v, callId);
+    }
     return this.state.applications
       .filter((x) => !callId || x.callId === callId)
-      .map((x) => this.applicationRow(x, viewer))
+      .filter((x) => v.role === 'admin' || this.isPartnerOf(v, this.state.openCalls.find((c) => c.id === x.callId)))
+      .map((x) => this.applicationRow(x, v))
       .sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
 
   async setApplicationStatus(viewer: Viewer, id: string, status: ApplicationStatus, notes: { decisionNote?: string; staffNote?: string } = {}): Promise<ApplicationRow> {
-    this.requireAdmin(viewer);
+    const v = this.resolve(viewer);
+    if (v.role !== 'admin') this.requireOrganiser(v);
     const app = this.state.applications.find((x) => x.id === id);
     if (!app) throw new NotFoundError('Application not found.');
+    if (v.role !== 'admin') this.requireCallManager(v, app.callId);
+    // The organiser reviews with Kofi's rules (shortlist, decide, correct); only the artist withdraws.
     if (!canMoveApplication(app.status, status, 'admin')) {
       throw new ValidationError(app.status === 'withdrawn' ? 'The artist withdrew this application.' : `This application cannot be moved from ${app.status} to ${status}.`, 'status');
+    }
+    if (app.status === 'accepted' && this.state.lots.some((l) => l.applicationId === app.id && l.status !== 'withdrawn')) {
+      throw new ValidationError('Works from this selection are lots in the auction. Withdraw or delete the lots first.', 'status');
     }
     for (const key of ['decisionNote', 'staffNote'] as const) {
       const val = notes[key];
@@ -1080,9 +1197,9 @@ export class MockDataSource implements DataSource {
     app.updatedAt = this.iso();
     if (status === 'accepted' || status === 'declined') app.decidedAt = app.updatedAt;
     else delete app.decidedAt;
-    this.audit(viewer, 'application.status', 'application', app.id, { status, callId: app.callId });
+    this.audit(v, 'application.status', 'application', app.id, { status, callId: app.callId });
     this.commit();
-    return this.applicationRow(app, viewer);
+    return this.applicationRow(app, v);
   }
 
   /* ---------- collector ("buyer") inquiries ---------- */
@@ -1156,6 +1273,299 @@ export class MockDataSource implements DataSource {
     return this.buyerInquiryRow(b);
   }
 
+  /* ---------- lots, sales, payouts ---------- */
+
+  /** The payout that counts for a lot: the live one (due/paid), else the latest voided one. */
+  private payoutForLot(lotId: string): Payout | undefined {
+    const all = this.state.payouts.filter((p) => p.lotId === lotId);
+    return all.find((p) => p.status !== 'void') ?? all.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
+  /**
+   * One lot as this viewer may see it. Admin: everything incl. the payout. Partner: the
+   * sale incl. buyerRef, never the payout. Artist (own lot): the sale without buyerRef, and
+   * their payout.
+   */
+  private lotRow(lot: Lot, v: Viewer): LotRow {
+    const call = this.state.openCalls.find((c) => c.id === lot.callId);
+    const aw = this.state.artworks.find((x) => x.id === lot.artworkId);
+    const artist = this.artistById(lot.artistId);
+    const asArtist = v.role === 'artist';
+    let row: LotRow = {
+      ...clone(lot),
+      callTitle: call?.title ?? 'A call that has been removed',
+      callKind: call?.kind ?? 'auction',
+      artworkTitle: aw?.title ?? 'A work that has been removed',
+      artistWorkingName: artist?.workingName ?? 'Unknown artist',
+    };
+    const work = aw ? (asArtist ? projectArtwork(aw, this.artistById(aw.artistId), v) : this.reviewerWork(aw, v)) : undefined;
+    if (work) row.work = work;
+    if (v.role === 'admin' || asArtist) {
+      const p = this.payoutForLot(lot.id);
+      if (p) row.payout = clone(p);
+    }
+    if (asArtist) row = projectLotForArtist(row);
+    return row;
+  }
+
+  private sortLots(rows: LotRow[]): LotRow[] {
+    return rows.sort((a, b) => a.callTitle.localeCompare(b.callTitle) || a.callId.localeCompare(b.callId) || a.lotNumber - b.lotNumber);
+  }
+
+  /** Admin: all lots. Partner: lots on calls its institution runs. Artists use listMyLots. */
+  async listLots(viewer: Viewer, callId?: string): Promise<LotRow[]> {
+    const v = this.resolve(viewer);
+    if (v.role !== 'admin') {
+      this.requireOrganiser(v);
+      if (callId) this.requireCallManager(v, callId);
+    }
+    const rows = this.state.lots
+      .filter((l) => !callId || l.callId === callId)
+      .filter((l) => v.role === 'admin' || this.isPartnerOf(v, this.state.openCalls.find((c) => c.id === l.callId)))
+      .map((l) => this.lotRow(l, v));
+    return this.sortLots(rows);
+  }
+
+  private requireLot(v: Viewer, id: string): { lot: Lot; call: OpenCall } {
+    if (v.role !== 'admin') this.requireOrganiser(v);
+    const lot = this.state.lots.find((l) => l.id === id);
+    if (!lot) throw new NotFoundError('Lot not found.');
+    const call = this.requireCallManager(v, lot.callId);
+    return { lot, call };
+  }
+
+  async saveLot(viewer: Viewer, input: LotInput & { id?: string }): Promise<LotRow> {
+    const v = this.resolve(viewer);
+    if (v.role !== 'admin') this.requireOrganiser(v);
+    const existing = input.id ? this.state.lots.find((l) => l.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundError('Lot not found.');
+    const call = this.requireCallManager(v, String(input.callId ?? ''));
+    if (existing) {
+      if (existing.callId !== call.id) throw new ValidationError('A lot cannot move to another call.', 'callId');
+      if (existing.status === 'sold') throw new ValidationError('This lot is sold. Void the sale before editing it.', 'status');
+    }
+    const clean: LotInput = {
+      callId: call.id,
+      applicationId: String(input.applicationId ?? ''),
+      artworkId: String(input.artworkId ?? ''),
+      lotNumber: input.lotNumber,
+    };
+    if (input.reserve !== undefined && input.reserve !== null) clean.reserve = input.reserve;
+    if (input.startingBid !== undefined && input.startingBid !== null) clean.startingBid = input.startingBid;
+    const application = this.state.applications.find((a) => a.id === clean.applicationId);
+    if (!application) throw new ValidationError('Choose a selected application.', 'applicationId');
+    const artwork = this.state.artworks.find((a) => a.id === clean.artworkId);
+    if (!artwork) throw new ValidationError('That work no longer exists.', 'artworkId');
+    const problem = validateLot({ call, application, artwork, input: clean, existing: this.state.lots.filter((l) => l.callId === call.id), editingId: existing?.id });
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    const now = this.iso();
+    let lot: Lot;
+    if (existing) {
+      lot = existing;
+      lot.applicationId = clean.applicationId;
+      lot.artworkId = clean.artworkId;
+      lot.artistId = application.artistId;
+      lot.lotNumber = clean.lotNumber;
+      if (clean.reserve !== undefined) lot.reserve = clean.reserve;
+      else delete lot.reserve;
+      if (clean.startingBid !== undefined) lot.startingBid = clean.startingBid;
+      else delete lot.startingBid;
+      lot.updatedAt = now;
+    } else {
+      lot = compact({
+        id: this.makeId('lot'),
+        callId: call.id,
+        applicationId: clean.applicationId,
+        artworkId: clean.artworkId,
+        artistId: application.artistId,
+        lotNumber: clean.lotNumber,
+        reserve: clean.reserve,
+        startingBid: clean.startingBid,
+        status: 'planned' as LotStatus,
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.state.lots.push(lot);
+    }
+    this.audit(v, 'lot.save', 'lot', lot.id, { callId: call.id, lotNumber: lot.lotNumber, created: !existing });
+    this.commit();
+    return this.lotRow(lot, v);
+  }
+
+  /** Moves allowed by canMoveLot. sold → unsold voids the sale; its payout is kept as 'void'. */
+  async setLotStatus(viewer: Viewer, id: string, status: LotStatus): Promise<LotRow> {
+    const v = this.resolve(viewer);
+    const { lot } = this.requireLot(v, id);
+    if (!LOT_STATUSES.includes(status)) throw new ValidationError('Unknown status.', 'status');
+    if (!canMoveLot(lot.status, status)) {
+      throw new ValidationError(status === 'sold' ? 'Record the sale to mark a lot sold.' : `This lot cannot move from ${lot.status} to ${status}.`, 'status');
+    }
+    if (lot.status === 'withdrawn') {
+      // Reinstating a withdrawn lot re-checks the rules it was exempt from while withdrawn.
+      const call = this.state.openCalls.find((c) => c.id === lot.callId);
+      const application = this.state.applications.find((a) => a.id === lot.applicationId);
+      const artwork = this.state.artworks.find((a) => a.id === lot.artworkId);
+      if (!call || !application || !artwork) throw new ValidationError('The work or its application no longer exists.', 'status');
+      const problem = validateLot({ call, application, artwork, input: lot, existing: this.state.lots.filter((l) => l.callId === lot.callId), editingId: lot.id });
+      if (problem) throw new ValidationError(problem.message, problem.field);
+    }
+    const now = this.iso();
+    if (lot.status === 'sold') {
+      const payout = this.state.payouts.find((p) => p.lotId === lot.id && p.status !== 'void');
+      if (payout?.status === 'paid') throw new ValidationError('Payout already paid.', 'status');
+      if (payout) {
+        payout.status = 'void';
+        payout.updatedAt = now;
+        this.audit(v, 'payout.status', 'payout', payout.id, { status: 'void', lotId: lot.id });
+      }
+      delete lot.sale;
+      this.audit(v, 'lot.sale', 'lot', lot.id, { voided: true, lotNumber: lot.lotNumber });
+    } else {
+      this.audit(v, 'lot.save', 'lot', lot.id, { status, from: lot.status, lotNumber: lot.lotNumber });
+    }
+    lot.status = status;
+    lot.updatedAt = now;
+    this.commit();
+    return this.lotRow(lot, v);
+  }
+
+  async recordSale(viewer: Viewer, id: string, input: SaleInput): Promise<LotRow> {
+    const v = this.resolve(viewer);
+    const { lot, call } = this.requireLot(v, id);
+    if (!call.terms) throw new ValidationError('Set the call’s compensation terms before recording a sale.', 'terms');
+    const clean: SaleInput = { hammerPrice: input.hammerPrice, soldOn: str(input.soldOn) };
+    const buyerRef = typeof input.buyerRef === 'string' ? input.buyerRef.trim() : '';
+    if (buyerRef) clean.buyerRef = buyerRef;
+    const problem = validateSale(lot, clean, this.today());
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    if (!isIsoDate(clean.soldOn)) throw new ValidationError('Enter the date of the sale.', 'soldOn');
+    const sale = splitSale(clean.hammerPrice, call.terms, kofiNoonIso(clean.soldOn), clean.buyerRef);
+    const now = this.iso();
+    lot.sale = sale;
+    lot.status = 'sold';
+    lot.updatedAt = now;
+    const payout: Payout = { id: this.makeId('payout'), lotId: lot.id, artistId: lot.artistId, amount: sale.artistAmount, currency: sale.currency, status: 'due', createdAt: now, updatedAt: now };
+    this.state.payouts.push(payout);
+    // Never the buyer reference in the audit trail.
+    this.audit(v, 'lot.sale', 'lot', lot.id, { hammer: sale.hammerPrice, currency: sale.currency, lotNumber: lot.lotNumber });
+    this.commit();
+    return this.lotRow(lot, v);
+  }
+
+  /** Only a lot that has never been sold: a sale (even a voided one) stays on the record. */
+  async deleteLot(viewer: Viewer, id: string): Promise<void> {
+    const v = this.resolve(viewer);
+    const { lot } = this.requireLot(v, id);
+    if (lot.status === 'sold' || this.state.payouts.some((p) => p.lotId === lot.id)) {
+      throw new ValidationError('This lot has a sale on record, so it cannot be deleted. Withdraw it instead.', 'status');
+    }
+    this.state.lots = this.state.lots.filter((l) => l.id !== lot.id);
+    this.audit(v, 'lot.delete', 'lot', lot.id, { callId: lot.callId, lotNumber: lot.lotNumber });
+    this.commit();
+  }
+
+  /** Artist: own lots, read-only; the sale never carries the buyer reference. */
+  async listMyLots(viewer: Viewer): Promise<LotRow[]> {
+    const a = this.requireMyArtist(viewer);
+    const v = this.resolve(viewer);
+    return this.sortLots(this.state.lots.filter((l) => l.artistId === a.id).map((l) => this.lotRow(l, v)));
+  }
+
+  private payoutRow(p: Payout): PayoutRow {
+    const lot = this.state.lots.find((l) => l.id === p.lotId);
+    const call = lot ? this.state.openCalls.find((c) => c.id === lot.callId) : undefined;
+    const aw = lot ? this.state.artworks.find((x) => x.id === lot.artworkId) : undefined;
+    return {
+      ...clone(p),
+      artistWorkingName: this.artistById(p.artistId)?.workingName ?? 'Unknown artist',
+      artworkTitle: aw?.title ?? 'A work that has been removed',
+      callTitle: call?.title ?? 'A call that has been removed',
+      lotNumber: lot?.lotNumber ?? 0,
+    };
+  }
+
+  /** Admin: all payouts. Artist: own. Everyone else (partners included): ForbiddenError. */
+  async listPayouts(viewer: Viewer): Promise<PayoutRow[]> {
+    const v = this.resolve(viewer);
+    let rows: Payout[];
+    if (v.role === 'admin') rows = this.state.payouts;
+    else if (v.role === 'artist') {
+      const a = this.requireMyArtist(v);
+      rows = this.state.payouts.filter((p) => p.artistId === a.id);
+    } else throw new ForbiddenError('Kofi staff only.');
+    return rows.map((p) => this.payoutRow(p)).sort((x, y) => y.createdAt.localeCompare(x.createdAt) || x.id.localeCompare(y.id));
+  }
+
+  async setPayoutStatus(viewer: Viewer, id: string, status: PayoutStatus, details: { method?: string; reference?: string; note?: string; paidOn?: string } = {}): Promise<PayoutRow> {
+    this.requireAdmin(viewer);
+    const p = this.state.payouts.find((x) => x.id === id);
+    if (!p) throw new NotFoundError('Payout not found.');
+    if (!PAYOUT_STATUSES.includes(status)) throw new ValidationError('Unknown status.', 'status');
+    if (!canMovePayout(p.status, status)) throw new ValidationError(`This payout cannot move from ${p.status} to ${status}.`, 'status');
+    if (p.status === 'void' && status === 'due') {
+      const lot = this.state.lots.find((l) => l.id === p.lotId);
+      const other = this.state.payouts.some((x) => x.lotId === p.lotId && x.id !== p.id && x.status !== 'void');
+      if (!lot || lot.status !== 'sold' || other) throw new ValidationError('This sale was voided. Record the sale again instead.', 'status');
+    }
+    const note = optStr(details.note, 'note', MAX_NOTE, 'Note');
+    if (status === 'paid') {
+      const method = optStr(details.method, 'method', 80, 'Payment method');
+      if (!method) throw new ValidationError('Say how the artist was paid.', 'method');
+      const reference = optStr(details.reference, 'reference', 120, 'Reference');
+      const paidOn = details.paidOn === undefined || details.paidOn === '' ? this.today() : str(details.paidOn);
+      if (!isIsoDate(paidOn)) throw new ValidationError('Payment date must be a valid date.', 'paidOn');
+      if (paidOn > this.today()) throw new ValidationError('The payment date cannot be in the future.', 'paidOn');
+      p.method = method;
+      if (reference) p.reference = reference;
+      else delete p.reference;
+      p.paidAt = kofiNoonIso(paidOn);
+    } else {
+      delete p.method;
+      delete p.reference;
+      delete p.paidAt;
+    }
+    if (details.note !== undefined) {
+      if (note) p.note = note;
+      else delete p.note;
+    }
+    p.status = status;
+    p.updatedAt = this.iso();
+    const meta: AuditEvent['meta'] = { status, lotId: p.lotId };
+    if (p.method) meta.method = p.method;
+    this.audit(viewer, 'payout.status', 'payout', p.id, meta);
+    this.commit();
+    return this.payoutRow(p);
+  }
+
+  /* ---------- Kofi reports ---------- */
+
+  async kofiReport(viewer: Viewer, range: ReportRange): Promise<KofiReport> {
+    this.requireAdmin(viewer);
+    // Reports are an admin-only path; keep the report builder out of the main chunk.
+    const { buildReport, validateRange } = await import('@/domain/reports');
+    const r: ReportRange = { from: str(range?.from), to: str(range?.to) };
+    const problem = validateRange(r, this.today());
+    if (problem) throw new ValidationError(problem, 'range');
+    const s = this.state;
+    const report = buildReport(
+      {
+        artists: s.artists,
+        artworks: s.artworks,
+        calls: s.openCalls,
+        institutions: s.institutions,
+        exhibitions: s.exhibitions,
+        applications: s.applications,
+        lots: s.lots,
+        payouts: s.payouts,
+      },
+      r,
+      this.iso(),
+    );
+    this.audit(viewer, 'report.export', 'report', `${r.from}_${r.to}`, { from: r.from, to: r.to });
+    this.commit(true);
+    return clone(report);
+  }
+
   /** Test-only: peek at raw state. */
   _raw(): MockState {
     return this.state;
@@ -1208,16 +1618,21 @@ export function validateArtwork(input: ArtworkInput): void {
   }
 }
 
-/* ---------- programme: persisted-state migration ---------- */
+/* ---------- persisted-state migration ---------- */
 
 /**
- * A state persisted by an older build (v2: no programme collections) keeps every
- * artist, work, document and audit row it has; only the missing collections are
+ * A state persisted by an older build keeps every row it has; only what is missing is
  * filled from the seed. Collections that exist are never touched.
+ * - v2 (no programme collections): the seeded programme is merged in.
+ * - v3 (no lots/payouts): calls get `kind: 'exhibition'` where they lack one, and the
+ *   seeded auction (call, its applications, lots and payouts) is added by id, skipping
+ *   anything that points at an artist or work the user has since deleted.
  */
 export function migrateState(parsed: Partial<MockState>): MockState {
   const missing = PROGRAMME_KEYS.filter((k) => !Array.isArray(parsed[k]));
-  if (missing.length === 0) return parsed as MockState;
+  const preV4 = SALES_KEYS.some((k) => !Array.isArray(parsed[k]));
+  const kindless = Array.isArray(parsed.openCalls) && parsed.openCalls.some((c) => !c.kind);
+  if (missing.length === 0 && !preV4 && !kindless) return parsed as MockState;
   const seed = buildProgrammeSeed();
   const out = { ...parsed } as MockState;
   for (const k of missing) (out as unknown as Record<string, unknown>)[k] = seed[k];
@@ -1240,7 +1655,57 @@ export function migrateState(parsed: Partial<MockState>): MockState {
       }
     }
   }
+  // Kindless (v3) calls: seeded ids take the seed's kind, like apply/0009_live_patch.sql; user-made calls were exhibitions.
+  const seedKind = new Map(seed.openCalls.map((c) => [c.id, c.kind]));
+  for (const c of out.openCalls) if (!c.kind) c.kind = seedKind.get(c.id) ?? 'exhibition';
+  if (preV4) mergeSalesSeed(out, seed, workIds, artistIds);
   return out;
+}
+
+function mergeSalesSeed(out: MockState, seed: ProgrammeState, workIds: Set<string>, artistIds: Set<string>): void {
+  out.lots = Array.isArray(out.lots) ? out.lots : [];
+  out.payouts = Array.isArray(out.payouts) ? out.payouts : [];
+  const has = <T extends { id: string }>(list: T[], id: string) => list.some((x) => x.id === id);
+  const instIds = new Set((out.institutions ?? []).map((i) => i.id));
+  // Only the sales seed (calls that have lots) is new in v4; other seeded calls are the user's to keep or delete.
+  const salesCallIds = new Set(seed.lots.map((l) => l.callId));
+  for (const call of seed.openCalls) {
+    if (!salesCallIds.has(call.id) || has(out.openCalls, call.id)) continue;
+    if (call.organizerInstitutionId && !instIds.has(call.organizerInstitutionId)) delete call.organizerInstitutionId;
+    if (call.exhibitionId && !has(out.exhibitions, call.exhibitionId)) delete call.exhibitionId;
+    out.openCalls.push(call);
+  }
+  for (const app of seed.applications) {
+    if (!salesCallIds.has(app.callId) || has(out.applications, app.id) || !artistIds.has(app.artistId)) continue;
+    app.artworkIds = app.artworkIds.filter((id) => workIds.has(id));
+    if (app.artworkIds.length > 0) out.applications.push(app);
+  }
+  for (const lot of seed.lots) {
+    if (has(out.lots, lot.id) || !workIds.has(lot.artworkId)) continue;
+    const app = out.applications.find((a) => a.id === lot.applicationId);
+    if (!app || app.status !== 'accepted' || !app.artworkIds.includes(lot.artworkId)) continue;
+    out.lots.push(lot);
+  }
+  for (const p of seed.payouts) {
+    if (!has(out.payouts, p.id) && has(out.lots, p.lotId)) out.payouts.push(p);
+  }
+}
+
+/** Noon in Kofi's time zone on a calendar day, as a UTC ISO timestamp (DST-aware). */
+export function kofiNoonIso(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  const guess = Date.UTC(y, m - 1, d, 12);
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: KOFI_TIME_ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(guess));
+  const get = (t: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === t)?.value ?? '0');
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return new Date(guess - (asUtc - guess)).toISOString();
+}
+
+/** Stable JSON for comparing terms (key order and undefined keys ignored). */
+function canonical(t: CallTerms | undefined): string {
+  if (!t) return '';
+  const o = t as unknown as Record<string, unknown>;
+  return JSON.stringify(Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => [k, o[k]]));
 }
 
 /* ---------- programme: input validation (server-equivalent; the SQL RPCs mirror these) ---------- */
@@ -1358,7 +1823,12 @@ export function cleanExhibition(input: ProgrammeInput<Exhibition>): Omit<Exhibit
   });
 }
 
-export function cleanOpenCall(input: ProgrammeInput<OpenCall>): Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'> {
+/**
+ * `fallbackKind` is the stored kind when an older client sends no kind (kind is required, so
+ * it can never be "cleared"). Validates kind and terms (validateCallTerms: an auction must
+ * carry terms; any terms must be valid).
+ */
+export function cleanOpenCall(input: ProgrammeInput<OpenCall>, fallbackKind?: CallKind): Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'> {
   const opensOn = reqDate(input.opensOn, 'opensOn', 'Opening date');
   const deadline = optDate(input.deadline, 'deadline', 'Deadline');
   if (deadline && deadline < opensOn) throw new ValidationError('The deadline is before the call opens.', 'deadline');
@@ -1366,7 +1836,9 @@ export function cleanOpenCall(input: ProgrammeInput<OpenCall>): Omit<OpenCall, '
   if (!Number.isInteger(maxWorks) || maxWorks < 1 || maxWorks > 10) throw new ValidationError('Allow between 1 and 10 works.', 'maxWorks');
   const mediums = Array.isArray(input.mediums) ? [...new Set(input.mediums)] : [];
   if (mediums.some((m) => !MEDIUMS.includes(m))) throw new ValidationError('Unknown medium.', 'mediums');
-  return compact({
+  const kind = (input.kind ?? fallbackKind ?? 'exhibition') as CallKind;
+  if (!CALL_KINDS.includes(kind)) throw new ValidationError('Choose what kind of call this is.', 'kind');
+  const out = compact({
     ...flags(input),
     title: title(input.title),
     partner: optStr(input.partner, 'partner', MAX_TITLE, 'Partner'),
@@ -1382,6 +1854,28 @@ export function cleanOpenCall(input: ProgrammeInput<OpenCall>): Omit<OpenCall, '
     image: image(input.image),
     externalUrl: optUrl(input.externalUrl, 'externalUrl'),
     exhibitionId: optStr(input.exhibitionId, 'exhibitionId', 100, 'Exhibition'),
+    kind,
+    organizerInstitutionId: optStr(input.organizerInstitutionId, 'organizerInstitutionId', 100, 'Organiser'),
+    terms: callTerms(input.terms),
+  });
+  const problem = validateCallTerms(out);
+  if (problem) throw new ValidationError(problem.message, problem.field);
+  return out;
+}
+
+function callTerms(v: unknown): CallTerms | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('The terms are not valid.', 'terms');
+  const t = v as Partial<Record<keyof CallTerms, unknown>>;
+  const pct = (x: unknown) => (typeof x === 'number' ? x : Number.NaN);
+  return compact({
+    artistSharePct: pct(t.artistSharePct),
+    kofiSharePct: pct(t.kofiSharePct),
+    partnerSharePct: pct(t.partnerSharePct),
+    buyerPremiumPct: pct(t.buyerPremiumPct),
+    resaleRoyaltyPct: pct(t.resaleRoyaltyPct),
+    currency: str(t.currency),
+    paymentNote: optStr(t.paymentNote, 'paymentNote', MAX_SUMMARY, 'Payment note'),
   });
 }
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { ApplicationRow } from '@/domain/types';
+import type { ApplicationRow, Institution } from '@/domain/types';
+import { CALL_KIND_LABEL } from '@/domain/types';
 import { callPhase, exhibitionPhase, kofiToday } from '@/domain/programme';
 import { useQuery } from '@/state/session';
 import {
@@ -35,13 +36,15 @@ export function AdminProgramme() {
   const tab: ProgrammeKind = isProgrammeKind(raw) ? raw : 'exhibitions';
 
   const q = useQuery(async (ds, v) => {
-    const [exhibitions, calls, events, stories, apps] = await Promise.all([
+    const [exhibitions, calls, events, stories, apps, institutions] = await Promise.all([
       ds.listExhibitions(v),
       ds.listOpenCalls(v),
       ds.listEvents(v),
       ds.listStories(v),
       ds.listApplications(v).catch(() => [] as ApplicationRow[]),
+      ds.listInstitutions(v).catch(() => [] as Institution[]),
     ]);
+    const instName = new Map(institutions.map((i) => [i.id, i.name]));
     const today = kofiToday();
     const rows: Record<ProgrammeKind, Row[]> = {
       exhibitions: exhibitions.map((x) => {
@@ -63,7 +66,16 @@ export function AdminProgramme() {
         return {
           id: c.id,
           title: c.title,
-          line: [c.partner, deadlineLabel(c, today)].filter(Boolean).join(' · '),
+          // Kind · who runs it · deadline. A partner institution organises; otherwise Kofi runs it (with any named partner).
+          line: [
+            CALL_KIND_LABEL[c.kind ?? 'exhibition'],
+            c.organizerInstitutionId
+              ? `Run by ${instName.get(c.organizerInstitutionId) ?? c.partner ?? 'a partner'}`
+              : c.partner && c.partner !== 'Kofi Collections'
+                ? `Kofi with ${c.partner}`
+                : 'Kofi Collections',
+            deadlineLabel(c, today),
+          ].join(' · '),
           phase: { label: CALL_PHASE_LABEL[p], tone: p === 'open' ? 'now' : p === 'upcoming' ? 'soon' : 'past' },
           draft: !c.published,
           sample: c.sample,

@@ -1,0 +1,158 @@
+/* Studio · Sales (the artist's lots and payments). Kofi Noir: hairlines, serif titles, tracked labels.
+   Loads before global.css, so kit overrides use two-class selectors. */
+
+.sts-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding-block: var(--space-4);
+  border-block: 1px solid var(--line);
+}
+.sts-totals dt {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--cream-3);
+}
+.sts-totals dd {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  line-height: 1.1;
+  color: var(--cream);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.sts-totals > div:first-child dd {
+  color: var(--gold);
+}
+
+.sts-list {
+  border-top: 1px solid var(--line);
+}
+.sts-lot {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.sts-lot__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.sts-lot__call {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--cream-2);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.sts-lot__call:hover {
+  color: var(--cream);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.sts-lot__work {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.sts-lot__work .thumb {
+  flex: none;
+  border-bottom: 2px solid var(--m, var(--cream));
+  border-radius: 0;
+}
+.sts-lot__id {
+  min-width: 0;
+}
+.sts-lot__n {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.sts-lot__title {
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+.sts-facts {
+  display: grid;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.sts-facts > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 34%) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 10px;
+  border-top: 1px solid var(--line);
+}
+.sts-facts dt {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--cream-3);
+  padding-top: 3px;
+}
+.sts-facts dd {
+  margin: 0;
+  color: var(--cream);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.sts-facts__share dd {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+}
+.sts-pct {
+  display: block;
+  font-family: var(--font-body, inherit);
+  font-size: var(--fs-xs);
+  color: var(--cream-3);
+}
+.sts-due,
+.sts-paid {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (min-width: 900px) {
+  .sts-lot {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    column-gap: var(--space-7);
+    align-items: start;
+  }
+  .sts-lot__head {
+    grid-column: 1 / -1;
+  }
+  .sts-facts {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+/* apply screen: the terms under a closed / not-yet-open notice */
+.sta-guard-terms {
+  max-width: 760px;
+  margin: var(--space-7) auto 0;
+}

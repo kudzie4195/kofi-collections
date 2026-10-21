@@ -16,4 +16,7 @@ export const adminRoutes: RouteObject[] = [
   { path: 'applications', lazy: () => import('./AdminApplications').then((m) => ({ Component: m.AdminApplications })) },
   { path: 'applications/:id', lazy: () => import('./AdminApplicationDetail').then((m) => ({ Component: m.AdminApplicationDetail })) },
   { path: 'collectors', lazy: () => import('./AdminCollectors').then((m) => ({ Component: m.AdminCollectors })) },
+  { path: 'lots', lazy: () => import('./AdminLots').then((m) => ({ Component: m.AdminLots })) },
+  { path: 'payouts', lazy: () => import('./AdminPayouts').then((m) => ({ Component: m.AdminPayouts })) },
+  { path: 'reports', lazy: () => import('./AdminReports').then((m) => ({ Component: m.AdminReports })) },
 ];

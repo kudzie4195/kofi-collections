@@ -6,6 +6,10 @@
 //                              (creates REAL, sign-in-able accounts)
 //   supabase/seed_content.sql  everything else, all in schema `kofi`
 //                              (needs seed_auth.sql to have run first)
+//   supabase/seed_programme.sql  additive programme rows (insert-only)
+//   supabase/seed_sales.sql    additive lots + payouts (insert-only, 0009)
+//   supabase/apply/0008_live_patch.sql, apply/0009_live_patch.sql
+//                              by-id corrections for the live project
 //
 //   node supabase/scripts/generate-seed.mjs
 //
@@ -77,6 +81,12 @@ const P = {
   stories: seed.stories ?? [],
   buyerInquiries: seed.buyerInquiries ?? [],
 };
+// Sales (0009_sales.sql): lots + payouts.
+const S = {
+  lots: seed.lots ?? [],
+  payouts: seed.payouts ?? [],
+};
+if (!S.lots.length) console.warn('warning: src/data/mock/seed.ts has no lots; sales tables will be empty.');
 const hasProgramme = Object.values(P).some((l) => l.length > 0);
 if (!hasProgramme) console.warn('warning: src/data/mock/seed.ts has no programme content; programme tables will be empty.');
 const d8 = (v) => (v ? `${s(v)}::date` : 'null');
@@ -96,10 +106,11 @@ function programmeInserts(table, onConflict = '') {
     P.exhibitions.map((e) =>
       `  (${uuid(e.id)}, ${s(e.title)}, ${s(e.subtitle)}, ${d8(e.startsOn)}, ${d8(e.endsOn)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.body)}, ` +
       `${imageJson(e.image)}, ${uuidArr(e.artworkIds)}, ${s(e.externalUrl)}, ${s(e.curatedBy)}, ${b(e.sample)}, ${b(e.published)}, ${ts(e.createdAt)}, ${ts(e.updatedAt)})`));
-  emit('open_calls', 'id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at',
+  emit('open_calls', 'id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at, kind, organizer_institution_id, terms',
     P.openCalls.map((c) =>
       `  (${uuid(c.id)}, ${s(c.title)}, ${s(c.partner)}, ${s(c.summary)}, ${s(c.body)}, ${s(c.eligibility)}, ${arr(c.mediums ?? [], 'kofi.medium')}, ${d8(c.opensOn)}, ${d8(c.deadline)}, ` +
-      `${n(c.maxWorks)}, ${s(c.fee)}, ${s(c.award)}, ${imageJson(c.image)}, ${s(c.externalUrl)}, ${uuidOrNull(c.exhibitionId)}, ${b(c.sample)}, ${b(c.published)}, ${ts(c.createdAt)}, ${ts(c.updatedAt)})`));
+      `${n(c.maxWorks)}, ${s(c.fee)}, ${s(c.award)}, ${imageJson(c.image)}, ${s(c.externalUrl)}, ${uuidOrNull(c.exhibitionId)}, ${b(c.sample)}, ${b(c.published)}, ${ts(c.createdAt)}, ${ts(c.updatedAt)}, ` +
+      `'${c.kind ?? 'exhibition'}', ${uuidOrNull(c.organizerInstitutionId)}, ${jsonOrNull(c.terms)})`));
   emit('events', 'id, title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published, created_at, updated_at',
     P.events.map((e) =>
       `  (${uuid(e.id)}, ${s(e.title)}, '${e.kind}', ${ts(e.startsAt)}, ${ts(e.endsAt)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.rsvpUrl)}, ${uuidOrNull(e.exhibitionId)}, ` +
@@ -119,6 +130,29 @@ function programmeInserts(table, onConflict = '') {
   return L;
 }
 const PROGRAMME_TABLES = ['exhibitions', 'open_calls', 'events', 'stories', 'applications', 'buyer_inquiries'];
+
+// Lots + payouts (0009_sales.sql). The sale is the frozen split (camelCase JSON,
+// exactly the TS Sale); payouts reference their lot.
+function salesInserts(table, onConflict = '') {
+  const L = [];
+  const end = onConflict ? `\n${onConflict};` : ';';
+  if (S.lots.length) {
+    L.push(`insert into ${table('lots')} (id, call_id, application_id, artwork_id, artist_id, lot_number, reserve, starting_bid, status, sale, created_at, updated_at) values`);
+    L.push(S.lots.map((l) =>
+      `  (${uuid(l.id)}, ${uuid(l.callId)}, ${uuid(l.applicationId)}, ${uuid(l.artworkId)}, ${uuid(l.artistId)}, ${n(l.lotNumber)}, ${n(l.reserve)}, ${n(l.startingBid)}, '${l.status}', ` +
+      `${jsonOrNull(l.sale)}, ${ts(l.createdAt)}, ${ts(l.updatedAt)})`).join(',\n') + end);
+    L.push('');
+  }
+  if (S.payouts.length) {
+    L.push(`insert into ${table('payouts')} (id, lot_id, artist_id, amount, currency, status, method, reference, paid_at, note, created_at, updated_at) values`);
+    L.push(S.payouts.map((p) =>
+      `  (${uuid(p.id)}, ${uuid(p.lotId)}, ${uuid(p.artistId)}, ${n(p.amount)}, ${s(p.currency)}, '${p.status}', ${s(p.method)}, ${s(p.reference)}, ${ts(p.paidAt)}, ${s(p.note)}, ` +
+      `${ts(p.createdAt)}, ${ts(p.updatedAt)})`).join(',\n') + end);
+    L.push('');
+  }
+  return L;
+}
+const SALES_TABLES = ['lots', 'payouts'];
 
 // ============================================================ seed_auth.sql ==
 header('demo auth accounts', [
@@ -172,7 +206,8 @@ header('demo content', [
   'Safe to re-run: content tables are restored by kofi.kofi_demo_reset(), which',
   'WIPES every row in the Kofi content tables (artists, artworks, images,',
   'institutions, curators, shortlists, inquiries, documents and the programme:',
-  'exhibitions, open calls, events, stories, applications, collector inquiries).',
+  'exhibitions, open calls, events, stories, applications, collector inquiries;',
+  'and the sales: lots, payouts).',
   'Audit events and',
   'consents are append-only and are never deleted; seed rows for them are',
   'inserted once.',
@@ -200,7 +235,7 @@ begin
   end if;
 end $$;`);
 out();
-const SNAP = ['profiles', 'institutions', 'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents', ...PROGRAMME_TABLES];
+const SNAP = ['profiles', 'institutions', 'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents', ...PROGRAMME_TABLES, ...SALES_TABLES];
 out('-- ------------------------------------------------------ demo snapshot -----');
 out(`drop table if exists ${SNAP.map((t) => `kofi.demo_${t}`).join(', ')};`);
 out('create table kofi.demo_profiles (id uuid primary key, role kofi.role not null, display_name text not null);');
@@ -313,6 +348,8 @@ out();
 
 out('-- Programme (0008): exhibitions, open calls, events, stories, applications, collector inquiries.');
 for (const l of programmeInserts((t) => `kofi.demo_${t}`)) out(l);
+out('-- Sales (0009): lots and payouts.');
+for (const l of salesInserts((t) => `kofi.demo_${t}`)) out(l);
 
 out('-- ------------------------------------------------------- reset function ---');
 out(`create or replace function kofi.kofi_demo_reset() returns void
@@ -328,6 +365,8 @@ begin
   -- Bulk restore is not a user action: suppress per-row audit triggers for this transaction.
   perform set_config('kofi.seeding', 'on', true);
 
+  delete from kofi.payouts;
+  delete from kofi.lots;
   delete from kofi.applications;
   delete from kofi.buyer_inquiries;
   delete from kofi.events;
@@ -364,6 +403,8 @@ begin
   insert into kofi.stories select * from kofi.demo_stories;
   insert into kofi.applications select * from kofi.demo_applications;
   insert into kofi.buyer_inquiries select * from kofi.demo_buyer_inquiries;
+  insert into kofi.lots select * from kofi.demo_lots;
+  insert into kofi.payouts select * from kofi.demo_payouts;
 
   perform set_config('kofi.seeding', 'off', true);
 end $fn$;`);
@@ -410,20 +451,29 @@ header('programme content (additive)', [
   'tables) must not run. On a demo project seed_content.sql already includes',
   'these rows.',
   '',
-  'Requires migration 0008_programme.sql, and the demo artists / artworks that',
-  'sample rows refer to (fixed UUIDs, see seed_content.sql). Stops with an error',
-  'if either is missing. Re-runnable (on conflict (id) do nothing).',
+  'Requires migrations 0008_programme.sql AND 0009_sales.sql (open_calls.kind,',
+  'organizer_institution_id, terms), and the demo artists / artworks /',
+  'institutions that sample rows refer to (fixed UUIDs, see seed_content.sql).',
+  'Stops with an error if any is missing. Re-runnable (on conflict (id) do nothing).',
 ]);
 out('begin;');
 out();
 const refArtists = [...new Set([...P.applications.map((a) => a.artistId), ...P.stories.map((t) => t.artistId).filter(Boolean), ...P.buyerInquiries.map((q) => q.artistId).filter(Boolean)])];
 const refWorks = [...new Set([...P.applications.flatMap((a) => a.artworkIds), ...P.buyerInquiries.map((q) => q.artworkId).filter(Boolean)])];
+const refInstitutions = [...new Set(P.openCalls.map((c) => c.organizerInstitutionId).filter(Boolean))];
 out(`do $$
 declare
   missing integer;
 begin
   if to_regclass('kofi.exhibitions') is null then
     raise exception 'seed_programme.sql: run supabase/migrations/0008_programme.sql first.';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema = 'kofi' and table_name = 'open_calls' and column_name = 'terms') then
+    raise exception 'seed_programme.sql: run supabase/migrations/0009_sales.sql (or apply/0009_part1..4.sql) first.';
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refInstitutions)}) as r (id) where not exists (select 1 from kofi.institutions i where i.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_programme.sql: % demo institution(s) organising a sample call are missing.', missing;
   end if;
   select count(*) into missing from unnest(${uuidArr(refArtists)}) as r (id) where not exists (select 1 from kofi.artists a where a.id = r.id);
   if missing > 0 then
@@ -465,3 +515,84 @@ out();
 out("select set_config('kofi.seeding', 'off', true);");
 out('commit;');
 writeOut('apply/0008_live_patch.sql');
+
+// ========================================================== seed_sales.sql ==
+// Additive lots + payouts for the live project (insert-only on fixed ids).
+lines = [];
+header('sales content (additive)', [
+  'Inserts the sample lots and payouts (0009_sales.sql) that are not there yet.',
+  'Never updates or deletes. Everything is in schema `kofi`.',
+  '',
+  'Use this where seed_content.sql (which WIPES and restores the Kofi content',
+  'tables) must not run. On a demo project seed_content.sql already includes',
+  'these rows. Run after seed_programme.sql (the lots belong to the sample',
+  'auction call and its accepted applications). Stops with an error if',
+  '0009_sales or any referenced call / application / work / artist is missing.',
+  'Re-runnable (on conflict (id) do nothing). Writes no audit rows.',
+]);
+out('begin;');
+out();
+const refLotCalls = [...new Set(S.lots.map((l) => l.callId))];
+const refLotApps = [...new Set(S.lots.map((l) => l.applicationId))];
+const refLotWorks = [...new Set(S.lots.map((l) => l.artworkId))];
+const refLotArtists = [...new Set([...S.lots.map((l) => l.artistId), ...S.payouts.map((p) => p.artistId)])];
+out(`do $$
+declare
+  missing integer;
+begin
+  if to_regclass('kofi.lots') is null or to_regclass('kofi.payouts') is null then
+    raise exception 'seed_sales.sql: run supabase/migrations/0009_sales.sql (or apply/0009_part1..4.sql) first.';
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refLotCalls)}) as r (id) where not exists (select 1 from kofi.open_calls c where c.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_sales.sql: % sample call(s) are missing. Run supabase/seed_programme.sql first.', missing;
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refLotApps)}) as r (id) where not exists (select 1 from kofi.applications a where a.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_sales.sql: % sample application(s) are missing. Run supabase/seed_programme.sql first.', missing;
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refLotWorks)}) as r (id) where not exists (select 1 from kofi.artworks w where w.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_sales.sql: % demo artwork(s) are missing.', missing;
+  end if;
+  select count(*) into missing from unnest(${uuidArr(refLotArtists)}) as r (id) where not exists (select 1 from kofi.artists a where a.id = r.id);
+  if missing > 0 then
+    raise exception 'seed_sales.sql: % demo artist(s) are missing.', missing;
+  end if;
+end $$;`);
+out();
+out('-- Seed rows are not staff actions: keep them out of the audit log (this transaction only).');
+out("select set_config('kofi.seeding', 'on', true);");
+out();
+for (const l of salesInserts((t) => `kofi.${t}`, 'on conflict (id) do nothing')) out(l);
+out("select set_config('kofi.seeding', 'off', true);");
+out();
+out('commit;');
+writeOut('seed_sales.sql');
+
+// ================================================ apply/0009_live_patch.sql ==
+// Calls that were on the live project before 0009 got the column default
+// (kind 'exhibition', no organiser, no terms). Bring the sample calls in line
+// with the TS seed, by id. Never touches a call that is not in the seed.
+lines = [];
+header('live patch: open call kind / organiser / terms', [
+  'For a project whose open calls were loaded before 0009_sales (they all got',
+  "kind 'exhibition'). Sets kind to the seed's value, by fixed id, only where it",
+  'differs; sets organizer_institution_id / terms only where they are still',
+  'empty. No inserts, no deletes, no other columns. Re-runnable.',
+  'Kept out of the audit log (seed correction, not a user action).',
+]);
+out('begin;');
+out("select set_config('kofi.seeding', 'on', true);");
+out();
+for (const c of P.openCalls) {
+  const kind = c.kind ?? 'exhibition';
+  // Terms first: an auction call must carry terms (open_calls_sales_guard).
+  if (c.terms) out(`update kofi.open_calls set terms = ${json(c.terms)} where id = ${uuid(c.id)} and terms is null;`);
+  if (c.organizerInstitutionId) out(`update kofi.open_calls set organizer_institution_id = ${uuid(c.organizerInstitutionId)} where id = ${uuid(c.id)} and organizer_institution_id is null;`);
+  out(`update kofi.open_calls set kind = '${kind}' where id = ${uuid(c.id)} and kind is distinct from '${kind}';`);
+}
+out();
+out("select set_config('kofi.seeding', 'off', true);");
+out('commit;');
+writeOut('apply/0009_live_patch.sql');

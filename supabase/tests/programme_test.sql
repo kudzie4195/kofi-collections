@@ -79,9 +79,9 @@ declare
   v uuid[];
 begin
   if (select count(*) from kofi.exhibitions_visible) <> 4 or exists (select 1 from kofi.exhibitions where not published)
-     or (select count(*) from kofi.open_calls) <> 4 or (select count(*) from kofi.events) <> 4
+     or (select count(*) from kofi.open_calls) <> 5 or (select count(*) from kofi.events) <> 4
      or (select count(*) from kofi.stories_visible) <> 4 then
-    raise exception 'FAIL: a visitor should see exactly the published programme (4 exhibitions, 4 calls, 4 events, 4 stories)';
+    raise exception 'FAIL: a visitor should see exactly the published programme (4 exhibitions, 5 calls, 4 events, 4 stories)';
   end if;
   if exists (select 1 from kofi.exhibitions_visible where id = 'a1ffffff-0000-4000-8000-000000000001')
      or exists (select 1 from kofi.open_calls where id = 'a2ffffff-0000-4000-8000-000000000001')
@@ -283,21 +283,23 @@ begin
   if n <> 0 then raise exception 'FAIL: an artist deleted a story'; end if;
   perform kofi_test.expect_error($q$insert into kofi.applications (call_id, artist_id, artwork_ids, statement) values ('a2000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000001', array['30000000-0000-4000-8000-000000000011']::uuid[], 'A statement that is long enough.')$q$, '42501');
   perform kofi_test.expect_error($q$update kofi.applications set status = 'accepted' where id = 'a3000000-0000-4000-8000-000000000001'$q$, '42501');
-  perform kofi_test.expect_error($q$select kofi.set_application_status('a3000000-0000-4000-8000-000000000003', 'accepted')$q$, '42501', null, 'Kofi staff only.');
+  perform kofi_test.expect_error($q$select kofi.set_application_status('a3000000-0000-4000-8000-000000000003', 'accepted')$q$, '42501', null, 'You do not have access to this.');
   raise notice 'ok: an artist cannot insert/update/delete programme rows, write applications directly, or decide applications';
 end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000006","role":"authenticated"}';
 do $$
 begin
   perform kofi_test.expect_error($q$insert into kofi.exhibitions (title, starts_on, summary) values ('x', '2027-01-01', 'x')$q$, '42501');
-  if exists (select 1 from kofi.applications_visible) or exists (select 1 from kofi.applications) then
-    raise exception 'FAIL: a curator can see applications';
+  -- Lena only sees applications to the call her institution runs (0009; sales_test.sql).
+  if exists (select 1 from kofi.applications_visible where call_id <> 'a2000000-0000-4000-8000-000000000005')
+     or exists (select 1 from kofi.applications where call_id <> 'a2000000-0000-4000-8000-000000000005') then
+    raise exception 'FAIL: a curator can see applications to calls her institution does not run';
   end if;
   if exists (select 1 from kofi.buyer_inquiries_visible) then
     raise exception 'FAIL: a curator can see collector inquiries';
   end if;
   perform kofi_test.expect_error($q$select kofi.submit_application('a2000000-0000-4000-8000-000000000002', array['30000000-0000-4000-8000-000000000011']::uuid[], 'A statement that is long enough.')$q$, '42501');
-  raise notice 'ok: a curator cannot write programme rows, sees no applications or collector inquiries, cannot apply';
+  raise notice 'ok: a curator cannot write programme rows, sees no applications to calls she does not run, no collector inquiries, cannot apply';
 end $$;
 rollback;
 
@@ -480,18 +482,19 @@ end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}';
 do $$
 begin
-  if (select count(*) from kofi.applications_visible) <> 1
+  if (select count(*) from kofi.applications_visible) <> 2
+     or exists (select 1 from kofi.applications_visible where artist_id <> '20000000-0000-4000-8000-000000000001')
      or not exists (select 1 from kofi.applications_visible where id = 'a3000000-0000-4000-8000-000000000001' and status = 'accepted') then
-    raise exception 'FAIL: Mara should see exactly her accepted application';
+    raise exception 'FAIL: Mara should see exactly her two applications (Summer Open, CMA auction)';
   end if;
-  raise notice 'ok: another artist (Mara) sees only her own application';
+  raise notice 'ok: another artist (Mara) sees only her own applications';
 end $$;
 set local request.jwt.claims = '{"sub":"10000000-0000-4000-8000-000000000008","role":"authenticated"}';
 do $$
 begin
-  if (select count(*) from kofi.applications_visible) <> 3
+  if (select count(*) from kofi.applications_visible) <> 6
      or (select staff_note from kofi.applications_visible where id = 'a3000000-0000-4000-8000-000000000002') <> 'Strong; space-limited.' then
-    raise exception 'FAIL: admin should see all 3 applications and June''s staff note';
+    raise exception 'FAIL: admin should see all 6 applications and June''s staff note';
   end if;
   raise notice 'ok: admin sees every application, including the Kofi staff note';
 end $$;
@@ -755,7 +758,7 @@ do $$ begin perform kofi.kofi_demo_reset(); end $$;
 reset role;
 do $$
 begin
-  if (select count(*) from kofi.applications) <> 3 or (select title from kofi.exhibitions where id = 'a1000000-0000-4000-8000-000000000004') <> 'Night Weather'
+  if (select count(*) from kofi.applications) <> 6 or (select title from kofi.exhibitions where id = 'a1000000-0000-4000-8000-000000000004') <> 'Night Weather'
      or (select count(*) from kofi.exhibitions) <> 5 or (select count(*) from kofi.buyer_inquiries) <> 2 then
     raise exception 'FAIL: kofi_demo_reset() did not restore the programme';
   end if;
@@ -801,8 +804,8 @@ begin
   if exists (select 1 from pg_policies where schemaname = 'storage' and policyname not like 'kofi %') then
     raise exception 'FAIL: a storage policy not named "kofi …" exists';
   end if;
-  if (select count(*) from pg_policies where schemaname = 'storage' and policyname like 'kofi programme %') <> 4 then
-    raise exception 'FAIL: expected the 4 "kofi programme …" storage policies';
+  if (select count(*) from pg_policies where schemaname = 'storage' and policyname like 'kofi programme admin %') <> 4 then
+    raise exception 'FAIL: expected the 4 "kofi programme admin …" storage policies';
   end if;
   if (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'kofi'
         and tablename in ('exhibitions', 'open_calls', 'events', 'stories', 'applications', 'buyer_inquiries')) <> 6 then

@@ -11,6 +11,7 @@ const mara: Viewer = { role: 'artist', userId: 'user_mara', artistId: 'art_mara'
 const june: Viewer = { role: 'artist', userId: 'user_june', artistId: 'art_june', displayName: 'June Takahashi-Bell' };
 const deshawn: Viewer = { role: 'artist', userId: 'user_deshawn', artistId: 'art_deshawn', displayName: 'DeShawn Ferris' };
 const lena: Viewer = { role: 'curator', userId: 'user_lena', curatorId: 'cur_lena', curatorVerified: true, displayName: 'Lena Marchetti' };
+const owen: Viewer = { role: 'curator', userId: 'user_owen', curatorId: 'cur_owen', curatorVerified: true, displayName: 'Owen Blackwood' };
 
 /** 2026-10-20 at noon in Pittsburgh: Night Weather is current, its call is open, Soft Ground is upcoming. */
 const T = Date.parse('2026-10-20T16:00:00Z');
@@ -36,6 +37,7 @@ const exInput = (over: Partial<ProgrammeInput<Exhibition>> = {}): ProgrammeInput
 const callInput = (over: Partial<ProgrammeInput<OpenCall>> = {}): ProgrammeInput<OpenCall> => ({
   sample: true,
   published: false,
+  kind: 'exhibition',
   title: 'Draft call',
   summary: 'A draft call.',
   body: 'Body.',
@@ -82,7 +84,7 @@ describe('programme reads', () => {
     const { ds } = make();
     expect((await ds.listExhibitions(visitor)).map((x) => x.id)).toEqual(['ex_night_weather', 'ex_soft_ground', 'ex_being_seen', 'ex_spirit_west', 'ex_i_am']);
     // The Art of Advocacy closed on its extended deadline (Sep 11, 2026); closed calls list most recent first.
-    expect((await ds.listOpenCalls(visitor)).map((x) => x.id)).toEqual(['call_night_weather', 'call_soft_ground', 'call_summer_open', 'call_advocacy']);
+    expect((await ds.listOpenCalls(visitor)).map((x) => x.id)).toEqual(['call_night_weather', 'call_soft_ground', 'call_cma_auction', 'call_summer_open', 'call_advocacy']);
     expect((await ds.listEvents(visitor)).map((x) => x.id)).toEqual(['ev_nw_opening', 'ev_mara_talk', 'ev_june_open_studio', 'ev_collector_evening']);
     expect((await ds.listStories(visitor)).map((x) => x.id)).toEqual(['st_advocacy_partner', 'st_mara_interview', 'st_june_loom', 'st_artist_record']);
     const real = (await ds.listExhibitions(visitor)).filter((x) => !x.sample).map((x) => x.id);
@@ -138,12 +140,13 @@ describe('programme reads', () => {
 });
 
 describe('programme writes', () => {
-  it('every write is admin-only', async () => {
+  it('every write is admin-only (a partner drafting its own call is covered in sales.test.ts)', async () => {
     const { ds } = make();
-    for (const v of [visitor, mara, lena]) {
+    for (const v of [visitor, mara, lena, owen]) {
       await expect(ds.saveExhibition(v, exInput())).rejects.toBeInstanceOf(ForbiddenError);
       await expect(ds.deleteExhibition(v, 'ex_night_weather')).rejects.toBeInstanceOf(ForbiddenError);
-      await expect(ds.saveOpenCall(v, callInput())).rejects.toBeInstanceOf(ForbiddenError);
+      if (v !== lena) await expect(ds.saveOpenCall(v, callInput())).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(ds.saveOpenCall(v, { ...callInput(), id: 'call_soft_ground' })).rejects.toBeInstanceOf(ForbiddenError);
       await expect(ds.deleteOpenCall(v, 'call_soft_ground')).rejects.toBeInstanceOf(ForbiddenError);
       await expect(ds.saveEvent(v, eventInput())).rejects.toBeInstanceOf(ForbiddenError);
       await expect(ds.deleteEvent(v, 'ev_mara_talk')).rejects.toBeInstanceOf(ForbiddenError);
@@ -322,8 +325,8 @@ describe('applications', () => {
 
   it('artists list only their own applications', async () => {
     const { ds } = make();
-    expect((await ds.listMyApplications(mara)).map((a) => a.id)).toEqual(['app_mara_summer']);
-    expect((await ds.listMyApplications(deshawn)).map((a) => a.id)).toEqual(['app_deshawn_night']);
+    expect((await ds.listMyApplications(mara)).map((a) => a.id)).toEqual(['app_mara_cma', 'app_mara_summer']);
+    expect((await ds.listMyApplications(deshawn)).map((a) => a.id)).toEqual(['app_deshawn_night', 'app_deshawn_cma']);
   });
 
   it('withdraw: owner only, and only before a decision', async () => {
@@ -342,7 +345,7 @@ describe('applications', () => {
   it('admins review: filter by call, decide with decidedAt, correct a decision, audited', async () => {
     const { ds, advance } = make();
     expect((await ds.listApplications(admin, 'call_summer_open')).map((a) => a.id).sort()).toEqual(['app_june_summer', 'app_mara_summer']);
-    expect((await ds.listApplications(admin)).length).toBe(3);
+    expect((await ds.listApplications(admin)).length).toBe(6);
     const shortlisted = await ds.setApplicationStatus(admin, 'app_deshawn_night', 'shortlisted');
     expect(shortlisted.decidedAt).toBeUndefined();
     advance(1000);
@@ -368,10 +371,13 @@ describe('applications', () => {
       await expect(ds.withdrawApplication(v, 'app_deshawn_night')).rejects.toBeInstanceOf(ForbiddenError);
     }
     await expect(ds.submitApplication(admin, input)).rejects.toBeInstanceOf(ForbiddenError);
-    for (const v of [lena, visitor, mara]) {
+    for (const v of [owen, visitor, mara]) {
       await expect(ds.listApplications(v)).rejects.toBeInstanceOf(ForbiddenError);
       await expect(ds.setApplicationStatus(v, 'app_deshawn_night', 'accepted')).rejects.toBeInstanceOf(ForbiddenError);
     }
+    // A partner reviews only its own calls (see sales.test.ts).
+    await expect(ds.setApplicationStatus(lena, 'app_deshawn_night', 'accepted')).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await ds.listApplications(lena)).every((a) => a.callId === 'call_cma_auction')).toBe(true);
   });
 });
 
@@ -463,8 +469,8 @@ describe('persisted state from v2', () => {
     expect(ds._raw().artworks).toHaveLength(artworks.length - 1);
     expect((await ds.listExhibitions(visitor)).map((x) => x.id)).toContain('ex_being_seen');
     expect((await ds.getExhibition(admin, 'ex_night_weather'))!.artworkIds).not.toContain('aw_mara_2');
-    expect((await ds.listOpenCalls(visitor)).length).toBe(4);
-    expect((await ds.listMyApplications(deshawn)).length).toBe(1);
+    expect((await ds.listOpenCalls(visitor)).length).toBe(5);
+    expect((await ds.listMyApplications(deshawn)).length).toBe(2);
     expect((await ds.listBuyerInquiries(admin)).length).toBe(2);
     // The migrated state is written on the next change and survives a reload.
     await ds.submitBuyerInquiry(visitor, inquiry());

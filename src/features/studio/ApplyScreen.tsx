@@ -6,6 +6,7 @@ import { ValidationError } from '@/data/DataSource';
 import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
 import { deadlineLabel, formatDay, formatInstantDay } from '@/features/programme/format';
+import { TermsBlock } from '@/features/programme/terms';
 import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Skeleton, TopBar, VisibilityBadge, WallLabel } from '@/ui';
 import { capitalize, focusFirstError } from './shared';
 
@@ -51,7 +52,18 @@ export function ApplyScreen() {
 
   const { call, artist, apps, works } = q.data;
   const guard = guardFor(call, artist, apps);
-  if (guard) return <Shell>{guard}</Shell>;
+  if (guard) {
+    return (
+      <Shell>
+        {guard}
+        {call?.terms && !call.externalUrl && (
+          <div className="sta-guard-terms">
+            <TermsBlock terms={call.terms} partnerName={call.partner} title="The call’s terms" variant="compact" />
+          </div>
+        )}
+      </Shell>
+    );
+  }
   return (
     <Shell>
       <ApplyForm call={call!} artist={artist!} works={works} apps={apps} />
@@ -291,6 +303,9 @@ function ApplyForm({ call, artist, works, apps }: { call: OpenCall; artist: Arti
             </h2>
           </header>
           <div className="sta-review">
+            {call.terms && (
+              <TermsBlock terms={call.terms} partnerName={call.partner} headingLevel={3} title="How a sale is shared" variant="compact" id="sta-terms" />
+            )}
             <div className="sta-review__facts">
               <p className="eyebrow">The call</p>
               <p className="sta-review__call">{call.title}</p>

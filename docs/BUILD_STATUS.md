@@ -2,6 +2,27 @@
 
 Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-20.
 
+## v4 — partner calls, auction lots, payouts, reports (2026-10-20)
+
+Built against the client's five-point checklist (artist profile + works; apply with existing work and reuse it; a partner creates a call, reviews, records selections; a selected work becomes an auction lot with compensation and sale records; Kofi exports participation, placement and payment data). Registration stays out of scope until Kofi decides on its own Supabase project.
+
+- **A call is the unit.** Every open call has a **kind** (exhibition, auction, commission, award) and an **organiser** (Kofi or a partner institution). Auction calls carry **published compensation terms** (artist / Kofi / partner shares summing to 100%, buyer's premium ≤30%, resale royalty ≤25%, currency, payment note) shown on the public call page and on the apply screen before the artist sends.
+- **Partner desk** (`/curator/calls`): a verified curator of the organiser institution drafts calls (Kofi publishes), reviews applications (works and statements, never contact details), decides, makes **lots** from selected works and **records sales**. No new role: partner = verified curator whose institution organises the call. Pending curators see "Verification pending".
+- **Lots and sales**: money is whole cents; a sale freezes the split (artist rounded first, remainder to Kofi) and creates the artist's **payout** (due → paid with method/reference, or void when a sale is voided; a paid payout can't be voided). Artists see their lots, hammer price, share and payout status at `/studio/sales` — never the buyer reference.
+- **Kofi desk**: call editor with kind/organiser/terms (locked once a lot sells), `/admin/lots`, `/admin/payouts`, `/admin/reports` (participation, placements, payments by Kofi-day range, CSV downloads with formula-injection-safe cells).
+- Supabase: migration `0009_sales` (lots, payouts, call kind/organiser/terms, RLS for partners, RPCs `record_sale`, `set_lot_status`, `set_payout_status`, `kofi_report`), all in schema `kofi`. Apply order and the 0008-after-0009 hazard are in `supabase/README.md` and `docs/SUPABASE.md` §10.
+
+| Check (v4) | Result |
+|---|---|
+| typecheck / unit + screen tests / build / cap sync | clean / 421 / clean (main chunk 475 kB) / ok |
+| Browser smoke: 133 routes × (375, 900, 1280, 375 dark) | 532 / 532 |
+| Demo flow / programme flow / **partner → lot → sale → payout → report flow** / modal focus v3 / **focus on the five new sheets** | 18 / 18 · 16 / 16 · 20 / 20 · 17 / 17 · 61 / 61 |
+| SQL suite (RLS, RPCs, sales arithmetic incl. half-cent cases, isolation, live apply path run twice) | 357 assertions pass |
+| SupabaseDataSource against a real PostgREST, full partner/sale/report flow, server report = `buildReport()` on the same rows | 113 / 113 |
+| Independent review (fresh Fable reviewer: recomputed the split in TS and SQL, partner scope, privacy, report totals by hand) | SHIP-WITH-FIXES (0 P0/P1, 9 P2) → all fixed and re-gated |
+
+Known limits (v4): the sample "Night Weather Benefit Auction" names a real museum as a fictional organiser and is tagged Sample — swap before a public demo; the curator nav highlights "Shortlists" while on the partner desk (one curator area); no payment rails — payouts are records Kofi marks paid.
+
 ## v3 — the programme (2026-10-20)
 
 Client feedback: "looks good, just feels empty with 3 tabs". Benchmarked against Ocula, Artsy, Saatchi Art and open-call platforms (CaFÉ, EntryThingy) and against koficollections.org's own sections, then added the "opportunities" half of the brief:

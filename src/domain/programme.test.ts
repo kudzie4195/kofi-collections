@@ -23,6 +23,7 @@ const call: OpenCall = {
   id: 'call_x',
   sample: true,
   published: true,
+  kind: 'exhibition',
   title: 'Test call',
   summary: 's',
   body: 'b',

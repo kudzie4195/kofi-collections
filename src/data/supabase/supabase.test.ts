@@ -34,7 +34,10 @@ import {
   type OpenCallRow,
   type StoryRow,
 } from './mapping';
-import { createSupabaseDataSource } from './SupabaseDataSource';
+import { assembleReport, createSupabaseDataSource } from './SupabaseDataSource';
+import { toLotRow, toPayoutRow, lotInputToJson, type LotViewRow, type PayoutViewRow } from './mapping';
+import { buildReport } from '@/domain/reports';
+import { projectLotForArtist } from '@/domain/sales';
 
 describe('mapPgError', () => {
   it('maps privilege and RLS failures to ForbiddenError with plain language', () => {
@@ -332,6 +335,8 @@ describe('demo identities', () => {
       ...seed.events.map((e) => e.id),
       ...seed.stories.map((t) => t.id),
       ...seed.buyerInquiries.map((q) => q.id),
+      ...seed.lots.map((l) => l.id),
+      ...seed.payouts.map((p) => p.id),
     ];
     for (const id of ids) expect(demoUuid(id), id).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Set(Object.values(DEMO_UUIDS)).size).toBe(Object.values(DEMO_UUIDS).length);
@@ -586,6 +591,123 @@ describe('SupabaseDataSource programme (offline)', () => {
     await expect(ds.listApplications(visitor)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(ds.listBuyerInquiries(visitor)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(ds.saveExhibition(visitor, {} as never)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('sales (0009)', () => {
+  const seed = buildSeed();
+
+  it('maps the auction call’s kind, organiser and terms both ways', () => {
+    const cma = seed.openCalls.find((c) => c.id === 'call_cma_auction')!;
+    const row = openCallToRow(cma);
+    expect(row).toMatchObject({ kind: 'auction', organizer_institution_id: 'inst_cma', terms: cma.terms });
+    const nw = openCallToRow(seed.openCalls.find((c) => c.id === 'call_night_weather')!);
+    expect(nw).toMatchObject({ kind: 'award', organizer_institution_id: null, terms: null });
+    const back = toOpenCall({ ...(row as unknown as OpenCallRow), id: cma.id, created_at: cma.createdAt, updated_at: cma.updatedAt });
+    expect(back.kind).toBe('auction');
+    expect(back.terms).toEqual(cma.terms);
+    expect(toOpenCall({ ...(nw as unknown as OpenCallRow), id: 'x', created_at: cma.createdAt, updated_at: cma.updatedAt, kind: null }).kind).toBe('exhibition');
+  });
+
+  const lotRow = (l: (typeof seed.lots)[number], payout: (typeof seed.payouts)[number] | undefined, sale = l.sale): LotViewRow => ({
+    id: l.id, call_id: l.callId, application_id: l.applicationId, artwork_id: l.artworkId, artist_id: l.artistId, lot_number: l.lotNumber,
+    reserve: l.reserve ?? null, starting_bid: l.startingBid ?? null, status: l.status, sale: sale ?? null,
+    payout: payout
+      ? { id: payout.id, lot_id: payout.lotId, artist_id: payout.artistId, amount: String(payout.amount), currency: payout.currency, status: payout.status, method: payout.method ?? null,
+          reference: payout.reference ?? null, paid_at: payout.paidAt ? payout.paidAt.replace('.000Z', '+00:00') : null, note: null, created_at: payout.createdAt, updated_at: payout.updatedAt }
+      : null,
+    call_title: 'Night Weather Benefit Auction', call_kind: 'auction', artwork_title: 'Doubling', artist_working_name: 'Mara Oyelaran', created_at: l.createdAt, updated_at: l.updatedAt,
+  });
+
+  it('maps lots_visible rows to LotRow (cents as numbers, optional fields omitted, payout attached)', () => {
+    const [l1, l2] = seed.lots;
+    const r1 = toLotRow(lotRow(l1!, seed.payouts[0]));
+    expect(r1).toMatchObject({ id: l1!.id, lotNumber: 1, reserve: 600000, status: 'sold', callKind: 'auction', artworkTitle: 'Doubling' });
+    expect(r1.sale).toEqual(l1!.sale);
+    expect(r1.payout).toEqual(seed.payouts[0]);
+    expect('startingBid' in r1).toBe(false);
+    const r2 = toLotRow({ ...lotRow(l2!, undefined), call_title: null, call_kind: null, artwork_title: null, artist_working_name: null });
+    expect(r2.sale).toBeUndefined();
+    expect(r2.payout).toBeUndefined();
+    expect([r2.callTitle, r2.callKind, r2.artworkTitle, r2.artistWorkingName]).toEqual(['A call that has been removed', 'auction', 'A work that has been removed', 'Unknown artist']);
+  });
+
+  it('an artist’s lot (the view already removed buyerRef) equals projectLotForArtist of the full lot', () => {
+    const l1 = seed.lots[0]!;
+    const { buyerRef: _drop, ...artistSale } = l1.sale!;
+    const asArtist = toLotRow(lotRow(l1, seed.payouts[0], artistSale as typeof l1.sale));
+    const full = toLotRow(lotRow(l1, seed.payouts[0]));
+    expect(asArtist).toEqual(projectLotForArtist(full));
+    expect(JSON.stringify(asArtist)).not.toContain('buyerRef');
+  });
+
+  it('maps payouts_visible rows with the mock fallbacks', () => {
+    const p = seed.payouts[1]!;
+    const row: PayoutViewRow = {
+      id: p.id, lot_id: p.lotId, artist_id: p.artistId, amount: p.amount, currency: p.currency, status: p.status, method: p.method ?? null, reference: p.reference ?? null,
+      paid_at: '2026-10-19T12:00:00-04:00', note: null, created_at: p.createdAt, updated_at: p.updatedAt,
+      artist_working_name: null, artwork_title: null, call_title: null, lot_number: null,
+    };
+    expect(toPayoutRow(row)).toEqual({ ...p, artistWorkingName: 'Unknown artist', artworkTitle: 'A work that has been removed', callTitle: 'A call that has been removed', lotNumber: 0 });
+  });
+
+  it('serialises LotInput for save_lot without undefined / null money', () => {
+    expect(lotInputToJson({ callId: 'c', applicationId: 'a', artworkId: 'w', lotNumber: 2, reserve: undefined, startingBid: null as unknown as number })).toEqual({ callId: 'c', applicationId: 'a', artworkId: 'w', lotNumber: 2 });
+    expect(lotInputToJson({ id: 'l', callId: 'c', applicationId: 'a', artworkId: 'w', lotNumber: 2, reserve: 0 })).toEqual({ id: 'l', callId: 'c', applicationId: 'a', artworkId: 'w', lotNumber: 2, reserve: 0 });
+  });
+
+  it('assembleReport() puts server rows in buildReport order and computes the same totals', () => {
+    const range = { from: '2026-01-01', to: '2026-12-31' };
+    const expected = buildReport(
+      { artists: seed.artists, artworks: seed.artworks, calls: seed.openCalls, institutions: seed.institutions, exhibitions: seed.exhibitions, applications: seed.applications, lots: seed.lots, payouts: seed.payouts },
+      range,
+      '2026-10-20T12:00:00.000Z',
+    );
+    expect(expected.payments).toHaveLength(2);
+    const shuffle = <T>(xs: T[]) => [...xs].reverse();
+    const got = assembleReport(range, { participation: shuffle(expected.participation), placements: shuffle(expected.placements), payments: shuffle(expected.payments) }, '2026-10-20T12:00:00.000Z');
+    expect(got.totals).toEqual(expected.totals);
+    expect(got.participation.map((r) => [r.submittedOn, r.artistWorkingName])).toEqual(expected.participation.map((r) => [r.submittedOn, r.artistWorkingName]));
+    expect(got.payments).toEqual(expected.payments);
+    expect(got.totals).toMatchObject({ lotsSold: 2, hammerTotal: { USD: 980000 }, artistPaid: { USD: 112000 }, artistDue: { USD: 574000 } });
+  });
+
+  it('maps the sales constraints and the organiser FK to the mock messages', () => {
+    expect(mapPgError({ code: '23503', message: 'insert or update on table "open_calls" violates foreign key constraint "open_calls_organizer_institution_id_fkey"' })).toEqual(
+      new ValidationError('That institution no longer exists.', 'organizerInstitutionId'),
+    );
+    expect(mapPgError({ code: '23514', message: 'new row for relation "lots" violates check constraint "lots_starting_bid_reserve"' })).toEqual(
+      new ValidationError('The starting bid cannot be above the reserve.', 'startingBid'),
+    );
+    expect(mapPgError({ code: '22023', message: 'Payout already paid.', hint: 'status' })).toEqual(new ValidationError('Payout already paid.', 'status'));
+  });
+
+  it('refuses partner / sales / report desks for a visitor without a network call', async () => {
+    const calls: string[] = [];
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+      calls.push(String(input));
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const ds = createSupabaseDataSource('http://127.0.0.1:1', 'test-anon-key', {
+      demoAutoSignIn: false,
+      clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl as typeof fetch } },
+    });
+    const visitor = SUPABASE_DEMO_IDENTITIES.find((d) => d.viewer.role === 'public')!.viewer;
+    const lot = { callId: DEMO_UUIDS.call_cma_auction, applicationId: DEMO_UUIDS.app_mara_cma, artworkId: DEMO_UUIDS.aw_mara_1, lotNumber: 1 };
+    await expect(ds.listMyCalls(visitor)).rejects.toEqual(new ForbiddenError('You do not have access to this.'));
+    await expect(ds.listApplications(visitor, DEMO_UUIDS.call_cma_auction)).rejects.toEqual(new ForbiddenError('You do not have access to this.'));
+    await expect(ds.setApplicationStatus(visitor, DEMO_UUIDS.app_mara_cma, 'accepted')).rejects.toEqual(new ForbiddenError('You do not have access to this.'));
+    await expect(ds.listLots(visitor)).rejects.toEqual(new ForbiddenError('You do not have access to this.'));
+    await expect(ds.saveLot(visitor, lot)).rejects.toEqual(new ForbiddenError('You do not have access to this.'));
+    await expect(ds.setLotStatus(visitor, DEMO_UUIDS.lot_cma_2, 'unsold')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.recordSale(visitor, DEMO_UUIDS.lot_cma_2, { hammerPrice: 100000, soldOn: '2026-10-18' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.deleteLot(visitor, DEMO_UUIDS.lot_cma_2)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(ds.listMyLots(visitor)).rejects.toEqual(new ForbiddenError('Sign in as an artist to do this.'));
+    await expect(ds.listPayouts(visitor)).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
+    await expect(ds.setPayoutStatus(visitor, DEMO_UUIDS.payout_cma_1, 'paid', { method: 'x' })).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
+    await expect(ds.kofiReport(visitor, { from: '2026-10-01', to: '2026-10-31' })).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
+    await expect(ds.saveOpenCall(visitor, { title: 'x' } as never)).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
     expect(calls).toHaveLength(0);
   });
 });

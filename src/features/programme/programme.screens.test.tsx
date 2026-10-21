@@ -161,7 +161,7 @@ describe('Open calls', () => {
   it('an open external call links to the partner form for everyone, in a new tab, and hides terms Kofi does not state', async () => {
     const ds = new MockDataSource({ persist: false, now: () => SEED_NOW });
     const call = await ds.saveOpenCall(QUINCY, {
-      sample: true, published: true, title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
+      sample: true, published: true, kind: 'exhibition', title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
       body: 'Read the call on the partner site.', eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1,
       fee: 'See the call', externalUrl: 'https://example.org/apply',
     });

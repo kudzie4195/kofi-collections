@@ -76,6 +76,19 @@ const APPLICATION_STATUS_VERB: Record<string, string> = {
   withdrawn: 'withdrew an application',
 };
 
+const LOT_STATUS_VERB: Record<string, string> = {
+  planned: 'moved a lot back to planned',
+  live: 'opened a lot for bidding',
+  unsold: 'marked a lot unsold',
+  withdrawn: 'withdrew a lot',
+};
+
+const PAYOUT_STATUS_VERB: Record<string, string> = {
+  paid: 'marked an artist payout as paid',
+  due: 'reopened an artist payout',
+  void: 'voided an artist payout',
+};
+
 /** AuditAction (+ meta, + entityType for programme rows) → a plain sentence fragment that follows the actor's name. */
 export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'> & Partial<Pick<AuditEvent, 'entityType'>>): string {
   const meta = ev.meta ?? {};
@@ -144,6 +157,17 @@ export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'> & Partial<
     case 'buyer_inquiry.status':
       if (meta.noteOnly) return 'added a staff note to a collector inquiry';
       return status === 'closed' ? 'closed a collector inquiry' : status === 'in progress' ? 'picked up a collector inquiry' : status === 'new' ? 'reopened a collector inquiry' : 'updated a collector inquiry';
+    case 'lot.save':
+      if (meta.created) return 'added a lot to an auction';
+      return LOT_STATUS_VERB[status] ?? 'edited a lot';
+    case 'lot.sale':
+      return meta.voided ? 'voided a sale' : 'recorded a sale';
+    case 'lot.delete':
+      return 'deleted a lot';
+    case 'payout.status':
+      return PAYOUT_STATUS_VERB[status] ?? 'updated a payout';
+    case 'report.export':
+      return 'ran a Kofi report';
   }
   // Exhaustive above; a row written by a newer schema still reads as a sentence.
   return 'made a change';

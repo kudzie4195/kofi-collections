@@ -15,7 +15,21 @@ export function CuratorHome() {
   const q = useQuery(async (ds, v) => {
     const curator = await ds.getMyCurator(v);
     const shortlists = curator ? await ds.listShortlists(v) : [];
-    return { curator, shortlists };
+    // The partner desk: only for verified curators; a pending curator sees nothing new.
+    let partner: { calls: number; toReview: number; lots: number; sold: number } | undefined;
+    if (curator?.status === 'verified') {
+      const calls = await ds.listMyCalls(v).catch(() => []);
+      if (calls.length) {
+        const [apps, lots] = await Promise.all([ds.listApplications(v).catch(() => []), ds.listLots(v).catch(() => [])]);
+        partner = {
+          calls: calls.length,
+          toReview: apps.filter((a) => a.status === 'submitted' || a.status === 'shortlisted').length,
+          lots: lots.length,
+          sold: lots.filter((l) => l.status === 'sold').length,
+        };
+      } else partner = { calls: 0, toReview: 0, lots: 0, sold: 0 };
+    }
+    return { curator, shortlists, partner };
   });
 
   const [creating, setCreating] = useState(false);
@@ -94,7 +108,37 @@ export function CuratorHome() {
             )}
             </div>
 
-            <div className="cu-split__main">
+            <div className="cu-split__main stack--lg">
+            {q.data.partner && (
+              <section className="stack" aria-labelledby="cu-calls-title">
+                <p className="eyebrow eyebrow--gold">Partner desk</p>
+                {q.data.partner.calls > 0 ? (
+                  <ul className="list cu-lists cu-calls" aria-labelledby="cu-calls-title">
+                    <li>
+                      <Link to="/curator/calls" className="list-row cu-list-row">
+                        <span className="sl-count" aria-hidden="true">
+                          {q.data.partner.calls}
+                        </span>
+                        <span className="list-row__main">
+                          <span className="list-row__title" style={{ display: 'block' }} id="cu-calls-title">
+                            Calls you run
+                          </span>
+                          <span className="list-row__sub" style={{ display: 'block' }}>
+                            {q.data.partner.calls === 1 ? '1 call' : `${q.data.partner.calls} calls`} · {q.data.partner.toReview} to review
+                            {q.data.partner.lots ? ` · ${q.data.partner.lots} lots, ${q.data.partner.sold} sold` : ''}
+                          </span>
+                        </span>
+                        <Icon.Back className="sl-row-chev" />
+                      </Link>
+                    </li>
+                  </ul>
+                ) : (
+                  <p className="small muted" id="cu-calls-title">
+                    Running an open call or a benefit auction with Kofi? <Link to="/curator/calls">Draft a call for your institution</Link>.
+                  </p>
+                )}
+              </section>
+            )}
             {curator ? (
               <section className="stack--lg">
                 <div className="cu-head">

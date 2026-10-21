@@ -1,6 +1,7 @@
 import type { RouteObject } from 'react-router-dom';
 import './studio.css';
 import './opportunities.css';
+import './sales.css';
 
 /**
  * Relative children of /studio. The artist-only role gate lives in the spine.
@@ -18,5 +19,6 @@ export const studioRoutes: RouteObject[] = [
   { path: 'consent', lazy: () => import('./Consent').then((m) => ({ Component: m.Consent })) },
   { path: 'opportunities', lazy: () => import('./Opportunities').then((m) => ({ Component: m.Opportunities })) },
   { path: 'apply/:callId', lazy: () => import('./ApplyScreen').then((m) => ({ Component: m.ApplyScreen })) },
+  { path: 'sales', lazy: () => import('./Sales').then((m) => ({ Component: m.Sales })) },
   { path: 'applications', lazy: () => import('./Applications').then((m) => ({ Component: m.Applications })) },
 ];

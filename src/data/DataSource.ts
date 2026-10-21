@@ -17,13 +17,20 @@ import type {
   Inquiry,
   InquiryStatus,
   Institution,
+  KofiReport,
+  LotRow,
+  LotStatus,
   OpenCall,
+  PayoutRow,
+  PayoutStatus,
+  ReportRange,
   ProgrammeEvent,
   Shortlist,
   Story,
   Viewer,
 } from '@/domain/types';
 import type { BuyerInquiryInput } from '@/domain/programme';
+import type { LotInput, SaleInput } from '@/domain/sales';
 
 /** Thrown by data sources when the viewer is not allowed to do something. */
 export class ForbiddenError extends Error {
@@ -227,6 +234,36 @@ export interface DataSource {
   submitBuyerInquiry(viewer: Viewer, input: BuyerInquiryInput): Promise<{ id: string }>;
   listBuyerInquiries(viewer: Viewer): Promise<BuyerInquiryRow[]>;
   setBuyerInquiryStatus(viewer: Viewer, id: string, status: BuyerInquiryStatus, staffNote?: string): Promise<BuyerInquiryRow>;
+
+  /* ---- partners (verified curators of a call's organiser institution) ----
+   * A partner may: create a call as a DRAFT with its institution as organiser
+   * (saveOpenCall; published stays false until Kofi publishes), edit it while draft,
+   * list and decide applications to its own calls (listApplications / setApplicationStatus
+   * scoped to those calls; staffNote is the reviewers' note shared with Kofi), create lots
+   * and record sales on its own auction calls. Never: publish, see other calls'
+   * applications, artist contact, payouts. Rules: domain/sales.isCallOrganizer. */
+  /** Calls this viewer organises (admin: all with an organiser). */
+  listMyCalls(viewer: Viewer): Promise<OpenCall[]>;
+
+  /* ---- lots, sales, payouts ----
+   * Kofi admins: everything. Organiser: lots + sales on its own auction calls.
+   * Artists: own lots (sale without buyerRef) and own payouts. Others: ForbiddenError. */
+  listLots(viewer: Viewer, callId?: string): Promise<LotRow[]>;
+  saveLot(viewer: Viewer, input: LotInput & { id?: string }): Promise<LotRow>;
+  setLotStatus(viewer: Viewer, id: string, status: LotStatus): Promise<LotRow>;
+  /** Records the hammer price: freezes the split from the call's terms, creates the artist's payout, audits 'lot.sale'. */
+  recordSale(viewer: Viewer, id: string, input: SaleInput): Promise<LotRow>;
+  /** Only a lot that has never been sold or whose sale was voided (status != 'sold'). */
+  deleteLot(viewer: Viewer, id: string): Promise<void>;
+  listMyLots(viewer: Viewer): Promise<LotRow[]>;
+  /** Admin: all; artist: own. */
+  listPayouts(viewer: Viewer): Promise<PayoutRow[]>;
+  /** Admin only. canMovePayout; paid requires method; audits 'payout.status'. */
+  setPayoutStatus(viewer: Viewer, id: string, status: PayoutStatus, details?: { method?: string; reference?: string; note?: string; paidOn?: string }): Promise<PayoutRow>;
+
+  /* ---- Kofi reports (admin only) ---- */
+  /** Builds domain/reports.buildReport from everything in range; audits 'report.export' with the range. */
+  kofiReport(viewer: Viewer, range: ReportRange): Promise<KofiReport>;
 
   /* ---- demo helpers ---- */
   resetDemoData(): Promise<void>;

@@ -17,6 +17,8 @@ import type {
   BuyerInquiryRow,
   BuyerInquiryStatus,
   BuyerIntent,
+  CallKind,
+  CallTerms,
   CareerStage,
   Curator,
   CuratorStatus,
@@ -27,8 +29,14 @@ import type {
   InquiryStatus,
   Institution,
   InstitutionType,
+  Lot,
+  LotRow,
+  LotStatus,
   Medium,
   OpenCall,
+  Payout,
+  PayoutRow,
+  PayoutStatus,
   ProgrammeBase,
   ProgrammeEvent,
   ProgrammeImage,
@@ -38,6 +46,7 @@ import type {
   Shortlist,
   Story,
   StoryKind,
+  Sale,
   Unit,
   Venue,
   Visibility,
@@ -727,6 +736,10 @@ export interface OpenCallRow extends ProgrammeBaseRow {
   image: ImageRowJson | null;
   external_url: string | null;
   exhibition_id: string | null;
+  /** 0009_sales.sql */
+  kind?: CallKind | null;
+  organizer_institution_id?: string | null;
+  terms?: CallTerms | null;
 }
 
 /** kofi.events_visible */
@@ -840,6 +853,7 @@ export function toOpenCall(row: OpenCallRow, resolve: (src: string) => string = 
     opensOn: row.opens_on,
     maxWorks: row.max_works,
     fee: row.fee,
+    kind: row.kind ?? 'exhibition',
   };
   if (row.partner) c.partner = row.partner;
   if (row.deadline) c.deadline = row.deadline;
@@ -848,7 +862,39 @@ export function toOpenCall(row: OpenCallRow, resolve: (src: string) => string = 
   if (image) c.image = image;
   if (row.external_url) c.externalUrl = row.external_url;
   if (row.exhibition_id) c.exhibitionId = row.exhibition_id;
+  if (row.organizer_institution_id) c.organizerInstitutionId = row.organizer_institution_id;
+  const terms = toTerms(row.terms);
+  if (terms) c.terms = terms;
   return c;
+}
+
+/** terms jsonb (camelCase, as CallTerms) → CallTerms; paymentNote only when set. */
+export function toTerms(t: CallTerms | null | undefined): CallTerms | undefined {
+  if (!t || typeof t !== 'object') return undefined;
+  const out: CallTerms = {
+    artistSharePct: num(t.artistSharePct),
+    kofiSharePct: num(t.kofiSharePct),
+    partnerSharePct: num(t.partnerSharePct),
+    buyerPremiumPct: num(t.buyerPremiumPct),
+    resaleRoyaltyPct: num(t.resaleRoyaltyPct),
+    currency: t.currency,
+  };
+  if (t.paymentNote) out.paymentNote = t.paymentNote;
+  return out;
+}
+
+function termsToJson(t: CallTerms | undefined): CallTerms | null {
+  if (!t) return null;
+  const out: CallTerms = {
+    artistSharePct: t.artistSharePct,
+    kofiSharePct: t.kofiSharePct,
+    partnerSharePct: t.partnerSharePct,
+    buyerPremiumPct: t.buyerPremiumPct,
+    resaleRoyaltyPct: t.resaleRoyaltyPct,
+    currency: t.currency,
+  };
+  if (t.paymentNote) out.paymentNote = t.paymentNote;
+  return out;
 }
 
 export function toProgrammeEvent(row: EventRow): ProgrammeEvent {
@@ -982,6 +1028,9 @@ export function openCallToRow(c: Authored<OpenCall>): Record<string, unknown> {
     exhibition_id: c.exhibitionId ?? null,
     sample: !!c.sample,
     published: !!c.published,
+    kind: c.kind ?? 'exhibition',
+    organizer_institution_id: c.organizerInstitutionId ?? null,
+    terms: termsToJson(c.terms),
   };
 }
 
@@ -1014,4 +1063,141 @@ export function storyToRow(s: Authored<Story>): Record<string, unknown> {
     sample: !!s.sample,
     published: !!s.published,
   };
+}
+
+/* ------------------------------------------------- sales (0009_sales.sql) -- */
+
+/** A kofi.payouts row as JSON (to_jsonb in kofi.lot_extras) or from kofi.payouts_visible. */
+export interface PayoutDbRow {
+  id: string;
+  lot_id: string;
+  artist_id: string;
+  amount: Num;
+  currency: string;
+  status: PayoutStatus;
+  method: string | null;
+  reference: string | null;
+  paid_at: Ts | null;
+  note: string | null;
+  created_at: Ts;
+  updated_at: Ts;
+}
+
+/** kofi.payouts_visible */
+export interface PayoutViewRow extends PayoutDbRow {
+  artist_working_name: string | null;
+  artwork_title: string | null;
+  call_title: string | null;
+  lot_number: number | null;
+}
+
+/** kofi.lots_visible: `sale` has no buyerRef for the artist; `payout` is NULL for the organiser. */
+export interface LotViewRow {
+  id: string;
+  call_id: string;
+  application_id: string;
+  artwork_id: string;
+  artist_id: string;
+  lot_number: number;
+  reserve: Num | null;
+  starting_bid: Num | null;
+  status: LotStatus;
+  sale: Sale | null;
+  payout: PayoutDbRow | null;
+  call_title: string | null;
+  call_kind: CallKind | null;
+  artwork_title: string | null;
+  artist_working_name: string | null;
+  created_at: Ts;
+  updated_at: Ts;
+}
+
+export function toPayout(row: PayoutDbRow): Payout {
+  const p: Payout = {
+    id: row.id,
+    lotId: row.lot_id,
+    artistId: row.artist_id,
+    amount: num(row.amount),
+    currency: row.currency,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+  if (row.method) p.method = row.method;
+  if (row.reference) p.reference = row.reference;
+  if (row.paid_at) p.paidAt = iso(row.paid_at);
+  if (row.note) p.note = row.note;
+  return p;
+}
+
+export function toPayoutRow(row: PayoutViewRow): PayoutRow {
+  return {
+    ...toPayout(row),
+    artistWorkingName: row.artist_working_name ?? 'Unknown artist',
+    artworkTitle: row.artwork_title ?? 'A work that has been removed',
+    callTitle: row.call_title ?? 'A call that has been removed',
+    lotNumber: row.lot_number ?? 0,
+  };
+}
+
+/** The frozen sale exactly as record_sale() wrote it (buyerRef only when the view kept it). */
+export function toSale(s: Sale): Sale {
+  const out: Sale = {
+    hammerPrice: num(s.hammerPrice),
+    currency: s.currency,
+    buyerPremium: num(s.buyerPremium),
+    artistAmount: num(s.artistAmount),
+    kofiAmount: num(s.kofiAmount),
+    partnerAmount: num(s.partnerAmount),
+    terms: toTerms(s.terms) ?? s.terms,
+    soldAt: iso(s.soldAt),
+  };
+  if (s.buyerRef) out.buyerRef = s.buyerRef;
+  return out;
+}
+
+export function toLot(row: LotViewRow): Lot {
+  const l: Lot = {
+    id: row.id,
+    callId: row.call_id,
+    applicationId: row.application_id,
+    artworkId: row.artwork_id,
+    artistId: row.artist_id,
+    lotNumber: row.lot_number,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+  if (row.reserve !== null && row.reserve !== undefined) l.reserve = num(row.reserve);
+  if (row.starting_bid !== null && row.starting_bid !== undefined) l.startingBid = num(row.starting_bid);
+  if (row.sale) l.sale = toSale(row.sale);
+  return l;
+}
+
+/** lots_visible row → LotRow; `work` is resolved by the caller (as this viewer may see it). */
+export function toLotRow(row: LotViewRow, work?: ArtworkView): LotRow {
+  const out: LotRow = {
+    ...toLot(row),
+    callTitle: row.call_title ?? 'A call that has been removed',
+    callKind: row.call_kind ?? 'auction',
+    artworkTitle: row.artwork_title ?? 'A work that has been removed',
+    artistWorkingName: row.artist_working_name ?? 'Unknown artist',
+  };
+  if (work) out.work = work;
+  if (row.payout) out.payout = toPayout(row.payout);
+  return out;
+}
+
+/** LotInput & { id? } → the JSON save_lot() takes (it re-validates everything). */
+export function lotInputToJson(input: { id?: string; callId: string; applicationId: string; artworkId: string; lotNumber: number; reserve?: number; startingBid?: number }): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    callId: input.callId,
+    applicationId: input.applicationId,
+    artworkId: input.artworkId,
+    lotNumber: input.lotNumber,
+  };
+  if (input.id) out.id = input.id;
+  if (input.reserve !== undefined && input.reserve !== null) out.reserve = input.reserve;
+  if (input.startingBid !== undefined && input.startingBid !== null) out.startingBid = input.startingBid;
+  return out;
 }

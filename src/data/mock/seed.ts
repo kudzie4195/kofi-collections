@@ -10,7 +10,9 @@ import type {
   Exhibition,
   Inquiry,
   Institution,
+  Lot,
   OpenCall,
+  Payout,
   ProgrammeEvent,
   Shortlist,
   Story,
@@ -46,11 +48,16 @@ export interface MockState {
   events: ProgrammeEvent[];
   stories: Story[];
   buyerInquiries: BuyerInquiry[];
+  /* ---- sales (added in v4; older persisted states are migrated on load) ---- */
+  lots: Lot[];
+  payouts: Payout[];
 }
 
 /** The collections added in v3. A persisted v2 state lacks them and gets the seeded programme merged in. */
 export const PROGRAMME_KEYS = ['exhibitions', 'openCalls', 'applications', 'events', 'stories', 'buyerInquiries'] as const;
-export type ProgrammeState = Pick<MockState, (typeof PROGRAMME_KEYS)[number]>;
+/** The collections added in v4. A persisted v3 state lacks them and gets the seeded auction merged in. */
+export const SALES_KEYS = ['lots', 'payouts'] as const;
+export type ProgrammeState = Pick<MockState, (typeof PROGRAMME_KEYS)[number] | (typeof SALES_KEYS)[number]>;
 
 export const DEMO_USERS = {
   mara: 'user_mara',
@@ -716,6 +723,7 @@ export function buildProgrammeSeed(): ProgrammeState {
       id: 'call_advocacy',
       sample: false,
       published: true,
+      kind: 'exhibition',
       title: 'The Art of Advocacy: Giving Form and Voice to Justice',
       partner: 'Neighborhood Legal Services',
       summary: 'An exhibition for Neighborhood Legal Services’ 60th anniversary, ending in an auction on October 6, 2026. Kofi Collections led artist selection.',
@@ -739,6 +747,7 @@ export function buildProgrammeSeed(): ProgrammeState {
       id: 'call_night_weather',
       sample: true,
       published: true,
+      kind: 'award',
       title: 'Night Weather Studio Award',
       partner: 'Kofi Collections',
       summary: 'Show us work made at night or about it. One artist receives a solo wall next spring and a studio grant.',
@@ -761,6 +770,7 @@ export function buildProgrammeSeed(): ProgrammeState {
       id: 'call_soft_ground',
       sample: true,
       published: true,
+      kind: 'exhibition',
       title: 'Soft Ground: Printmakers & Weavers',
       partner: 'Kofi Collections',
       summary: 'Printmakers and textile artists: apply to show alongside Soft Ground this winter.',
@@ -781,6 +791,7 @@ export function buildProgrammeSeed(): ProgrammeState {
       id: 'call_summer_open',
       sample: true,
       published: true,
+      kind: 'exhibition',
       title: 'Late Summer Open 2026',
       partner: 'Kofi Collections',
       summary: 'Kofi’s open call for the autumn hang. Selected works are showing now in Night Weather.',
@@ -795,6 +806,38 @@ export function buildProgrammeSeed(): ProgrammeState {
       fee: 'No entry fee',
       createdAt: '2026-08-12T14:00:00.000Z',
       updatedAt: '2026-09-21T14:00:00.000Z',
+    },
+    {
+      id: 'call_cma_auction',
+      sample: true,
+      published: true,
+      kind: 'auction',
+      title: 'Night Weather Benefit Auction',
+      partner: 'Carnegie Museum of Art',
+      organizerInstitutionId: 'inst_cma',
+      summary: 'A benefit auction of works from Night Weather, run with Carnegie Museum of Art. Artists receive 70% of the hammer price.',
+      body:
+        'Carnegie Museum of Art and Kofi Collections are holding a benefit auction of works selected from artists in the Night Weather programme. Proceeds support the Night Weather programme: Kofi’s share and the museum’s share fund next year’s studio award and the artists’ talks.\n\n' +
+        'Artists set their own reserve, the lowest hammer price they will accept. Artists receive 70% of the hammer price, Kofi 20% and the museum 10%. A 10% buyer’s premium is charged on top of the hammer price. If a work is resold later, the artist is owed a 5% resale royalty under Kofi’s open seller’s contract.\n\n' +
+        'Attach up to two works from your Kofi portfolio. Selected works become lots in the auction.',
+      eligibility: 'Artists with an approved Kofi profile',
+      mediums: [],
+      opensOn: '2026-08-15',
+      deadline: '2026-09-30',
+      maxWorks: 2,
+      fee: 'No entry fee',
+      exhibitionId: 'ex_night_weather',
+      terms: {
+        artistSharePct: 70,
+        kofiSharePct: 20,
+        partnerSharePct: 10,
+        buyerPremiumPct: 10,
+        resaleRoyaltyPct: 5,
+        currency: 'USD',
+        paymentNote: 'Artists are paid within 30 days of the auction.',
+      },
+      createdAt: '2026-08-10T14:00:00.000Z',
+      updatedAt: '2026-08-14T14:00:00.000Z',
     },
   ];
 
@@ -833,6 +876,44 @@ export function buildProgrammeSeed(): ProgrammeState {
       status: 'submitted',
       createdAt: '2026-10-12T02:15:00.000Z',
       updatedAt: '2026-10-12T02:15:00.000Z',
+    },
+    {
+      id: 'app_mara_cma',
+      callId: 'call_cma_auction',
+      artistId: 'art_mara',
+      artworkIds: ['aw_mara_1', 'aw_mara_2'],
+      statement: 'Doubling and Small Weather No. 4 were painted in the same week of rain. I would like both offered, the large one with a reserve I have agreed with Kofi.',
+      status: 'accepted',
+      decisionNote: 'Selected. Both works will be offered as lots; Kofi will confirm your reserves with you.',
+      staffNote: 'Reserves agreed by phone: $6,000 and $1,000.',
+      createdAt: '2026-09-14T15:00:00.000Z',
+      updatedAt: '2026-10-05T15:00:00.000Z',
+      decidedAt: '2026-10-05T15:00:00.000Z',
+    },
+    {
+      id: 'app_deshawn_cma',
+      callId: 'call_cma_auction',
+      artistId: 'art_deshawn',
+      artworkIds: ['aw_deshawn_1'],
+      statement: 'Print 2/5 of Night Shift: Bakery. The edition is otherwise held back, so this is the only print offered this year.',
+      status: 'accepted',
+      decisionNote: 'Selected. Your print will be offered as a lot.',
+      createdAt: '2026-09-21T19:30:00.000Z',
+      updatedAt: '2026-10-05T15:05:00.000Z',
+      decidedAt: '2026-10-05T15:05:00.000Z',
+    },
+    {
+      id: 'app_priya_cma',
+      callId: 'call_cma_auction',
+      artistId: 'art_priya',
+      artworkIds: ['aw_priya_1'],
+      statement: 'A screen print from the Grid Drift series, edition of 20. It started as a few lines of code and ended as ink.',
+      status: 'declined',
+      decisionNote: 'Thank you. This auction was open to artists with an approved Kofi profile; we would be glad to see your work again once your profile is approved.',
+      staffNote: 'Profile still in review at the deadline.',
+      createdAt: '2026-09-28T13:45:00.000Z',
+      updatedAt: '2026-10-05T15:10:00.000Z',
+      decidedAt: '2026-10-05T15:10:00.000Z',
     },
   ];
 
@@ -1002,5 +1083,66 @@ export function buildProgrammeSeed(): ProgrammeState {
     },
   ];
 
-  return { exhibitions, openCalls, applications, events, stories, buyerInquiries };
+  const cmaTerms = openCalls.find((c) => c.id === 'call_cma_auction')!.terms!;
+  // Sold at noon Kofi time on Oct 18, 2026 (EDT, UTC-4). Amounts are whole cents.
+  const soldAt = '2026-10-18T16:00:00.000Z';
+  const lots: Lot[] = [
+    {
+      id: 'lot_cma_1',
+      callId: 'call_cma_auction',
+      applicationId: 'app_mara_cma',
+      artworkId: 'aw_mara_1',
+      artistId: 'art_mara',
+      lotNumber: 1,
+      reserve: 600000,
+      status: 'sold',
+      sale: { hammerPrice: 820000, currency: 'USD', buyerPremium: 82000, artistAmount: 574000, kofiAmount: 164000, partnerAmount: 82000, terms: { ...cmaTerms }, soldAt, buyerRef: 'Paddle 14' },
+      createdAt: '2026-10-08T14:00:00.000Z',
+      updatedAt: soldAt,
+    },
+    {
+      id: 'lot_cma_2',
+      callId: 'call_cma_auction',
+      applicationId: 'app_mara_cma',
+      artworkId: 'aw_mara_2',
+      artistId: 'art_mara',
+      lotNumber: 2,
+      reserve: 100000,
+      status: 'live',
+      createdAt: '2026-10-08T14:05:00.000Z',
+      updatedAt: '2026-10-18T14:00:00.000Z',
+    },
+    {
+      id: 'lot_cma_3',
+      callId: 'call_cma_auction',
+      applicationId: 'app_deshawn_cma',
+      artworkId: 'aw_deshawn_1',
+      artistId: 'art_deshawn',
+      lotNumber: 3,
+      reserve: 150000,
+      status: 'sold',
+      sale: { hammerPrice: 160000, currency: 'USD', buyerPremium: 16000, artistAmount: 112000, kofiAmount: 32000, partnerAmount: 16000, terms: { ...cmaTerms }, soldAt, buyerRef: 'Paddle 3' },
+      createdAt: '2026-10-08T14:10:00.000Z',
+      updatedAt: soldAt,
+    },
+  ];
+
+  const payouts: Payout[] = [
+    { id: 'payout_cma_1', lotId: 'lot_cma_1', artistId: 'art_mara', amount: 574000, currency: 'USD', status: 'due', createdAt: soldAt, updatedAt: soldAt },
+    {
+      id: 'payout_cma_3',
+      lotId: 'lot_cma_3',
+      artistId: 'art_deshawn',
+      amount: 112000,
+      currency: 'USD',
+      status: 'paid',
+      method: 'Bank transfer',
+      reference: 'KC-2026-0031',
+      paidAt: '2026-10-19T16:00:00.000Z',
+      createdAt: soldAt,
+      updatedAt: '2026-10-19T16:00:00.000Z',
+    },
+  ];
+
+  return { exhibitions, openCalls, applications, events, stories, buyerInquiries, lots, payouts };
 }

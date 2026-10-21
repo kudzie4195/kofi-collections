@@ -60,6 +60,15 @@ function EntityRef({ ev, names }: { ev: AuditEvent; names: AuditNames | undefine
           Document <code>{id}</code>
         </span>
       );
+    case 'lot':
+      return <Link to={typeof ev.meta?.callId === 'string' ? `/admin/lots?call=${ev.meta.callId}` : '/admin/lots'}>{typeof ev.meta?.lotNumber === 'number' ? `Lot ${ev.meta.lotNumber}` : 'A lot'}</Link>;
+    case 'payout':
+      return <Link to="/admin/payouts?status=all">Artist payout</Link>;
+    case 'report': {
+      const from = typeof ev.meta?.from === 'string' ? ev.meta.from : undefined;
+      const to = typeof ev.meta?.to === 'string' ? ev.meta.to : undefined;
+      return <Link to={from && to ? `/admin/reports?from=${from}&to=${to}` : '/admin/reports'}>Report{from && to ? ` ${from} to ${to}` : ''}</Link>;
+    }
   }
 }
 

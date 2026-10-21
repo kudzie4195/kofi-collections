@@ -190,11 +190,11 @@ Error mapping (`mapPgError`): `42501` → `ForbiddenError`; `P0002`, `PGRST116`,
 
 **Verified** (real PostgreSQL 16.15, local throwaway cluster, `supabase/tests/LAST_RUN.log`):
 
-- All nine migrations (0000–0008) load cleanly (0008 twice, to prove it is idempotent) on top of `supabase/tests/shim.sql`, a stand-in for Supabase's `auth`, `storage`, `extensions` schemas, the `anon`/`authenticated`/`service_role` roles (with Supabase's default grants in `public`) **and the other product**: a pre-existing `public.profiles`, `public.consent_records`, `public.admin_users`, `public.is_admin()`, an `on_auth_user_created` trigger on `auth.users` and two existing users.
+- All ten migrations (0000–0009) load cleanly (0008 and 0009 twice each, to prove they are idempotent) on top of `supabase/tests/shim.sql`, a stand-in for Supabase's `auth`, `storage`, `extensions` schemas, the `anon`/`authenticated`/`service_role` roles (with Supabase's default grants in `public`) **and the other product**: a pre-existing `public.profiles`, `public.consent_records`, `public.admin_users`, `public.is_admin()`, an `on_auth_user_created` trigger on `auth.users` and two existing users.
 - `seed_auth.sql` + `seed_content.sql` load, and load again (idempotent).
 - `supabase/tests/rls_test.sql` + `supabase/tests/rpc_test.sql`: 100 assertions executed as each demo identity the way PostgREST does it (`set local role …; set local request.jwt.claims = …`), all passing, against `kofi.*`. These include the policies, column privileges, views, guard and audit triggers, the inquiry state machine, every RPC, the storage policies on `storage.objects`, the vault "audited open first" gate, cascades, and `kofi_demo_reset()`.
-- `supabase/tests/programme_test.sql`: 58 assertions for 0008 — see §9.
-- `supabase/tests/isolation_test.sql`: 16 assertions — no Kofi tables in `public`; a fingerprint of `public` (objects, ACLs, policies, triggers, the other product's rows and its auth trigger) is identical before the migrations and after migrations + seed; every Kofi function pins `search_path = kofi, public`, every view is `security_invoker`, every table has RLS; realtime publishes only `kofi.*` (14 tables); both auth triggers coexist and a failing Kofi profile insert does not block a sign-up; internal helpers and the snapshot are not reachable by API roles; `drop schema kofi cascade` (in a savepoint, rolled back) leaves `public` identical and removes Kofi's auth trigger, storage policies and realtime tables.
+- `supabase/tests/programme_test.sql`: 58 assertions for 0008 — see §9. `supabase/tests/sales_test.sql`: 53 assertions for 0009 — see §10.
+- `supabase/tests/isolation_test.sql`: 16 assertions — no Kofi tables in `public`; a fingerprint of `public` (objects, ACLs, policies, triggers, the other product's rows and its auth trigger) is identical before the migrations and after migrations + seed; every Kofi function pins `search_path = kofi, public`, every view is `security_invoker`, every table has RLS; realtime publishes only `kofi.*` (16 tables); both auth triggers coexist and a failing Kofi profile insert does not block a sign-up; internal helpers and the snapshot are not reachable by API roles; `drop schema kofi cascade` (in a savepoint, rolled back) leaves `public` identical and removes Kofi's auth trigger, storage policies and realtime tables.
 - Run it yourself: `PGHOST=… PGPORT=… PGUSER=postgres supabase/tests/run-local.sh` (it drops and recreates a database — never point it at a Supabase project).
 
 **Not verified against a live Supabase project** (no project or Docker daemon was available):
@@ -273,7 +273,7 @@ The live project already holds the 13 demo works and must **not** be reset — n
 | 2 | `supabase/apply/0008_part2.sql` | ~14 KB | triggers, read helpers, views |
 | 3 | `supabase/apply/0008_part3.sql` | ~14 KB | RPCs with their EXECUTE grants |
 | 4 | `supabase/apply/0008_part4.sql` | ~10 KB | table / view grants, RLS, `kofi-programme` bucket + policies, realtime, records `0008_programme` in `kofi.applied_migrations`, reloads PostgREST |
-| 5 | `supabase/seed_programme.sql` | ~21 KB | programme rows, insert-only on fixed ids (`on conflict (id) do nothing`); never updates or deletes |
+| 5 | `supabase/seed_programme.sql` | ~25 KB | programme rows, insert-only on fixed ids (`on conflict (id) do nothing`); never updates or deletes. **Since 0009 it needs 0009 first** (it writes the call kind / organiser / terms columns) — see §10 |
 | 6 | `supabase/apply/0008_live_patch.sql` | ~6 KB | `UPDATE kofi.artworks SET rights_note = …` for the 13 works by fixed id, only where different |
 
 The parts are generated from `0008_programme.sql` (`node supabase/scripts/split-0008.mjs`); each is one transaction and idempotent, so a failed part can be re-run. `0008_programme.sql` itself (one transaction) is equivalent. `run-local.sh` checks this "live path": a database built with parts 1–4 (twice), programme tables emptied and rights notes changed, then `seed_programme.sql` and the live patch (twice) ends in the seeded state with no audit rows, and passes `programme_test.sql` + `isolation_test.sql`.
@@ -295,3 +295,78 @@ The TypeScript side (`SupabaseDataSource` programme methods) was also run end to
 - Mock-mode audit rows for collector inquiries use the sender's name as the actor name; Supabase records an anonymous visitor as actor `anonymous` / role `public`.
 - Event times come back in Kofi's offset (`2026-10-29T18:30:00-04:00`) whatever offset they were saved with; the instant is the same.
 
+
+## 10. Partners, auctions, payouts, reports (0009)
+
+A call can be an auction run with a partner institution. Selected works become **lots**; recording a hammer price freezes the split (`Sale`) and creates the artist's **payout**; Kofi marks payouts paid; reports are derived from applications, exhibitions, lots and payouts. Shapes mirror the "Sales" section of `src/domain/types.ts`; rules are `src/domain/sales.ts`, `src/domain/reports.ts` and the mock data source's `saveOpenCall` / `listApplications` / `setApplicationStatus` / `saveLot` / `setLotStatus` / `recordSale` / `deleteLot` / `setPayoutStatus` / `kofiReport`, re-implemented server-side with the **same messages, form fields and cents arithmetic**.
+
+### Objects (all in `kofi`)
+
+| Kind | Names |
+|---|---|
+| Columns on `open_calls` | `kind kofi.call_kind` (default `exhibition`), `organizer_institution_id` → `institutions` (on delete set null), `terms jsonb` (a `CallTerms`, camelCase) with CHECKs `open_calls_terms_shape` (`call_terms_ok()`) and `open_calls_auction_terms` (a published auction has terms) |
+| Tables | `lots` (sale jsonb = the frozen `Sale`; partial unique indexes: one live lot per work per call, one lot number per call — withdrawn lots free both), `payouts` |
+| Enums | `call_kind`, `lot_status`, `payout_status` |
+| Views (`security_invoker`) | `lots_visible` (sale without `buyerRef` for the artist; payout only for Kofi and the artist), `payouts_visible`; `open_calls_visible` gains `kind`, `organizer_institution_id`, `terms` (appended) |
+| RPCs | `save_lot(p_lot jsonb)`, `set_lot_status(p_id, p_status text)`, `record_sale(p_id, p_hammer numeric, p_sold_on text, p_buyer_ref text)`, `delete_lot(p_id)`, `set_payout_status(p_id, p_status text, p_method, p_reference, p_note, p_paid_on text)`, `kofi_report(p_from text, p_to text)`, `call_application_works(p_call)`; `set_application_status` now also for partners |
+| Helpers | `my_verified_institution_id`, `is_call_organizer`, `require_organiser`, `organiser_sees_artwork`, `lot_extras`, `payout_labels`, `call_lot_state` (definer); `call_terms_problem` / `call_terms_ok` (= `validateTerms`), `kofi_day`, `kofi_today`, `kofi_noon`, `js_iso`, `iso_date_ok`, `json_int`, `try_uuid` (pure); internal guards `require_call_manager`, `require_lot`, `lot_rules` (not API-callable) |
+| Trigger | `open_calls_sales_guard` (before insert/update on `open_calls`) |
+| Replaced from 0008 | `application_labels` (reviewers' note to Kofi **and the call's organiser**), `programme_exhibition_link` (partner sees its draft's link), `programme_audit` (organiser link is a reference column), `set_application_status`; from 0004 `storage_image_readable` (+ the reviewer rule) |
+| Outside `kofi` | storage policy `kofi programme partner insert` (verified curators may add images under `kofi-programme/open-calls/`; no update / delete / list); `lots`, `payouts` added to `supabase_realtime` |
+
+Signatures differ from a naïve `date` / `bigint` design on purpose: the text / numeric parameters let the server answer malformed input with the domain's own messages (`Enter the date of the sale.`, `Enter the hammer price.`, `Pick a start and end date.`, `Unknown status.`) instead of a cast error.
+
+### Access model
+
+| | anon | artist | partner (verified curator of the organiser) | pending curator / other curator | Kofi admin |
+|---|---|---|---|---|---|
+| Open calls | published | published | + its own drafts; insert a draft for its institution (forced `published = false`, `sample = false`, organiser = its own); edit only while unpublished; never publish / re-assign (`open_calls_sales_guard`) | published | everything |
+| Applications | — | own, never `staff_note` | to its calls, with `staff_note` (the reviewers' note); decide via `set_application_status` | — | all |
+| Attached works | — | — | `call_application_works()`: any attached work except Only me (applying is consent), price per its own visibility, signed photos (`storage_image_readable`); discovery unchanged | — | `artworks_visible` |
+| Lots | — | own, read-only; sale **without** `buyerRef`; own payout | its calls' lots incl. `buyerRef`, **no payout**; RPC writes | — | all |
+| Payouts | — | own | — | — | all; `set_payout_status` |
+| Report | — | — | — | — | `kofi_report` |
+
+Grants: `lots` — `SELECT` on every column **except `sale`** (read through `lots_visible`), no writes; `payouts` — `SELECT` (RLS), no writes; new RPCs revoked from `public`/`anon`, granted to `authenticated`; `open_calls` gains `SELECT (kind, organizer_institution_id, terms)` for anon/authenticated and column `INSERT`/`UPDATE` on them for authenticated. Lots have **no foreign key to `artworks`** (like the programme's `artwork_ids`): an artist may still delete a work, as in mock mode, and the lot / sale stays on the record ("A work that has been removed").
+
+### Rules the server enforces
+
+- **Terms**: `call_terms_problem()` = `validateTerms()` (first problem, same field); an auction call always carries terms (any save, as `cleanOpenCall`); terms are **locked once a lot has sold** and a call with lots stays an auction — for Kofi too.
+- **save_lot**: requireOrganiser → lot exists → requireCallManager → same call / not sold → application / work exist → `validateLot()` (via `lot_rules`); new lots are `planned`; audited `lot.save {callId, lotNumber, created}`. Races on the partial unique indexes map to the same messages.
+- **set_lot_status**: `canMoveLot()`; reinstating a withdrawn lot re-runs `validateLot()`; `sold → unsold` voids the sale (sale cleared, the live payout → `void`, kept) unless the payout is paid (`Payout already paid.`); audited `lot.save {status, from, lotNumber}` or `lot.sale {voided, lotNumber}` + `payout.status {status: void}`.
+- **record_sale**: terms required → `validateSale()` (same order) → `isIsoDate`; `splitSale()` in cents: `round(hammer × pct / 100)` — Postgres `round(numeric)` rounds half away from zero, which equals `Math.round` for these positive amounts — artist first, then partner, remainder to Kofi, premium on top; `soldAt` = 12:00 Kofi time written like `toISOString()`; payout `due` for the artist amount; audited `lot.sale {hammer, currency, lotNumber}` — never the buyer reference.
+- **delete_lot**: only a lot that has never been sold (no payout on record).
+- **set_payout_status**: Kofi only; `canMovePayout()`; `void → due` only while the lot is sold with no other live payout; paid needs a method (≤ 80), reference ≤ 120, note ≤ 2000, a valid day not in the future (default today), stored as 12:00 Kofi time; leaving `paid` clears method / reference / day; audited `payout.status {status, lotId, method?}`.
+- **set_application_status**: Kofi or the call's partner; a selection with live lots cannot be moved.
+- **kofi_report**: Kofi only; `validateRange()`; returns `{participation, placements, payments}` — rows shaped exactly like `ParticipationRow` / `PlacementRow` / `PaymentRow`, over **all** rows, Kofi days compared as `YYYY-MM-DD` strings like the TS. The **client** puts them in `buildReport()`'s order and computes the totals with `buildReport()`'s rules (`assembleReport()` in `SupabaseDataSource.ts`); audited `report.export {from, to}`.
+
+### Applying 0009 to the shared production project
+
+0009 needs 0000–0008 (already live). Never run `seed_content.sql` there. Run, in order, each file on its own:
+
+| # | File | Bytes | What |
+|---|---|---|---|
+| 1 | `supabase/apply/0009_part1.sql` | 12 922 | enums, pure helpers, `open_calls` columns (+ their SELECT grant), `lots`, `payouts` (RLS on, no access yet), audit vocabulary |
+| 2 | `supabase/apply/0009_part2.sql` | 15 792 | partner helpers, guard trigger, replaced read helpers, views |
+| 3 | `supabase/apply/0009_part3.sql` | 17 293 | lot RPCs, each with its EXECUTE grant |
+| 4 | `supabase/apply/0009_part4.sql` | 15 485 | payout / application / report RPCs, each with its EXECUTE grant |
+| 5 | `supabase/apply/0009_part5.sql` | 5 822 | table / view grants, RLS policies, the partner storage policy, realtime, records `0009_sales`, reloads PostgREST |
+| 6 | `supabase/seed_programme.sql` | 25 307 | insert-only; adds the CMA benefit auction + its 3 applications (existing rows untouched) |
+| 7 | `supabase/seed_sales.sql` | 5 596 | insert-only lots + payouts |
+| 8 | `supabase/apply/0009_live_patch.sql` | 2 097 | by fixed id: the sample calls' `kind` (Night Weather → `award`), organiser / terms only where empty |
+
+Generated: parts by `node supabase/scripts/split-0009.mjs`, seeds and patches by `node supabase/scripts/generate-seed.mjs`. Every file is one transaction and idempotent. `run-local.sh` checks this live path: 0008 parts ×2 + 0009 parts ×2, the pre-0009 state recreated (no lots / payouts / auction call, every call kind `exhibition`, old rights notes), then seed_programme / 0008 live patch / seed_sales / 0009 live patch ×2 → seeded state, no audit rows, and `programme_test.sql` + `sales_test.sql` + `isolation_test.sql` pass on it.
+
+**Do not re-run 0008 (or its parts) after 0009.** 0008 redefines the audit vocabulary, the open-call policies and grants, `application_labels` and `set_application_status` without the 0009 additions; its view step fails on `open_calls_visible` (columns cannot be dropped) but its part 1 / part 4 would succeed and silently undo 0009. If 0008 is ever re-run, run 0009 again right after.
+
+### Verification
+
+`supabase/tests/sales_test.sql` (53 assertions, run on both databases) covers: the seeded auction, terms and day helpers; a partner's draft (forced draft / organiser), edits, refused publish / re-assign / published edits / Kofi-run calls / deletes, terms validation; Kofi publishing, the terms lock and kind lock, the backing CHECKs; partner application review (only its calls, reviewers' note, the live-lot rule), reviewer works and photos (incl. a pending artist's attached work, never in discovery); Owen (pending) and artists refused everywhere; every `save_lot` / `record_sale` rule, the 820 000 → 574 000 / 164 000 / 82 000 + 82 000 split and a .5-cent rounding case, void / re-sale / delete / reinstate; the full lot status matrix; payout rules and the paid → void refusal; who sees which lot / payout (artist without `buyerRef`, organiser without payouts); the October 2026 report rows; validateRange; audit rows; storage; demo reset; isolation (new objects only in `kofi`, `public` fingerprint unchanged, least-privilege grants).
+
+`SupabaseDataSource` was also run end to end against **PostgREST 12.2.3** on the same local database (113 checks): Lena creates a draft auction → Kofi publishes → Mara applies with a Kofi-only work → Lena sees it, selects, makes a lot, records the sale → Mara's `listMyLots` has no buyer reference anywhere → Kofi marks the payout paid → `kofiReport` equals `buildReport()` run on the same raw rows (rows and totals). Not verified: Supabase Storage itself (stand-in applying the `storage.objects` policies), GoTrue, Realtime delivery.
+
+### Known differences from mock mode
+
+- Two live lots cannot share a work or a lot number even transiently (partial unique indexes); mock mode only checks this in `validateLot`.
+- Report placements with the same day and artist may come in a different (stable, deterministic) order than mock mode; every other row order and all totals are identical.
+- Lot, payout, sale and report ids are UUIDs.

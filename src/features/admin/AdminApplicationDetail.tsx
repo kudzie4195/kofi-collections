@@ -9,6 +9,7 @@ import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, deadlineLabel, format
 import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Sheet, Skeleton, StatusDot, TopBar, WallLabel } from '@/ui';
 import './admin.css';
 import './programme.css';
+import './sales.css';
 
 type Move = Extract<ApplicationStatus, 'shortlisted' | 'accepted' | 'declined'>;
 
@@ -110,6 +111,11 @@ export function AdminApplicationDetail() {
               ))}
             </div>
           )}
+          {call?.kind === 'auction' && a.status === 'accepted' && (
+            <LinkButton to={`/admin/lots?call=${a.callId}`} tone="secondary" size="sm" icon={<Icon.Plus />} className="pga-lot">
+              Make a lot
+            </LinkButton>
+          )}
           <Link to={`/admin/applications?call=${a.callId}`} className="small pga-back">
             All applications to this call
           </Link>
@@ -152,7 +158,7 @@ export function AdminApplicationDetail() {
                 <Icon.Lock aria-hidden="true" /> Private staff note
               </p>
               <p className="pga-note__text">{a.staffNote ?? <span className="muted">No staff note.</span>}</p>
-              <p className="tiny muted">Kofi only. Never shown to the artist.</p>
+              <p className="tiny muted">{call?.organizerInstitutionId ? 'Kofi and the call’s organiser. Never shown to the artist.' : 'Kofi only. Never shown to the artist.'}</p>
             </div>
           </section>
         </div>

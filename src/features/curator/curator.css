@@ -482,3 +482,427 @@
   border-radius: 0;
   padding: var(--space-5) 0 0;
 }
+
+/* =====================================================================
+   Partner desk ("Calls you run") — the admin desk's quieter sibling.
+   Reuses the pg- and pga- classes from admin/programme.css; local pc- classes below.
+   ===================================================================== */
+.h1.pc-title {
+  font-size: clamp(2.25rem, 7vw, 3.25rem);
+  line-height: 1.02;
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.pc-lede {
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.pc-org {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-block: var(--space-4);
+  border-block: 1px solid var(--line);
+}
+.pc-org svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 2px;
+  color: var(--gold);
+  stroke-width: 1.5;
+}
+.pc-org__label {
+  display: block;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.pc-org__name {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+}
+.pc-pub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--green);
+  padding: 3px 9px;
+  border: 1px solid rgba(127, 163, 68, 0.55);
+  border-radius: var(--radius-pill);
+}
+
+/* call list */
+.pc-calls {
+  border-bottom: 1px solid var(--line);
+}
+.pc-calls > li + li {
+  border-top: 1px solid var(--line);
+}
+.list-row.pc-call {
+  padding-block: var(--space-5);
+  gap: var(--space-4);
+  align-items: center;
+}
+.pc-call__kind {
+  display: block;
+  margin-top: var(--space-3);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.pc-call__title {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.5rem, 4.6vw, 2rem);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+.pc-call__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* editor bits */
+.pc-readonly {
+  display: grid;
+  gap: 6px;
+}
+.pc-readonly__value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 0 0 2px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+}
+.pc-readonly__value svg {
+  width: 18px;
+  height: 18px;
+  color: var(--gold);
+  stroke-width: 1.5;
+  flex: none;
+}
+fieldset.pc-terms {
+  margin: 0;
+  min-width: 0;
+}
+.pc-terms > legend {
+  padding: 0;
+  float: left;
+  width: 100%;
+}
+.pc-terms > legend + * {
+  clear: both;
+}
+.pc-pcts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+@media (min-width: 640px) {
+  .pc-pcts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.pc-example {
+  display: grid;
+  gap: 6px;
+  padding: var(--space-4) 0 var(--space-4) var(--space-4);
+  border-left: 1px solid var(--gold);
+}
+.pc-example__line {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.pc-splitlist {
+  display: grid;
+  margin: 0;
+}
+.pc-splitlist > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.pc-splitlist dt {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.pc-splitlist dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* review */
+.pc-asideactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pc-app__statement {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--fs-md);
+  line-height: 1.35;
+  color: var(--text-2);
+  white-space: normal;
+}
+.pc-decide .btn {
+  min-width: 112px;
+}
+
+/* lots: a semantic table laid out as ledger cards (the desk's main column is too
+   narrow for eight columns). Phone: one column of label/value rows; desk: two. */
+.pc-lots-wrap {
+  min-width: 0;
+}
+.pc-lots {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.pc-lots,
+.pc-lots tbody,
+.pc-lots tr,
+.pc-lots th,
+.pc-lots td {
+  display: block;
+}
+.pc-lots thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.pc-lots tr {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-4);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--line);
+}
+.pc-lots tbody tr:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.pc-lots th,
+.pc-lots td {
+  text-align: left;
+  padding: 0;
+}
+.pc-lots .pc-lotno {
+  grid-column: 1;
+  grid-row: 1 / span 20;
+  min-width: 40px;
+}
+.pc-lotno__n {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-3xl);
+  line-height: 0.9;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.pc-lots tr[data-status='withdrawn'] .pc-lotno__n,
+.pc-lots tr[data-status='unsold'] .pc-lotno__n {
+  color: var(--text-3);
+}
+.pc-lots td.pc-workcell {
+  grid-column: 2 / -1;
+  margin-bottom: var(--space-3);
+}
+.pc-work {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  min-width: 0;
+}
+.pc-work .thumb {
+  flex: none;
+  border-bottom: 2px solid var(--m, var(--cream));
+  border-radius: 0;
+}
+.pc-work__text {
+  min-width: 0;
+}
+.pc-work__title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  line-height: 1.1;
+  overflow-wrap: break-word;
+}
+.pc-work__artist {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-2);
+}
+.pc-lots td:not(.pc-workcell):not(.pc-actions) {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: 9px;
+  border-top: 1px solid var(--line-soft);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.pc-lots td:not(.pc-workcell):not(.pc-actions)::before {
+  content: attr(data-label);
+  flex: none;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: left;
+  padding-top: 3px;
+}
+.pc-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.pc-vals {
+  display: grid;
+  align-content: start;
+  justify-items: end;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pc-lots td.pc-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.pc-movegroup {
+  display: grid;
+  gap: var(--space-2);
+}
+/* Two fact columns only once the main column is wide enough (the aside takes 380px from 900). */
+@media (min-width: 1100px) {
+  .pc-lots tr {
+    grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: var(--space-5);
+    align-items: start;
+  }
+  .pc-lots td:not(.pc-workcell):not(.pc-actions) {
+    border-top: 1px solid var(--line-soft);
+  }
+}
+@media (max-width: 899px) {
+  .pc-lots td.pc-actions .btn,
+  .pc-decide .btn,
+  .pc-asideactions .btn,
+  .pc-movegroup .btn {
+    min-height: 44px;
+  }
+}
+
+/* review aside: the terms, folded */
+.pc-termsbox {
+  border-block: 1px solid var(--line);
+}
+.pc-termsbox > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--space-3);
+  min-height: 44px;
+  padding-block: var(--space-3);
+  cursor: pointer;
+  list-style: none;
+}
+.pc-termsbox > summary::-webkit-details-marker {
+  display: none;
+}
+.pc-termsbox__label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.pc-termsbox__gist {
+  grid-column: 1;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.pc-termsbox__chev {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 18px;
+  height: 18px;
+  transform: rotate(-90deg);
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+.pc-termsbox[open] .pc-termsbox__chev {
+  transform: rotate(90deg);
+}
+.pc-termsbox[open] > .kt-terms {
+  margin-bottom: var(--space-4);
+}
+/* applications: a fixed thumb column so names line up whatever the number of works */
+.pc-app .pg-thumbs {
+  flex: none;
+  width: 88px;
+}
+@media (max-width: 420px) {
+  .pc-app .pg-thumbs {
+    width: auto;
+  }
+}
+
+/* Partner call desk tabs: two labels, one row at every width. Three-class selector so the
+   result does not depend on which feature stylesheet loads last (admin.css sets max-content). */
+.cu-split__main .pg-tabs .segmented {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.cu-split__main .pg-tabs .segmented__btn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

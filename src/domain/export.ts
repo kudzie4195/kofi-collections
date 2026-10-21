@@ -64,7 +64,10 @@ export const ARTWORK_CSV_COLUMNS = [
 
 export function csvEscape(value: unknown): string {
   if (value === undefined || value === null) return '';
-  const s = String(value);
+  let s = String(value);
+  // A cell starting with = + - @ (or a tab/CR) is run as a formula by Excel and Sheets.
+  // Prefix a quote so a title like "=HYPERLINK(...)" stays text. Numbers are never strings here.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

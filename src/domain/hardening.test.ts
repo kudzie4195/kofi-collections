@@ -71,3 +71,16 @@ describe('hardening — catches from independent review', () => {
     localStorage.clear();
   });
 });
+
+describe('CSV formula injection', () => {
+  it('neutralises cells that a spreadsheet would run as a formula', async () => {
+    const { csvEscape } = await import('./export');
+    expect(csvEscape('=HYPERLINK("http://evil","x")')).toBe('"\'=HYPERLINK(""http://evil"",""x"")"');
+    expect(csvEscape('+1234')).toBe("'+1234");
+    expect(csvEscape('-5')).toBe("'-5");
+    expect(csvEscape('@cmd')).toBe("'@cmd");
+    expect(csvEscape('Doubling (Liberty Avenue, 7:40pm)')).toBe('"Doubling (Liberty Avenue, 7:40pm)"');
+    expect(csvEscape(1200)).toBe('1200');
+    expect(csvEscape('')).toBe('');
+  });
+});

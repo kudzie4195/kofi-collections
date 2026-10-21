@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ApplicationRow, CallPhase, OpenCall, Viewer } from '@/domain/types';
+import { CALL_KIND_LABEL } from '@/domain/types';
 import { callPhase } from '@/domain/programme';
 import { useQuery, useViewer } from '@/state/session';
 import { EmptyState, ErrorState, Icon, LinkButton, SiteFooter, Skeleton, StatusDot, TopBar } from '@/ui';
 import { CallCard, DeadlineBadge, PageHead, SampleTag, useToday } from './shared';
 import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, CALL_PHASE_LABEL, formatDay, paragraphs } from './format';
+import { TermsBlock } from './terms';
 
 export function CallsScreen() {
   const today = useToday();
@@ -23,7 +25,7 @@ export function CallsScreen() {
         <PageHead
           eyebrow="Opportunities"
           title="Open calls"
-          lede="Exhibitions, awards and partner commissions looking for artists. Kofi calls never charge an entry fee; apply with works from your Kofi portfolio."
+          lede="Exhibitions, auctions, awards and partner commissions looking for artists. Kofi calls never charge an entry fee; apply with works from your Kofi portfolio."
           aside={
             q.data && (
               <p className="eyebrow kp-head__count">
@@ -149,14 +151,16 @@ export function CallScreen() {
     <div className="screen kp-page kp-calldetail">
       <TopBar title="Open call" back="/calls" subordinate />
       <main className="container container--wide kp-main">
-        {!call.published && viewer.role === 'admin' && (
+        {!call.published && (viewer.role === 'admin' || viewer.role === 'curator') && (
           <p className="kp-draft">
-            <Icon.Lock /> Draft · only Kofi staff can see this call
+            <Icon.Lock /> {viewer.role === 'admin' ? 'Draft · only Kofi staff can see this call' : 'Draft · only Kofi and your institution can see this call'}
           </p>
         )}
         <header className="kp-callhead">
           <p className="kp-eyebrow-row">
-            <span className="eyebrow eyebrow--gold">{call.partner ?? 'Kofi Collections'}</span>
+            <span className="eyebrow eyebrow--gold">
+              {CALL_KIND_LABEL[call.kind ?? 'exhibition']} · {call.partner ?? 'Kofi Collections'}
+            </span>
             <span className="eyebrow">· {CALL_PHASE_LABEL[phase]}</span>
             {call.sample && <SampleTag />}
           </p>
@@ -175,6 +179,7 @@ export function CallScreen() {
                 </div>
               ))}
             </dl>
+            {call.terms && <TermsBlock terms={call.terms} partnerName={call.partner} />}
             <div className="kp-prose">
               {paragraphs(call.body).map((p, i) =>
                 p.kind === 'quote' ? (

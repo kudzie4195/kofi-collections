@@ -55,7 +55,7 @@ describe('opportunities', () => {
   it('lists open and upcoming calls with medium hints, partner forms and applied status', async () => {
     const ds = new MockDataSource({ persist: false });
     await ds.saveOpenCall(ADMIN, {
-      sample: true, published: true, title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
+      sample: true, published: true, kind: 'exhibition', title: 'Partner Form Call', partner: 'A Partner', summary: 'A call run on a partner form.',
       body: 'Read the call on the partner site.', eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1,
       fee: 'See the call', externalUrl: 'https://example.org/apply',
     });
@@ -158,7 +158,7 @@ describe('apply flow', () => {
     cleanup();
     const ds = new MockDataSource({ persist: false });
     const partner = await ds.saveOpenCall(ADMIN, {
-      sample: true, published: true, title: 'Partner Form Call', summary: 'A call run on a partner form.', body: 'Read it there.',
+      sample: true, published: true, kind: 'exhibition', title: 'Partner Form Call', summary: 'A call run on a partner form.', body: 'Read it there.',
       eligibility: 'See the call', mediums: [], opensOn: '2026-10-01', maxWorks: 1, fee: 'See the call', externalUrl: 'https://example.org/apply',
     });
     renderStudio(`/studio/apply/${partner.id}`, MARA, ds);
@@ -186,7 +186,8 @@ describe('my applications', () => {
   it('shows Mara’s decision note and offers no withdraw on a decided application', async () => {
     renderStudio('/studio/applications');
     expect(await screen.findByText('Selected for Night Weather, opening October 2.')).toBeInTheDocument();
-    expect(screen.getByText('Selected')).toBeInTheDocument();
+    // Mara was selected for both the Late Summer Open and the CMA benefit auction (v4 seed).
+    expect(screen.getAllByText('Selected')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /Withdraw/ })).not.toBeInTheDocument();
   });
 });
@@ -198,6 +199,6 @@ describe('studio home', () => {
     const open = within(block).getByRole('link', { name: /Open call/ });
     expect(open).toHaveAttribute('href', '/studio/opportunities');
     expect(open).toHaveTextContent(/^1/); // Night Weather (Art of Advocacy closed Sep 11, 2026)
-    expect(within(block).getByRole('link', { name: /My applications/ })).toHaveTextContent('1 selected');
+    expect(within(block).getByRole('link', { name: /My applications/ })).toHaveTextContent('2 selected'); // Late Summer Open + CMA benefit auction
   });
 });

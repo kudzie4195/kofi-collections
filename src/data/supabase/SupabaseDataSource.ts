@@ -18,7 +18,16 @@ import type {
   Inquiry,
   InquiryStatus,
   Institution,
+  KofiReport,
+  LotRow,
+  LotStatus,
   OpenCall,
+  ParticipationRow,
+  PaymentRow,
+  PayoutRow,
+  PayoutStatus,
+  PlacementRow,
+  ReportRange,
   ProgrammeBase,
   ProgrammeEvent,
   ProgrammeImage,
@@ -29,6 +38,8 @@ import type {
 } from '@/domain/types';
 import { BUYER_INQUIRY_STATUSES } from '@/domain/types';
 import { callPhase, kofiToday, sortExhibitions, validateBuyerInquiry, type BuyerInquiryInput } from '@/domain/programme';
+import { validateRange } from '@/domain/reports';
+import type { LotInput, SaleInput } from '@/domain/sales';
 import { cleanEvent, cleanExhibition, cleanOpenCall, cleanStory, validateArtwork } from '../mock/MockDataSource';
 import {
   ForbiddenError,
@@ -57,6 +68,7 @@ import {
   exhibitionToRow,
   IMAGE_BUCKET,
   isUuid,
+  lotInputToJson,
   normalizeImageSrc,
   normalizeProgrammeImageSrc,
   openCallToRow,
@@ -82,6 +94,8 @@ import {
   toInquiry,
   toInquiryRow,
   toInstitution,
+  toLotRow,
+  toPayoutRow,
   toShortlist,
   VAULT_BUCKET,
   type ApplicationViewRow,
@@ -99,6 +113,8 @@ import {
   type StoryRow,
   type InquiryViewRow,
   type InstitutionRow,
+  type LotViewRow,
+  type PayoutViewRow,
   type ShortlistRowDb,
 } from './mapping';
 
@@ -111,6 +127,7 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const REALTIME_TABLES = [
   'artists', 'artworks', 'artwork_images', 'curators', 'shortlists', 'shortlist_items', 'inquiries', 'documents',
   'exhibitions', 'open_calls', 'events', 'stories', 'applications', 'buyer_inquiries',
+  'lots', 'payouts',
 ] as const;
 const GONE = 'That item no longer exists.';
 
@@ -131,6 +148,8 @@ interface Me {
   artistId?: string;
   curatorId?: string;
   curatorVerified: boolean;
+  /** A verified curator's institution (kofi.my_verified_institution_id()) — what makes them a call's partner. */
+  institutionId?: string;
 }
 const PUBLIC_ME: Me = { role: 'public', displayName: 'Visitor', curatorVerified: false };
 
@@ -287,6 +306,10 @@ export class SupabaseDataSource implements DataSource {
       const me: Me = { userId: r.user_id, role: r.role, displayName: r.display_name, curatorVerified: !!r.curator_verified };
       if (r.artist_id) me.artistId = r.artist_id;
       if (r.curator_id) me.curatorId = r.curator_id;
+      if (me.role === 'curator' && me.curatorVerified) {
+        const inst = await this.rpc<string | null>(this.client, 'my_verified_institution_id');
+        if (inst) me.institutionId = inst;
+      }
       return me;
     })();
     this.meCache.set(userId, p);
@@ -342,6 +365,23 @@ export class SupabaseDataSource implements DataSource {
 
   private requireAdmin(me: Me): void {
     if (me.role !== 'admin') throw new ForbiddenError('Kofi staff only.');
+  }
+
+  /** requireOrganiser(): a verified curator's institution (the server re-checks in every RPC / policy). */
+  private requireOrganiser(me: Me): string {
+    if (me.role === 'curator' && me.institutionId) return me.institutionId;
+    throw new ForbiddenError(me.role === 'curator' ? 'Your institution has not been verified yet.' : 'You do not have access to this.');
+  }
+
+  /** requireCallManager() for a partner: the call must be one its institution runs. */
+  private async requirePartnerCall(db: SupabaseClient, me: Me, callId: string): Promise<void> {
+    const inst = this.requireOrganiser(me);
+    const call = isUuid(callId)
+      ? await this.run<{ organizer_institution_id: string | null } | null>(
+          kofi(db).from(PROGRAMME.open_call.view).select('organizer_institution_id').eq('id', callId).maybeSingle(),
+        )
+      : null;
+    if (!call || call.organizer_institution_id !== inst) throw new ForbiddenError('You can only manage calls your institution runs.');
   }
 
   private async access(db: SupabaseClient, kind: 'artwork' | 'document' | 'shortlist', id: string): Promise<'owner' | 'other' | 'not_found'> {
@@ -1011,7 +1051,8 @@ export class SupabaseDataSource implements DataSource {
     return { image: { ...image, src: PROGRAMME_PREFIX + path }, uploaded: path };
   }
 
-  private refIdsOrThrow(clean: { artworkIds?: string[]; exhibitionId?: string; artistId?: string }): void {
+  private refIdsOrThrow(clean: { artworkIds?: string[]; exhibitionId?: string; artistId?: string; organizerInstitutionId?: string }): void {
+    if (clean.organizerInstitutionId && !isUuid(clean.organizerInstitutionId)) throw new ValidationError('That institution no longer exists.', 'organizerInstitutionId');
     // Ids that are not even UUIDs cannot exist here (same messages as the mock's checkProgrammeRefs()).
     if ((clean.artworkIds ?? []).some((id) => !isUuid(id))) throw new ValidationError('One of the attached works no longer exists.', 'artworkIds');
     if (clean.exhibitionId && !isUuid(clean.exhibitionId)) throw new ValidationError('That exhibition no longer exists.', 'exhibitionId');
@@ -1035,6 +1076,18 @@ export class SupabaseDataSource implements DataSource {
     const prepared = { ...input, image: this.programmeInputImage(input.image) } as ProgrammeInput<T>;
     const cleaned = clean(prepared);
     this.refIdsOrThrow(cleaned as { artworkIds?: string[]; exhibitionId?: string; artistId?: string });
+    return { db, id: await this.writeProgrammeRow<T>(db, kind, input.id, cleaned, toRow) };
+  }
+
+  /** Insert / update one validated programme row (RLS decides who may), uploading its image first. */
+  private async writeProgrammeRow<T extends ProgrammeBase & { image?: ProgrammeImage }>(
+    db: SupabaseClient,
+    kind: ProgrammeKind,
+    inputId: string | undefined,
+    cleaned: Omit<T, 'id' | 'createdAt' | 'updatedAt'>,
+    toRow: (clean: Omit<T, 'id' | 'createdAt' | 'updatedAt'>) => Record<string, unknown>,
+  ): Promise<string> {
+    const input = { id: inputId };
     const { table } = PROGRAMME[kind];
 
     let previousImage: string | undefined;
@@ -1066,7 +1119,7 @@ export class SupabaseDataSource implements DataSource {
     const oldPath = previousImage ? programmePathOf(previousImage) : undefined;
     if (oldPath && previousImage !== image?.src) await this.removeObjects(db, PROGRAMME_BUCKET, [oldPath]);
     this.emit();
-    return { db, id };
+    return id;
   }
 
   private async deleteProgrammeRow(viewer: Viewer, kind: ProgrammeKind, id: string): Promise<void> {
@@ -1131,11 +1184,54 @@ export class SupabaseDataSource implements DataSource {
     return row ? toOpenCall(row, this.programmeImageResolver(db)) : undefined;
   }
 
+  /**
+   * Admin: any call (kind / terms validated by cleanOpenCall; the server freezes terms once a
+   * lot has sold and keeps a call with lots an auction). Partner: a draft for its own
+   * institution, edited only while Kofi has not published it; published / sample / organiser
+   * are never theirs to set (kofi.open_calls_sales_guard re-enforces all of it).
+   */
   async saveOpenCall(viewer: Viewer, input: ProgrammeInput<OpenCall>): Promise<OpenCall> {
-    const { db, id } = await this.saveProgrammeRow<OpenCall>(viewer, 'open_call', input, cleanOpenCall, openCallToRow);
+    const { db, me } = await this.ctx(viewer);
+    let existing: OpenCall | undefined;
+    if (input.id) {
+      const row = await this.fetchProgramme<OpenCallRow>(db, 'open_call', input.id);
+      if (!row) throw new NotFoundError(GONE);
+      existing = toOpenCall(row);
+    }
+    const prepared = { ...input, image: this.programmeInputImage(input.image) } as ProgrammeInput<OpenCall>;
+    let cleaned: Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'>;
+    if (me.role === 'admin') {
+      cleaned = cleanOpenCall(prepared, existing?.kind);
+      if (cleaned.organizerInstitutionId && !isUuid(cleaned.organizerInstitutionId)) {
+        throw new ValidationError('That institution no longer exists.', 'organizerInstitutionId');
+      }
+    } else {
+      const inst = me.role === 'curator' ? me.institutionId : undefined;
+      if (!inst) throw new ForbiddenError(me.role === 'curator' ? 'Your institution has not been verified yet.' : 'Kofi staff only.');
+      if (existing) {
+        if (existing.organizerInstitutionId !== inst) throw new ForbiddenError('You can only edit calls your institution runs.');
+        if (existing.published) throw new ForbiddenError('Kofi has published this call. Ask Kofi to make changes.');
+      }
+      cleaned = cleanOpenCall({ ...prepared, organizerInstitutionId: inst }, existing?.kind);
+      cleaned.published = existing?.published ?? false;
+      cleaned.sample = existing?.sample ?? false;
+    }
+    this.refIdsOrThrow(cleaned);
+    const id = await this.writeProgrammeRow<OpenCall>(db, 'open_call', input.id, cleaned, openCallToRow);
     const row = await this.fetchProgramme<OpenCallRow>(db, 'open_call', id);
     if (!row) throw new NotFoundError(GONE);
     return toOpenCall(row, this.programmeImageResolver(db));
+  }
+
+  /** Calls this viewer runs: a partner's own (drafts included); admin: every call with an organiser. */
+  async listMyCalls(viewer: Viewer): Promise<OpenCall[]> {
+    const { db, me } = await this.ctx(viewer);
+    let q = kofi(db).from(PROGRAMME.open_call.view).select('*');
+    if (me.role === 'admin') q = q.not('organizer_institution_id', 'is', null);
+    else q = q.eq('organizer_institution_id', this.requireOrganiser(me));
+    const rows = await this.run<OpenCallRow[]>(q);
+    const resolve = this.programmeImageResolver(db);
+    return rows.map((r) => toOpenCall(r, resolve)).sort((a, b) => b.opensOn.localeCompare(a.opensOn) || a.title.localeCompare(b.title));
   }
 
   /** A call with applications cannot be deleted: the server answers "This call has applications. Unpublish it instead." */
@@ -1199,22 +1295,39 @@ export class SupabaseDataSource implements DataSource {
     return me.artistId;
   }
 
-  /** Attach the works each application lists, as this viewer may see them (artist: own; admin: all). */
-  private async applicationRows(db: SupabaseClient, rows: ApplicationViewRow[]): Promise<ApplicationRow[]> {
-    const ids = [...new Set(rows.flatMap((r) => r.artwork_ids ?? []))].filter(isUuid);
-    const works = ids.length
-      ? await this.projectArtworks(db, await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').in('id', ids)))
-      : [];
-    const byId = new Map(works.map((w) => [w.id, w]));
+  /**
+   * The works attached to applications to a partner's calls, as a reviewer sees them
+   * (kofi.call_application_works: applying is consent — any work but an Only me one;
+   * the price still follows its own visibility).
+   */
+  private async reviewerWorks(db: SupabaseClient, callId?: string): Promise<ArtworkView[]> {
+    const rows = await this.rpc<ArtworkViewRow[]>(db, 'call_application_works', { p_call: callId ?? null });
+    return this.projectArtworks(db, rows ?? []);
+  }
+
+  /** Works by id as this viewer may see them: a partner as reviewer, everyone else through artworks_visible. */
+  private async worksFor(db: SupabaseClient, me: Me | undefined, ids: string[], callId?: string): Promise<Map<string, ArtworkView>> {
+    const wanted = [...new Set(ids)].filter(isUuid);
+    if (!wanted.length) return new Map();
+    const works =
+      me?.role === 'curator'
+        ? (await this.reviewerWorks(db, callId)).filter((w) => wanted.includes(w.id))
+        : await this.projectArtworks(db, await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').in('id', wanted)));
+    return new Map(works.map((w) => [w.id, w]));
+  }
+
+  /** Attach the works each application lists, as this viewer may see them (artist: own; reviewer: attached; admin: all). */
+  private async applicationRows(db: SupabaseClient, rows: ApplicationViewRow[], me?: Me, callId?: string): Promise<ApplicationRow[]> {
+    const byId = await this.worksFor(db, me, rows.flatMap((r) => r.artwork_ids ?? []), callId);
     return rows
       .map((r) => toApplicationRow(r, (r.artwork_ids ?? []).map((id) => byId.get(id)).filter((w): w is ArtworkView => !!w)))
       .sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
 
-  private async fetchApplication(db: SupabaseClient, id: string): Promise<ApplicationRow> {
+  private async fetchApplication(db: SupabaseClient, id: string, me?: Me): Promise<ApplicationRow> {
     const row = await this.run<ApplicationViewRow | null>(kofi(db).from(SCHEMA_APPLICATIONS).select('*').eq('id', id).maybeSingle());
     if (!row) throw new NotFoundError('Application not found.');
-    return (await this.applicationRows(db, [row]))[0]!;
+    return (await this.applicationRows(db, [row], me, row.call_id))[0]!;
   }
 
   async listMyApplications(viewer: Viewer): Promise<ApplicationRow[]> {
@@ -1249,15 +1362,19 @@ export class SupabaseDataSource implements DataSource {
     return this.fetchApplication(db, id);
   }
 
+  /** Admin: all (optionally one call). Partner: applications to calls its institution runs only (RLS). */
   async listApplications(viewer: Viewer, callId?: string): Promise<ApplicationRow[]> {
     const { db, me } = await this.ctx(viewer);
-    this.requireAdmin(me);
+    if (me.role !== 'admin') {
+      this.requireOrganiser(me);
+      if (callId) await this.requirePartnerCall(db, me, callId);
+    }
     let q = kofi(db).from(SCHEMA_APPLICATIONS).select('*');
-    if (callId !== undefined) {
+    if (callId !== undefined && callId !== '') {
       if (!isUuid(callId)) return [];
       q = q.eq('call_id', callId);
     }
-    return this.applicationRows(db, await this.run<ApplicationViewRow[]>(q));
+    return this.applicationRows(db, await this.run<ApplicationViewRow[]>(q), me, callId || undefined);
   }
 
   /** Moves allowed by canMoveApplication(); notes: undefined keeps, '' clears. Checked again by kofi.set_application_status(). */
@@ -1268,7 +1385,7 @@ export class SupabaseDataSource implements DataSource {
     notes: { decisionNote?: string; staffNote?: string } = {},
   ): Promise<ApplicationRow> {
     const { db, me } = await this.ctx(viewer);
-    this.requireAdmin(me);
+    if (me.role !== 'admin') this.requireOrganiser(me);
     if (!isUuid(id)) throw new NotFoundError('Application not found.');
     await this.rpc(db, 'set_application_status', {
       p_id: id,
@@ -1277,7 +1394,7 @@ export class SupabaseDataSource implements DataSource {
       p_staff_note: notes.staffNote ?? null,
     });
     this.emit();
-    return this.fetchApplication(db, id);
+    return this.fetchApplication(db, id, me);
   }
 
   /* -------------------------------------------- collector ("buyer") inquiries -- */
@@ -1324,6 +1441,145 @@ export class SupabaseDataSource implements DataSource {
     return toBuyerInquiryRow(row);
   }
 
+  /* --------------------------------------------------- lots, sales, payouts -- */
+  /*
+   * Lots and payouts are written only through RPCs (kofi.save_lot, set_lot_status,
+   * record_sale, delete_lot, set_payout_status), which re-run domain/sales with the
+   * same messages and cents arithmetic. Reads come from kofi.lots_visible (the sale
+   * without buyerRef for the artist, no payout for the organiser) and payouts_visible.
+   */
+
+  private async lotRows(db: SupabaseClient, me: Me, rows: LotViewRow[]): Promise<LotRow[]> {
+    const works = await this.worksFor(db, me, rows.map((r) => r.artwork_id));
+    return sortLots(rows.map((r) => toLotRow(r, works.get(r.artwork_id))));
+  }
+
+  private async fetchLot(db: SupabaseClient, me: Me, id: string): Promise<LotRow> {
+    const row = await this.run<LotViewRow | null>(kofi(db).from('lots_visible').select('*').eq('id', id).maybeSingle());
+    if (!row) throw new NotFoundError('Lot not found.');
+    return (await this.lotRows(db, me, [row]))[0]!;
+  }
+
+  /** Admin: all lots. Partner: lots on calls its institution runs. Artists use listMyLots. */
+  async listLots(viewer: Viewer, callId?: string): Promise<LotRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'admin') {
+      this.requireOrganiser(me);
+      if (callId) await this.requirePartnerCall(db, me, callId);
+    }
+    let q = kofi(db).from('lots_visible').select('*');
+    if (callId) {
+      if (!isUuid(callId)) return [];
+      q = q.eq('call_id', callId);
+    }
+    return this.lotRows(db, me, await this.run<LotViewRow[]>(q));
+  }
+
+  async saveLot(viewer: Viewer, input: LotInput & { id?: string }): Promise<LotRow> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'admin') this.requireOrganiser(me);
+    const id = await this.rpc<string>(db, 'save_lot', { p_lot: lotInputToJson(input) });
+    this.emit();
+    return this.fetchLot(db, me, id);
+  }
+
+  /** canMoveLot(); sold → unsold voids the sale and its payout (a paid payout cannot be voided). */
+  async setLotStatus(viewer: Viewer, id: string, status: LotStatus): Promise<LotRow> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'admin') this.requireOrganiser(me);
+    if (!isUuid(id)) throw new NotFoundError('Lot not found.');
+    await this.rpc(db, 'set_lot_status', { p_id: id, p_status: status });
+    this.emit();
+    return this.fetchLot(db, me, id);
+  }
+
+  async recordSale(viewer: Viewer, id: string, input: SaleInput): Promise<LotRow> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'admin') this.requireOrganiser(me);
+    if (!isUuid(id)) throw new NotFoundError('Lot not found.');
+    await this.rpc(db, 'record_sale', {
+      p_id: id,
+      p_hammer: typeof input.hammerPrice === 'number' && Number.isFinite(input.hammerPrice) ? input.hammerPrice : null,
+      p_sold_on: typeof input.soldOn === 'string' ? input.soldOn : '',
+      p_buyer_ref: typeof input.buyerRef === 'string' ? input.buyerRef : null,
+    });
+    this.emit();
+    return this.fetchLot(db, me, id);
+  }
+
+  async deleteLot(viewer: Viewer, id: string): Promise<void> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'admin') this.requireOrganiser(me);
+    if (!isUuid(id)) throw new NotFoundError('Lot not found.');
+    await this.rpc(db, 'delete_lot', { p_id: id });
+    this.emit();
+  }
+
+  /** Artist: own lots, read-only; the sale never carries the buyer reference (the view strips it). */
+  async listMyLots(viewer: Viewer): Promise<LotRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'artist' || !me.artistId) throw new ForbiddenError('Sign in as an artist to do this.');
+    return this.lotRows(db, me, await this.run<LotViewRow[]>(kofi(db).from('lots_visible').select('*').eq('artist_id', me.artistId)));
+  }
+
+  /** Admin: all payouts. Artist: own. Everyone else (partners included): ForbiddenError. */
+  async listPayouts(viewer: Viewer): Promise<PayoutRow[]> {
+    const { db, me } = await this.ctx(viewer);
+    let q = kofi(db).from('payouts_visible').select('*');
+    if (me.role === 'artist' && me.artistId) q = q.eq('artist_id', me.artistId);
+    else if (me.role !== 'admin') throw new ForbiddenError('Kofi staff only.');
+    const rows = await this.run<PayoutViewRow[]>(q);
+    return rows.map(toPayoutRow).sort((x, y) => y.createdAt.localeCompare(x.createdAt) || x.id.localeCompare(y.id));
+  }
+
+  /** Admin only. canMovePayout; paid requires a method; the day is stored as 12:00 Kofi time. */
+  async setPayoutStatus(
+    viewer: Viewer,
+    id: string,
+    status: PayoutStatus,
+    details: { method?: string; reference?: string; note?: string; paidOn?: string } = {},
+  ): Promise<PayoutRow> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    if (!isUuid(id)) throw new NotFoundError('Payout not found.');
+    const text = (v: unknown) => (v === undefined || v === null ? null : String(v));
+    await this.rpc(db, 'set_payout_status', {
+      p_id: id,
+      p_status: status,
+      p_method: text(details.method),
+      p_reference: text(details.reference),
+      // undefined keeps the note; anything else (null / '') sets or clears it, as in mock mode.
+      p_note: details.note === undefined ? null : (details.note ?? ''),
+      // undefined / '' → today; a non-string is not a date.
+      p_paid_on: details.paidOn === undefined ? null : typeof details.paidOn === 'string' ? details.paidOn : ' ',
+    });
+    this.emit();
+    const row = await this.run<PayoutViewRow | null>(kofi(db).from('payouts_visible').select('*').eq('id', id).maybeSingle());
+    if (!row) throw new NotFoundError('Payout not found.');
+    return toPayoutRow(row);
+  }
+
+  /* ------------------------------------------------------------ Kofi reports -- */
+
+  /**
+   * kofi.kofi_report() computes the three row sets of domain/reports.buildReport server-side
+   * (same Kofi-day semantics) and audits report.export; here they are put in buildReport's
+   * order and the totals are added with buildReport's rules.
+   */
+  async kofiReport(viewer: Viewer, range: ReportRange): Promise<KofiReport> {
+    const { db, me } = await this.ctx(viewer);
+    this.requireAdmin(me);
+    const r: ReportRange = { from: typeof range?.from === 'string' ? range.from.trim() : '', to: typeof range?.to === 'string' ? range.to.trim() : '' };
+    const problem = validateRange(r, kofiToday());
+    if (problem) throw new ValidationError(problem, 'range');
+    const data = await this.rpc<{ participation: ParticipationRow[]; placements: PlacementRow[]; payments: PaymentRow[] }>(db, 'kofi_report', {
+      p_from: r.from,
+      p_to: r.to,
+    });
+    this.emit();
+    return assembleReport(r, data, new Date().toISOString());
+  }
+
   /* ---------------------------------------------------------- demo helpers -- */
 
   /**
@@ -1367,6 +1623,45 @@ function sortOpenCalls(list: OpenCall[], today: string): OpenCall[] {
     if (pa === 'upcoming') return a.opensOn.localeCompare(b.opensOn) || (a.deadline ?? far).localeCompare(b.deadline ?? far);
     return (b.deadline ?? '').localeCompare(a.deadline ?? '');
   });
+}
+
+/** Same order as mock mode: call title, call, lot number. */
+function sortLots(rows: LotRow[]): LotRow[] {
+  return rows.sort((a, b) => a.callTitle.localeCompare(b.callTitle) || a.callId.localeCompare(b.callId) || a.lotNumber - b.lotNumber);
+}
+
+/** The server's report rows in buildReport()'s order, plus buildReport()'s totals. */
+export function assembleReport(
+  range: ReportRange,
+  data: { participation: ParticipationRow[]; placements: PlacementRow[]; payments: PaymentRow[] },
+  generatedAt: string,
+): KofiReport {
+  const participation = [...(data.participation ?? [])].sort(
+    (x, y) => y.submittedOn.localeCompare(x.submittedOn) || x.artistWorkingName.localeCompare(y.artistWorkingName),
+  );
+  const placements = [...(data.placements ?? [])].sort((x, y) => y.on.localeCompare(x.on) || x.artistWorkingName.localeCompare(y.artistWorkingName));
+  const payments = [...(data.payments ?? [])].sort((x, y) => y.soldOn.localeCompare(x.soldOn) || x.artistWorkingName.localeCompare(y.artistWorkingName));
+  const sum = (rows: PaymentRow[], pick: (r: PaymentRow) => number) => {
+    const out: Record<string, number> = {};
+    for (const p of rows) out[p.currency] = (out[p.currency] ?? 0) + pick(p);
+    return out;
+  };
+  return {
+    range,
+    generatedAt,
+    participation,
+    placements,
+    payments,
+    totals: {
+      applications: participation.length,
+      selected: participation.filter((p) => p.status === 'accepted').length,
+      artistsParticipating: new Set(participation.map((p) => p.artistId)).size,
+      lotsSold: payments.length,
+      hammerTotal: sum(payments, (p) => p.hammerPrice),
+      artistPaid: sum(payments.filter((p) => p.status === 'paid'), (p) => p.artistAmount),
+      artistDue: sum(payments.filter((p) => p.status === 'due'), (p) => p.artistAmount),
+    },
+  };
 }
 
 /** Factory used by src/data/index.ts when VITE_DATA_MODE=supabase. */

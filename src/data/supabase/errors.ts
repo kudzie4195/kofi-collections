@@ -92,6 +92,18 @@ function programmeConstraintErrors(): Record<string, { message: string; field?: 
     buyer_inquiries_organization_length: { message: 'Keep the organisation name under 160 characters.', field: 'organization' },
     buyer_inquiries_message_length: { message: 'Add a line or two so Kofi knows how to help.', field: 'message' },
     buyer_inquiries_staff_note_length: { message: 'Keep notes under 2000 characters.', field: 'staffNote' },
+    // 0009_sales.sql — the guard trigger / RPCs raise the exact domain messages first;
+    // these only surface if those were bypassed.
+    open_calls_terms_shape: { message: 'The terms are not valid.', field: 'terms' },
+    open_calls_auction_terms: { message: 'An auction call must publish its compensation terms.', field: 'terms' },
+    lots_lot_number_range: { message: 'Lot number must be between 1 and 9999.', field: 'lotNumber' },
+    lots_reserve_nonnegative: { message: 'Enter a whole amount of money, or leave it empty.', field: 'reserve' },
+    lots_starting_bid_nonnegative: { message: 'Enter a whole amount of money, or leave it empty.', field: 'startingBid' },
+    lots_starting_bid_reserve: { message: 'The starting bid cannot be above the reserve.', field: 'startingBid' },
+    payouts_method_length: { message: 'Keep the payment method under 80 characters.', field: 'method' },
+    payouts_reference_length: { message: 'Keep the reference under 120 characters.', field: 'reference' },
+    payouts_note_length: { message: 'Keep the note under 2000 characters.', field: 'note' },
+    payouts_paid_details: { message: 'Say how the artist was paid.', field: 'method' },
   });
   return out;
 }
@@ -105,6 +117,7 @@ export const FOREIGN_KEY_ERRORS: Record<string, { message: string; field?: strin
   open_calls_exhibition_id_fkey: { message: 'That exhibition no longer exists.', field: 'exhibitionId' },
   events_exhibition_id_fkey: { message: 'That exhibition no longer exists.', field: 'exhibitionId' },
   stories_artist_id_fkey: { message: 'That artist no longer exists.', field: 'artistId' },
+  open_calls_organizer_institution_id_fkey: { message: 'That institution no longer exists.', field: 'organizerInstitutionId' },
 };
 
 export const SESSION_ENDED_MESSAGE = 'Your session has ended. Sign in again from Account.';
