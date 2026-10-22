@@ -32,7 +32,7 @@ function bundledArtPlugin() {
 
 export async function loadSeed() {
   const entry = `
-    export { buildSeed, DEMO_IDENTITIES, DEMO_USERS } from '@/data/mock/seed';
+    export { buildSeed, DEMO_IDENTITIES, DEMO_USERS, V4_SEED_LINKS } from '@/data/mock/seed';
     export { DEMO_UUIDS, DEMO_EMAILS, DEMO_PASSWORD } from '@/data/supabase/demo';
     export { CONSENT_VERSION } from '@/domain/types';
   `;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { ArtistStatus, ArtworkView } from '@/domain/types';
+import type { ArtistStatus, ArtworkView, ProfileImportRecord } from '@/domain/types';
 import { formatDimensions } from '@/domain/units';
 import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
@@ -23,6 +23,10 @@ import {
 import { ARTIST_STATUS_LABEL } from './AdminArtists';
 import { formatDate } from './format';
 import { NoteSheet, type NoteAction } from './NoteSheet';
+import { FIELD_WORD, checkedSentence, deskIntakeCopy as dc } from './intakeCopy';
+import { LinkList, linkParts } from './links';
+import { PlatformIcon } from './icons';
+import { platformName } from '@/domain/intake';
 import './admin.css';
 
 export function AdminArtistDetail() {
@@ -125,6 +129,23 @@ export function AdminArtistDetail() {
     }
   };
 
+  /* ---- links ---- */
+  const [rechecking, setRechecking] = useState(false);
+  const recheck = async () => {
+    setRechecking(true);
+    try {
+      const links = await data.checkMyLinks(viewer, id);
+      const verified = links.filter((l) => l.verification === 'verified').length;
+      const s = checkedSentence(links.length, verified);
+      toast.push(s.charAt(0).toUpperCase() + s.slice(1) + '.', 'success');
+      q.reload();
+    } catch (e) {
+      toast.push(errorMessage(e), 'error');
+    } finally {
+      setRechecking(false);
+    }
+  };
+
   const a = q.data?.artist;
 
   return (
@@ -200,6 +221,22 @@ export function AdminArtistDetail() {
               </div>
             </Panel>
 
+            <section className="ad-call" aria-labelledby="ad-call-title">
+              <h2 className="eyebrow ad-call__title" id="ad-call-title">
+                {dc.callTitle}
+              </h2>
+              {a.verificationToken ? (
+                <>
+                  <p className="ad-call__code">
+                    <code data-testid="artist-token">{a.verificationToken}</code>
+                  </p>
+                  <p className="small ad-call__body">{dc.callBody}</p>
+                </>
+              ) : (
+                <p className="small ad-call__body">{dc.callNoCode}</p>
+              )}
+            </section>
+
             <Panel className="private-panel" title="Private — Kofi staff only">
               <dl className="spec">
                 <dt>Legal name</dt>
@@ -224,6 +261,27 @@ export function AdminArtistDetail() {
             </div>
 
             <div className="ad-split__main stack--lg">
+            <Panel
+              title={dc.linksTitle}
+              className="ad-links"
+              action={
+                a.links.length > 0 ? (
+                  <Button tone="secondary" size="sm" loading={rechecking} onClick={() => void recheck()}>
+                    {dc.recheck}
+                  </Button>
+                ) : undefined
+              }
+            >
+              <div className="stack--sm">
+                {a.links.length > 0 && <p className="small muted">{dc.linksLede}</p>}
+                <LinkList links={a.links} explain label={`${a.workingName}: links`} />
+              </div>
+            </Panel>
+
+            <Panel title={dc.importsTitle} className="ad-imports">
+              <ImportList records={a.imports ?? []} />
+            </Panel>
+
             <Panel title="Kofi notes" className="ad-notes">
               <form
                 className="stack"
@@ -317,5 +375,53 @@ export function AdminArtistDetail() {
       </main>
       <NoteSheet action={action} onClose={() => setAction(undefined)} />
     </div>
+  );
+}
+
+function ImportList({ records }: { records: ProfileImportRecord[] }) {
+  if (!records.length) return <p className="small muted">{dc.importsNone}</p>;
+  const sorted = [...records].sort((x, y) => y.fetchedAt.localeCompare(x.fetchedAt));
+  return (
+    <ul className="ad-imports__list" aria-label={dc.importsTitle}>
+      {sorted.map((r, i) => {
+        const { platform, handle } = linkParts(r.source);
+        const used = [...new Set(r.appliedFields.map((f) => FIELD_WORD[f] ?? f))];
+        return (
+          <li key={`${r.source.url}-${r.fetchedAt}-${i}`} className="ad-import">
+            <span className="ad-import__icon" aria-hidden="true">
+              <PlatformIcon platform={platform} />
+            </span>
+            <div className="ad-import__main">
+              <p className="ad-import__head">
+                <span className="ad-import__platform">{platformName(platform)}</span>{' '}
+                <a href={r.source.url} target="_blank" rel="noopener noreferrer" className="ad-import__handle">
+                  {handle}
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+                <time className="ad-import__when" dateTime={r.fetchedAt}>
+                  {formatDate(r.fetchedAt)}
+                </time>
+              </p>
+              <p className="small ad-import__used">
+                {used.length ? (
+                  <>
+                    <span className="ad-import__label">{dc.importsUsed}</span> {used.join(', ')}
+                  </>
+                ) : (
+                  <span className="muted">{dc.importsNothingUsed}</span>
+                )}
+              </p>
+              {r.notes.length > 0 && (
+                <ul className="ad-import__notes">
+                  {r.notes.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

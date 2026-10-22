@@ -100,9 +100,36 @@ export interface Region {
   precision: RegionPrecision;
 }
 
+/** Where a link points. 'website' is any site the artist controls. */
+export type LinkPlatform = 'instagram' | 'website' | 'facebook' | 'linkedin' | 'tiktok' | 'youtube' | 'other';
+export const LINK_PLATFORMS: LinkPlatform[] = ['instagram', 'website', 'facebook', 'linkedin', 'tiktok', 'youtube', 'other'];
+export const LINK_PLATFORM_LABEL: Record<LinkPlatform, string> = {
+  instagram: 'Instagram',
+  website: 'Website',
+  facebook: 'Facebook',
+  linkedin: 'LinkedIn',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+  other: 'Link',
+};
+
+/**
+ * How a link was checked. 'verified' means Kofi's checker found the artist's
+ * verification code (or a link back to their Kofi profile) on the page, so the
+ * person who made this profile controls that page. 'claimed' is the artist's
+ * word only. 'failed' means the page was reached and the code was not there;
+ * 'unreachable' means it could not be read (private account, blocked, down).
+ */
+export type LinkVerification = 'claimed' | 'verified' | 'failed' | 'unreachable';
+
 export interface ArtistLink {
   label: string;
   url: string;
+  platform?: LinkPlatform;
+  /** "@handle" for social platforms, host for websites. Derived, never typed. */
+  handle?: string;
+  verification?: LinkVerification;
+  checkedAt?: string;
 }
 
 export interface ArtistExperience {
@@ -152,6 +179,13 @@ export interface Artist {
   consentVersion?: string;
   consentAcceptedAt?: string;
   avatarColor: string;
+  /**
+   * Six characters after "kofi-" (e.g. kofi-7f3a2k) the artist puts in a bio or
+   * on a page to prove a link is theirs. Owner/admin only. Set at sign-up.
+   */
+  verificationToken?: string;
+  /** Where profile fields came from, for Kofi's reviewer. Owner/admin only. */
+  imports?: ProfileImportRecord[];
   createdAt: string;
   updatedAt: string;
 }
@@ -326,7 +360,10 @@ export type AuditAction =
   | 'lot.sale'
   | 'lot.delete'
   | 'payout.status'
-  | 'report.export';
+  | 'report.export'
+  | 'artist.signup'
+  | 'artist.import'
+  | 'artist.links';
 
 /** Append-only. */
 export interface AuditEvent {
@@ -400,6 +437,9 @@ export interface ArtistView {
   canEdit: boolean;
   /** Full region (owner/admin only). */
   region?: Region;
+  /** Owner/admin only. */
+  verificationToken?: string;
+  imports?: ProfileImportRecord[];
   createdAt: string;
   updatedAt: string;
 }
@@ -781,3 +821,70 @@ export interface KofiReport {
     artistDue: Record<string, number>;
   };
 }
+
+/* =====================================================================
+   v5 — intake: sign-up, profile import from the artist's own links, and
+   link verification. Pure rules live in domain/intake.ts.
+   ===================================================================== */
+
+/** Fields an import can suggest. Everything is a suggestion the artist confirms. */
+export interface ProfileImportFields {
+  workingName?: string;
+  bio?: string;
+  /** A photo URL on the source (never copied without the artist's confirmation). */
+  photoUrl?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  /** Other links found on the page (rel=me, bio links). */
+  links?: ArtistLink[];
+  /** Platform-level signals, shown to the reviewer, never to the public. */
+  followers?: number;
+  postCount?: number;
+}
+
+export interface ProfileImport {
+  source: ArtistLink;
+  fields: ProfileImportFields;
+  /** 0–1 per field: how much to trust the suggestion (1 = structured data, 0.5 = og tags, 0.3 = guessed from the handle). */
+  confidence: Partial<Record<keyof ProfileImportFields, number>>;
+  fetchedAt: string;
+  /** Plain-language notes: "Instagram did not let us read the bio; we used the handle." */
+  notes: string[];
+}
+
+/** What the reviewer sees about where a profile came from. */
+export interface ProfileImportRecord {
+  source: ArtistLink;
+  fetchedAt: string;
+  /** Which fields the artist accepted from this import. */
+  appliedFields: (keyof ProfileImportFields)[];
+  notes: string[];
+}
+
+export interface SignUpInput {
+  displayName: string;
+  email: string;
+  password: string;
+  /** Must equal CONSENT_VERSION. */
+  consentVersion: string;
+}
+
+export interface SignUpResult {
+  viewer: Viewer;
+  /** Mock mode: the demo identity to add to the picker. */
+  identity?: DemoIdentity;
+  /** Supabase mode: sign-in is blocked until the email is confirmed. */
+  emailConfirmationRequired: boolean;
+}
+
+/** One step of the intake, persisted so an artist can leave and come back. */
+export type IntakeStep = 'account' | 'links' | 'about' | 'work' | 'verify';
+export const INTAKE_STEPS: IntakeStep[] = ['account', 'links', 'about', 'work', 'verify'];
+export const INTAKE_STEP_LABEL: Record<IntakeStep, string> = {
+  account: 'Your account',
+  links: 'Your links',
+  about: 'About you',
+  work: 'Your work',
+  verify: 'Check and send',
+};

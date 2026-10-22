@@ -18,8 +18,11 @@ import type {
   Story,
   Venue,
 } from '@/domain/types';
+import type { ArtistLink, LinkVerification, ProfileImportRecord } from '@/domain/types';
 import { CONSENT_VERSION } from '@/domain/types';
+import { normalizeLink } from '@/domain/intake';
 import { placeholderArt } from './placeholderArt';
+import { SAMPLE_LINKS, SEED_TOKENS } from './importFixtures';
 import bundledArt from 'virtual:bundled-art';
 
 /**
@@ -29,6 +32,65 @@ import bundledArt from 'virtual:bundled-art';
 
 const T0 = '2026-09-01T12:00:00.000Z';
 const d = (daysAgo: number) => new Date(Date.parse(T0) - daysAgo * 86_400_000).toISOString();
+
+/** A typed link as the intake stores it (platform and handle derived from the URL). */
+function link(label: string, url: string, verification: LinkVerification = 'claimed', checkedAt?: string): ArtistLink {
+  const n = normalizeLink(url);
+  if (!n) throw new Error(`Bad seed link ${url}`);
+  const out: ArtistLink = { label, url: n.url, platform: n.platform, handle: n.handle, verification };
+  if (checkedAt) out.checkedAt = checkedAt;
+  return out;
+}
+
+const strip = (l: ArtistLink): ArtistLink => ({ label: l.label, url: l.url, platform: l.platform, handle: l.handle, verification: 'claimed' });
+
+/**
+ * v5 intake fields of the seeded artists: links, verification code and where the
+ * profile came from. Also used by migrateState to upgrade a v4 device.
+ */
+export function seedIntake(): Record<string, { links: ArtistLink[]; verificationToken: string; imports: ProfileImportRecord[] }> {
+  const maraIg = link('Instagram', SAMPLE_LINKS.maraInstagram, 'verified', d(40));
+  const maraSite = link('Website', SAMPLE_LINKS.maraWebsite);
+  const priyaSite = link('Website', SAMPLE_LINKS.priyaWebsite);
+  const priyaLi = link('LinkedIn', SAMPLE_LINKS.priyaLinkedIn, 'unreachable', d(6));
+  return {
+    art_mara: {
+      links: [maraSite, maraIg],
+      verificationToken: SEED_TOKENS.art_mara,
+      imports: [
+        { source: strip(maraIg), fetchedAt: d(45), appliedFields: ['workingName'], notes: [] },
+        { source: strip(maraSite), fetchedAt: d(45), appliedFields: ['city', 'region', 'country'], notes: [] },
+      ],
+    },
+    art_tobias: { links: [link('Website', 'https://example.com/tobias')], verificationToken: SEED_TOKENS.art_tobias, imports: [] },
+    art_june: {
+      links: [link('Instagram', SAMPLE_LINKS.juneInstagram)],
+      verificationToken: SEED_TOKENS.art_june,
+      imports: [],
+    },
+    art_deshawn: { links: [link('Instagram', SAMPLE_LINKS.deshawnInstagram)], verificationToken: SEED_TOKENS.art_deshawn, imports: [] },
+    art_priya: {
+      links: [priyaSite, priyaLi],
+      verificationToken: SEED_TOKENS.art_priya,
+      imports: [
+        { source: strip(priyaSite), fetchedAt: d(7), appliedFields: ['workingName', 'bio'], notes: [] },
+        { source: strip(priyaLi), fetchedAt: d(7), appliedFields: [], notes: ['We could not read a name from the page, so this comes from the handle.'] },
+      ],
+    },
+  };
+}
+
+/** The links v4 seeded (before typed links). migrateState swaps exactly these for the v5 sample links. */
+export const V4_SEED_LINKS: Record<string, { label: string; url: string }[]> = {
+  art_mara: [
+    { label: 'Website', url: 'https://example.com/mara' },
+    { label: 'Instagram', url: 'https://instagram.com/example_mara' },
+  ],
+  art_tobias: [{ label: 'Website', url: 'https://example.com/tobias' }],
+  art_june: [{ label: 'Instagram', url: 'https://instagram.com/example_june' }],
+  art_deshawn: [],
+  art_priya: [{ label: 'Website', url: 'https://example.com/priya' }],
+};
 
 export interface MockState {
   artists: Artist[];
@@ -51,6 +113,23 @@ export interface MockState {
   /* ---- sales (added in v4; older persisted states are migrated on load) ---- */
   lots: Lot[];
   payouts: Payout[];
+  /* ---- intake (added in v5; older persisted states are migrated on load) ---- */
+  /** Artists who signed up on this device. Their identities join the demo picker. */
+  accounts: MockAccount[];
+}
+
+/**
+ * A mock-mode sign-up. There is no password check in mock mode (the picker signs
+ * people in), so the password is never stored. The email is kept only to refuse
+ * a second account with the same address.
+ */
+export interface MockAccount {
+  /** Lower-cased. */
+  email: string;
+  userId: string;
+  artistId: string;
+  identity: DemoIdentity;
+  createdAt: string;
 }
 
 /** The collections added in v3. A persisted v2 state lacks them and gets the seeded programme merged in. */
@@ -97,10 +176,7 @@ export function buildSeed(): MockState {
       careerStage: 'mid-career',
       experience: { commissions: true, publicArt: true, residencies: true, institutionalShows: true, yearsPracticing: 14 },
       availability: { commissions: true, sales: true, exhibitions: true },
-      links: [
-        { label: 'Website', url: 'https://example.com/mara' },
-        { label: 'Instagram', url: 'https://instagram.com/example_mara' },
-      ],
+      links: [],
       contact: { email: 'mara@example.com', phone: '+1 412 555 0142', studioAddress: '19 Foundry St, Pittsburgh, PA' },
       kofiNotes: 'Onboarded Sept 2026. Strong fit for the airport commission call.',
       visibility: 'public',
@@ -122,7 +198,7 @@ export function buildSeed(): MockState {
       careerStage: 'established',
       experience: { commissions: true, publicArt: true, residencies: true, institutionalShows: true, yearsPracticing: 22 },
       availability: { commissions: true, sales: true, exhibitions: true },
-      links: [{ label: 'Website', url: 'https://example.com/tobias' }],
+      links: [],
       contact: { email: 'tobias@example.com' },
       visibility: 'public',
       status: 'approved',
@@ -143,7 +219,7 @@ export function buildSeed(): MockState {
       careerStage: 'emerging',
       experience: { commissions: false, publicArt: false, residencies: true, institutionalShows: false, yearsPracticing: 4 },
       availability: { commissions: true, sales: true, exhibitions: true },
-      links: [{ label: 'Instagram', url: 'https://instagram.com/example_june' }],
+      links: [],
       contact: { email: 'june@example.com' },
       visibility: 'public',
       status: 'approved',
@@ -185,7 +261,7 @@ export function buildSeed(): MockState {
       careerStage: 'emerging',
       experience: { commissions: false, publicArt: false, residencies: false, institutionalShows: false, yearsPracticing: 2 },
       availability: { commissions: true, sales: true, exhibitions: true },
-      links: [{ label: 'Website', url: 'https://example.com/priya' }],
+      links: [],
       contact: { email: 'priya@example.com' },
       kofiNotes: 'Submitted for review. Need two more documented works before approval.',
       visibility: 'public',
@@ -575,7 +651,13 @@ export function buildSeed(): MockState {
     { id: 'ev_4', actorId: DEMO_USERS.admin, actorRole: 'admin', actorName: 'Quincy (Kofi)', action: 'inquiry.status', entityType: 'inquiry', entityId: 'inq_1', at: d(15), meta: { status: 'forwarded' } },
   ];
 
-  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit, ...buildProgrammeSeed() };
+  const intake = seedIntake();
+  for (const a of artists) {
+    const v5 = intake[a.id];
+    if (v5) Object.assign(a, v5);
+  }
+
+  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit, ...buildProgrammeSeed(), accounts: [] };
 }
 
 export const DEMO_IDENTITIES: DemoIdentity[] = [

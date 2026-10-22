@@ -2399,3 +2399,206 @@ ul.kg-rail {
   min-height: 44px;
   padding-block: 10px;
 }
+
+/* ---------- Discover v5: artist-first blocks (how it works, why artists join, collectors) ---------- */
+#kp-how {
+  scroll-margin-top: calc(var(--safe-top) + var(--topbar-h) + var(--space-5));
+}
+#kp-how:focus {
+  outline: none;
+}
+@media (min-width: 900px) {
+  #kp-how {
+    scroll-margin-top: calc(var(--safe-top) + var(--nav-h) + var(--space-6));
+  }
+}
+.kp-how__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  counter-reset: none;
+}
+.kp-how__step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-5);
+  row-gap: var(--space-2);
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--line);
+}
+.kp-how__step:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.kp-how__num {
+  grid-row: span 2;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 4rem;
+  line-height: 0.8;
+  color: var(--gold);
+  min-width: 1ch;
+}
+.kp-how__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.75rem, 7vw, 2.25rem);
+  line-height: 1.05;
+}
+.kp-how__body {
+  max-width: 40ch;
+  color: var(--cream-2);
+  font-weight: 300;
+  line-height: 1.6;
+}
+.kp-how__cta {
+  margin-top: var(--space-6);
+}
+@media (min-width: 900px) {
+  .kp-how__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .kp-how__step,
+  .kp-how__step:last-child {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    padding: var(--space-6) var(--space-6) var(--space-7);
+    border-top: 0;
+    border-bottom: 0;
+  }
+  .kp-how__step + .kp-how__step {
+    border-left: 1px solid var(--line);
+  }
+  .kp-how__step:first-child {
+    padding-left: 0;
+  }
+  .kp-how__num {
+    grid-row: auto;
+    font-size: 5.5rem;
+    margin-bottom: var(--space-4);
+  }
+}
+
+.kp-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+.kp-fact {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  background: var(--black-2);
+}
+.kp-fact__stroke {
+  display: block;
+  width: 44px;
+  height: 5px;
+  border-radius: 2px 4px 2px 4px;
+  transform: skewX(-14deg);
+  background: var(--red);
+}
+.kp-fact--gold .kp-fact__stroke {
+  background: var(--gold);
+}
+.kp-fact--green .kp-fact__stroke {
+  background: var(--green);
+}
+.kp-fact__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.75rem;
+  line-height: 1.05;
+}
+.kp-fact__body {
+  color: var(--cream-2);
+  font-weight: 300;
+  line-height: 1.6;
+}
+@media (min-width: 900px) {
+  .kp-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+  .kp-fact {
+    padding: var(--space-6);
+    min-height: 240px;
+  }
+  .kp-fact__title {
+    font-size: 2.125rem;
+  }
+}
+
+.kp-collectors {
+  margin-top: var(--space-8);
+  padding: var(--space-7) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--black-2);
+}
+.kp-collectors__inner {
+  display: grid;
+  gap: var(--space-5);
+}
+.kp-collectors__title {
+  margin-top: var(--space-3);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2.5rem, 11vw, 4rem);
+  line-height: 0.98;
+  letter-spacing: -0.015em;
+}
+.kp-collectors__body {
+  margin-top: var(--space-4);
+  max-width: 48ch;
+  color: var(--cream-2);
+  font-weight: 300;
+  line-height: 1.6;
+}
+.kp-collectors__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@media (min-width: 900px) {
+  .kp-collectors {
+    margin-top: var(--space-9);
+    padding: var(--space-8) 0;
+  }
+  .kp-collectors__inner {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: end;
+    gap: var(--space-8);
+  }
+  .kp-collectors__ctas {
+    justify-content: flex-end;
+  }
+}
+
+/* ---------- Discover: hero scrim ----------
+   The photograph is brightest where the lede and the count line sit. Mobile: a full-width
+   scrim rising from the bottom, under the whole text column. Desktop: the left 55% goes
+   from near-black to clear, so the photo stays visible on the right. */
+.kp-hero .kg-hero--photo {
+  background-image:
+    linear-gradient(0deg, rgba(10, 10, 10, 0.97) 0%, rgba(10, 10, 10, 0.9) 42%, rgba(10, 10, 10, 0.62) 70%, rgba(10, 10, 10, 0.35) 100%),
+    var(--kg-hero-img, none);
+}
+@media (min-width: 900px) {
+  .kp-hero .kg-hero--photo {
+    background-image:
+      linear-gradient(90deg, rgba(10, 10, 10, 0.94) 0%, rgba(10, 10, 10, 0.86) 32%, rgba(10, 10, 10, 0.5) 46%, rgba(10, 10, 10, 0) 58%),
+      linear-gradient(0deg, rgba(10, 10, 10, 0.85) 0%, rgba(10, 10, 10, 0) 38%),
+      var(--kg-hero-img, none);
+  }
+}
+.kp-hero .kg-hero__count {
+  color: var(--cream-2);
+}

@@ -4,6 +4,7 @@ import { MockDataSource } from '@/data/mock/MockDataSource';
 import { navForRole, mobileTabs, desktopTabs } from '@/app/TabBar';
 import { DESHAWN, LENA, MARA, QUINCY, renderAt, SEED_NOW, VISITOR } from './testUtils';
 import { getSaved, isSaved, resetSavedCache, SAVED_KEY, toggleSaved } from './saved';
+import { homeCopy } from './homeCopy';
 
 beforeEach(() => {
   // Only Date is faked: the seeded programme has absolute dates, so phases are pinned to 2026-10-20.
@@ -23,7 +24,7 @@ describe('Discover (/)', () => {
     renderAt('/');
     expect(await screen.findByRole('heading', { level: 2, name: 'Night Weather' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Kofi Collections' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /artists keep the record/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /bring your work\. kofi brings the room\./i })).toBeInTheDocument();
     // open call band: the soonest-closing open call, with days left
     const band = screen.getByRole('heading', { name: 'Night Weather Studio Award' }).closest('section') as HTMLElement;
     expect(within(band).getByText('Closes in 41 days')).toBeInTheDocument();
@@ -42,6 +43,33 @@ describe('Discover (/)', () => {
     // services link to the About anchors
     expect(screen.getByRole('link', { name: /for organisations/i })).toHaveAttribute('href', '/about#organisations');
     expect(screen.getAllByText('Sample').length).toBeGreaterThan(0);
+  });
+
+  it('leads with artists: hero CTA, how it works, why artists join, then the collectors band', async () => {
+    renderAt('/');
+    await screen.findByRole('heading', { level: 2, name: 'Night Weather' });
+    const hero = screen.getByRole('heading', { name: /bring your work/i }).closest('section') as HTMLElement;
+    expect(within(hero).getByRole('link', { name: homeCopy.hero.start })).toHaveAttribute('href', '/join');
+    expect(within(hero).getByRole('link', { name: homeCopy.hero.how })).toHaveAttribute('href', '#kp-how');
+    const how = screen.getByRole('heading', { level: 2, name: homeCopy.how.title }).closest('section') as HTMLElement;
+    expect(within(how).getAllByRole('listitem')).toHaveLength(3);
+    for (const st of homeCopy.how.steps) expect(within(how).getByRole('heading', { level: 3, name: st.title })).toBeInTheDocument();
+    for (const f of homeCopy.why.facts) expect(screen.getByRole('heading', { level: 3, name: f.title })).toBeInTheDocument();
+    const collectors = screen.getByRole('heading', { level: 2, name: homeCopy.collectors.title }).closest('section') as HTMLElement;
+    expect(within(collectors).getByRole('link', { name: homeCopy.collectors.browse })).toHaveAttribute('href', '/works');
+    fireEvent.click(within(collectors).getByRole('button', { name: homeCopy.collectors.ask }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    // artist block order: how → why → open call → … → collectors → now showing (a lazy chunk)
+    await waitFor(() => expect(document.getElementById('kp-now-title')).not.toBeNull());
+    const order = ['kp-how', 'kp-why', 'kp-callband-title', 'kp-collectors-title', 'kp-now-title'].map((id) => document.getElementById(id)!);
+    for (let i = 1; i < order.length; i++) expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('the hero CTA follows the role: artists go to the studio, staff browse', async () => {
+    renderAt('/', MARA);
+    const hero = (await screen.findByRole('heading', { name: /bring your work/i })).closest('section') as HTMLElement;
+    expect(within(hero).getByRole('link', { name: homeCopy.hero.studio })).toHaveAttribute('href', '/studio');
+    expect(screen.queryByRole('link', { name: homeCopy.how.cta })).not.toBeInTheDocument();
   });
 
   it('hides blocks whose data is empty', async () => {

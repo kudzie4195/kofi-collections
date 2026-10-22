@@ -38,7 +38,7 @@ describe('Artist profile (/artists/:id)', () => {
     expect(screen.getByText(/I paint the hour after a storm/)).toBeInTheDocument();
     expect(screen.getByText('Years practicing').nextElementSibling).toHaveTextContent('14');
     const site = screen.getByRole('link', { name: /website/i });
-    expect(site).toHaveAttribute('href', 'https://example.com/mara');
+    expect(site).toHaveAttribute('href', 'https://www.mara-oyelaran.com');
     expect(site).toHaveAttribute('target', '_blank');
     expect(site).toHaveAttribute('rel', 'noopener noreferrer');
     const works = await screen.findByRole('list', { name: 'Works by Mara Oyelaran' });

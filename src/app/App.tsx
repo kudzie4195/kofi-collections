@@ -11,6 +11,7 @@ import { programmeRoutes } from '@/features/programme/routes';
 import { studioRoutes } from '@/features/studio/routes';
 import { curatorRoutes } from '@/features/curator/routes';
 import { adminRoutes } from '@/features/admin/routes';
+import { joinRoutes } from '@/features/join/routes';
 import { isNative } from '@/native/platform';
 
 function Layout() {
@@ -42,7 +43,7 @@ function RouteFallback() {
   );
 }
 
-// Role desks (/studio, /curator, /admin) are route-level `lazy` chunks; their gates stay eager.
+// Role desks (/studio, /curator, /admin) and the intake (/join) are route-level `lazy` chunks; the gates stay eager.
 // Hash router: works identically on Vercel, file:// previews and inside Capacitor WebViews.
 const router = createHashRouter([
   {
@@ -51,6 +52,8 @@ const router = createHashRouter([
       ...programmeRoutes,
       ...galleryRoutes,
       { path: '/account', element: <AccountScreen /> },
+      // Artist intake (v5): not role-gated, the screen decides per role. Lazy chunk.
+      ...joinRoutes,
       { path: '/studio', element: <RoleGate roles={['artist']} />, children: studioRoutes },
       { path: '/curator', element: <RoleGate roles={['curator']} />, children: curatorRoutes },
       { path: '/admin', element: <RoleGate roles={['admin']} />, children: adminRoutes },

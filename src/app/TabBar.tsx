@@ -3,6 +3,7 @@ import { Icon } from '@/ui';
 import { useViewer } from '@/state/session';
 import type { ReactNode } from 'react';
 import type { Role } from '@/domain/types';
+import { homeCopy } from '@/features/programme/homeCopy';
 import './nav.css';
 
 export interface NavItem {
@@ -84,6 +85,12 @@ export function TabBar() {
             </Link>
           );
         })}
+        {/* Desktop only: visitors get the artist CTA beside the links (not a tab; the mobile hero carries it). */}
+        {viewer.role === 'public' && !pathname.startsWith('/join') && (
+          <Link to="/join" className="btn btn--sm tabbar__cta">
+            {homeCopy.hero.start}
+          </Link>
+        )}
       </div>
     </nav>
   );

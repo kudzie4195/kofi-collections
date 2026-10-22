@@ -14,6 +14,8 @@ interface SessionContextValue {
   version: number;
   signInAs(identity: DemoIdentity): void;
   signOut(): void;
+  /** Re-read the demo identities (after sign-up adds one). */
+  refreshIdentities(): Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -61,6 +63,10 @@ export function SessionProvider({ children, dataSource }: { children: ReactNode;
     }
   }, []);
 
+  const refreshIdentities = useCallback(async () => {
+    if (data) setIdentities(await data.listDemoIdentities());
+  }, [data]);
+
   const signOut = useCallback(() => {
     setViewer(PUBLIC_VIEWER);
     try {
@@ -72,8 +78,8 @@ export function SessionProvider({ children, dataSource }: { children: ReactNode;
   }, []);
 
   const value = useMemo<SessionContextValue | undefined>(
-    () => (data ? { viewer, identities, data, version, signInAs, signOut } : undefined),
-    [viewer, identities, data, version, signInAs, signOut],
+    () => (data ? { viewer, identities, data, version, signInAs, signOut, refreshIdentities } : undefined),
+    [viewer, identities, data, version, signInAs, signOut, refreshIdentities],
   );
 
   if (!value) return <BootSplash />;

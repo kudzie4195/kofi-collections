@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the migrations (0008 and 0009 each twice to prove they are re-runnable),
+# Runs the migrations (0008, 0009 and 0010 each twice to prove they are re-runnable),
 # the seed (auth once, content twice, then the additive programme + sales seeds)
 # and the RLS / RPC / programme / sales / schema-isolation assertions against a
 # THROWAWAY plain-Postgres database, with supabase/tests/shim.sql standing in
@@ -40,6 +40,9 @@ set +e
   run -q -f "$root/migrations/0009_sales.sql"
   echo "== migrations/0009_sales.sql (second run — must be idempotent)"
   run -q -f "$root/migrations/0009_sales.sql"
+  echo "== migrations/0010_intake.sql (twice — must be idempotent)"
+  run -q -f "$root/migrations/0010_intake.sql"
+  run -q -f "$root/migrations/0010_intake.sql"
   echo "== seed_auth.sql"
   run -q -f "$root/seed_auth.sql"
   echo "== seed_content.sql (first run)"
@@ -69,8 +72,11 @@ set +e
   run -f "$here/programme_test.sql"
   echo "== tests/sales_test.sql"
   run -f "$here/sales_test.sql"
+  echo "== tests/intake_test.sql"
+  run -f "$here/intake_test.sql"
   echo "== tests/isolation_test.sql"
   run -f "$here/isolation_test.sql"
+  expected_intake="$(run -At -c "select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists")"
 
   # ---- live path: 0008 and 0009 applied as the pasted parts; the live project's
   # rows (loaded before 0009: every call kind 'exhibition', no auction, no lots)
@@ -78,14 +84,15 @@ set +e
   pdb="${db}_parts"
   runp() { psql -X -v ON_ERROR_STOP=1 -d "$pdb" "$@"; }
   echo
-  echo "== LIVE PATH: $pdb = shim + 0000-0007 + apply/0008_part1..4 (x2) + apply/0009_part1..5 (x2), seeds"
+  echo "== LIVE PATH: $pdb = shim + 0000-0007 + apply/0008_part1..4 (x2) + apply/0009_part1..5 (x2), v4 seeds, apply/0010_part1..2 (x2) + 0010_live_patch (x2)"
   psql -X -q -d postgres -c "drop database if exists $pdb" -c "create database $pdb"
   runp -q -f "$here/shim.sql"
   for f in "$root"/migrations/000[0-7]_*.sql; do runp -q -f "$f"; done
   for pass in 1 2; do for f in "$root"/apply/0008_part*.sql; do echo "== $(basename "$f") (pass $pass)"; runp -q -f "$f"; done; done
   for pass in 1 2; do for f in "$root"/apply/0009_part*.sql; do echo "== $(basename "$f") (pass $pass)"; runp -q -f "$f"; done; done
   runp -q -f "$root/seed_auth.sql"
-  runp -q -f "$root/seed_content.sql"
+  # The live project's content was loaded by the v4 seed (before 0010): frozen copy.
+  runp -q -f "$here/fixtures/seed_content_v4.sql"
   echo "== live state before 0009 data: no lots / payouts / auction call / its applications, every call kind 'exhibition',"
   echo "   artworks with old rights notes; then seed_programme.sql, 0008_live_patch, seed_sales.sql, 0009_live_patch (each twice)"
   runp -q -c "begin; select set_config('kofi.seeding', 'on', true);
@@ -121,10 +128,36 @@ set +e
       raise notice 'ok: live path — 0008 parts 1..4 and 0009 parts 1..5 (twice each), seed_programme / seed_sales / both live patches (twice) leave the seeded state, without audit noise';
     end \$\$;"
   runp -q -c "drop table kofi_test.expected_notes; drop table kofi_test.expected_calls"
+  echo "== 0010 on the live path: apply/0010_part1..2 (x2), then apply/0010_live_patch.sql (x2)"
+  for pass in 1 2; do for f in "$root"/apply/0010_part*.sql; do echo "== $(basename "$f") (pass $pass)"; runp -q -f "$f"; done; done
+  runp -q -c "create table kofi_test.baseline_audit as select count(*) as n from kofi.audit_events"
+  for pass in 1 2; do runp -q -f "$root/apply/0010_live_patch.sql"; done
+  runp -At -v expected="$expected_intake" <<'SQL'
+create table kofi_test.expected_intake as select :'expected'::jsonb as v;
+do $$
+begin
+  if (select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists)
+     is distinct from (select v from kofi_test.expected_intake) then
+    raise exception 'FAIL: 0010 parts + 0010_live_patch.sql did not bring the demo artists to the seed (tokens, typed links, imports)';
+  end if;
+  if (select count(*) from kofi.audit_events) <> (select n from kofi_test.baseline_audit) then
+    raise exception 'FAIL: 0010_live_patch.sql wrote audit rows';
+  end if;
+  perform kofi.kofi_demo_reset();
+  if (select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists)
+     is distinct from (select v from kofi_test.expected_intake) then
+    raise exception 'FAIL: after 0010_live_patch.sql, Reset demo data should restore the same codes, links and imports';
+  end if;
+  raise notice 'ok: live path — 0010 parts 1..2 (twice) + 0010_live_patch.sql (twice) give the seed''s tokens, typed links and imports, without audit rows; the reset snapshot keeps them';
+end $$;
+SQL
+  runp -q -c "drop table kofi_test.baseline_audit; drop table kofi_test.expected_intake"
   echo "== tests/programme_test.sql (live-path database)"
   runp -f "$here/programme_test.sql"
   echo "== tests/sales_test.sql (live-path database)"
   runp -f "$here/sales_test.sql"
+  echo "== tests/intake_test.sql (live-path database)"
+  runp -f "$here/intake_test.sql"
   echo "== tests/isolation_test.sql (live-path database)"
   runp -f "$here/isolation_test.sql"
   psql -X -q -d postgres -c "drop database if exists $pdb"

@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient, type SupabaseClientOptions } from '@supabase/supabase-js';
+import { createClient, FunctionsHttpError, type SupabaseClient, type SupabaseClientOptions } from '@supabase/supabase-js';
+import { importFromSignals, isFetchableUrl, normalizeLink, validateSignUp, type PageSignals } from '@/domain/intake';
 import { applyFilters, type ArtworkFilters } from '@/domain/filters';
 import { artworksToCsv, buildArtistExport } from '@/domain/export';
 import type {
@@ -35,6 +36,11 @@ import type {
   Shortlist,
   Story,
   Viewer,
+  ArtistLink,
+  ProfileImport,
+  ProfileImportRecord,
+  SignUpInput,
+  SignUpResult,
 } from '@/domain/types';
 import { BUYER_INQUIRY_STATUSES } from '@/domain/types';
 import { callPhase, kofiToday, sortExhibitions, validateBuyerInquiry, type BuyerInquiryInput } from '@/domain/programme';
@@ -42,6 +48,7 @@ import { validateRange } from '@/domain/reports';
 import type { LotInput, SaleInput } from '@/domain/sales';
 import { cleanEvent, cleanExhibition, cleanOpenCall, cleanStory, validateArtwork } from '../mock/MockDataSource';
 import {
+  ConflictError,
   ForbiddenError,
   NotFoundError,
   ValidationError,
@@ -174,7 +181,25 @@ export interface SupabaseDataSourceOptions {
   demoAutoSignIn?: boolean;
   /** Passed through to createClient (tests use this to disable session persistence). */
   clientOptions?: SupabaseClientOptions<'public'>;
+  /**
+   * Artist self sign-up (signUpArtist). Default: VITE_KOFI_SIGNUP, and 'off'
+   * when that is not set. On a project shared with another product every
+   * auth.signUp also fires that product's own auth.users trigger, so keep it
+   * 'off' there until Kofi has its own project (docs/SUPABASE.md §11).
+   */
+  signUp?: 'on' | 'off';
+  /**
+   * Base of the public artist page, for the link-back check ("…/#/artists/<id>").
+   * Default: VITE_KOFI_PUBLIC_URL, else the current page's origin + path.
+   */
+  publicAppUrl?: string;
 }
+
+/** Messages for the intake (kept here so the mock's wording can be matched in one place). */
+export const SIGNUP_CLOSED_MESSAGE = 'Sign-up is not open on this demo yet. Ask Kofi for an invite.';
+export const READER_OFFLINE_NOTE = "Kofi's reader is offline; we used your handle.";
+export const CHECKER_OFFLINE_MESSAGE = "Kofi's link checker is offline right now. Your links keep their last result.";
+const IMPORT_FUNCTION = 'profile-import';
 
 /**
  * Every table, view and RPC lives in the `kofi` Postgres schema (see
@@ -198,6 +223,8 @@ export class SupabaseDataSource implements DataSource {
   /** Session-less client used for the public visitor, so "Visitor" really is anon. */
   private readonly anonClient: SupabaseClient;
   private readonly demoAutoSignIn: boolean;
+  private readonly signUpMode: 'on' | 'off';
+  private readonly publicAppUrl: string | undefined;
   private listeners = new Set<() => void>();
   private channel: ReturnType<SupabaseClient['channel']> | undefined;
   private emitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -216,6 +243,8 @@ export class SupabaseDataSource implements DataSource {
     });
     const env = (import.meta as { env?: Record<string, string | undefined> }).env;
     this.demoAutoSignIn = opts.demoAutoSignIn ?? env?.VITE_SUPABASE_DEMO_LOGIN === 'true';
+    this.signUpMode = opts.signUp ?? (env?.VITE_KOFI_SIGNUP?.trim().toLowerCase() === 'on' ? 'on' : 'off');
+    this.publicAppUrl = opts.publicAppUrl ?? env?.VITE_KOFI_PUBLIC_URL ?? undefined;
     this.client.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
         this.meCache.clear();
@@ -305,6 +334,11 @@ export class SupabaseDataSource implements DataSource {
       if (!r || !r.user_id) return PUBLIC_ME;
       const me: Me = { userId: r.user_id, role: r.role, displayName: r.display_name, curatorVerified: !!r.curator_verified };
       if (r.artist_id) me.artistId = r.artist_id;
+      else if (r.role === 'artist') {
+        // A Kofi sign-up has a profile but no artists row until its first sign-in (0010 ensure_my_artist).
+        const id = await this.rpc<string | null>(this.client, 'ensure_my_artist').catch(() => null);
+        if (id) me.artistId = id;
+      }
       if (r.curator_id) me.curatorId = r.curator_id;
       if (me.role === 'curator' && me.curatorVerified) {
         const inst = await this.rpc<string | null>(this.client, 'my_verified_institution_id');
@@ -502,6 +536,165 @@ export class SupabaseDataSource implements DataSource {
     const rows = await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').eq('artist_id', artistId));
     const visible = rows.filter((r) => owner || (r.visibility !== 'private' && r.visibility !== 'kofi'));
     return (await this.projectArtworks(db, visible)).sort((x, y) => y.year - x.year || y.createdAt.localeCompare(x.createdAt));
+  }
+
+  /* ------------------------------------------------------- intake (v5) -- */
+
+  /** Base URL of the public artist page (link-back check), or undefined on a non-web shell. */
+  private publicBase(): string | undefined {
+    const configured = this.publicAppUrl?.trim();
+    if (configured) return configured.replace(/#.*$/, '');
+    const loc = (globalThis as { location?: { origin?: string; pathname?: string } }).location;
+    if (!loc?.origin || !/^https?:\/\//.test(loc.origin)) return undefined;
+    return loc.origin + (loc.pathname ?? '/');
+  }
+
+  private profileUrlFor(artistId: string): string | undefined {
+    const base = this.publicBase();
+    return base ? `${base}#/artists/${artistId}` : undefined;
+  }
+
+  /** Calls the profile-import edge function; 'offline' when it is not deployed or cannot be reached. */
+  private async invokeImport(
+    db: SupabaseClient,
+    body: Record<string, unknown>,
+  ): Promise<{ kind: 'ok'; data: Record<string, unknown> } | { kind: 'offline' } | { kind: 'http'; status: number; error?: string; message?: string }> {
+    try {
+      const { data, error } = await db.functions.invoke(IMPORT_FUNCTION, { body });
+      if (!error) return data && typeof data === 'object' ? { kind: 'ok', data: data as Record<string, unknown> } : { kind: 'offline' };
+      if (error instanceof FunctionsHttpError) {
+        const resp = error.context as Response | undefined;
+        let payload: { error?: string; message?: string } = {};
+        try {
+          payload = ((await resp?.json()) ?? {}) as typeof payload;
+        } catch {
+          /* not our JSON */
+        }
+        const status = resp?.status ?? 500;
+        // The platform's own 404 ("Requested function was not found") and any 5xx mean the reader is not there.
+        if ((status === 404 && !payload.error) || status >= 500 || (status === 401 && !payload.error)) return { kind: 'offline' };
+        const out: { kind: 'http'; status: number; error?: string; message?: string } = { kind: 'http', status };
+        if (payload.error) out.error = payload.error;
+        if (payload.message) out.message = payload.message;
+        return out;
+      }
+      return { kind: 'offline' };
+    } catch {
+      return { kind: 'offline' };
+    }
+  }
+
+  async signUpArtist(input: SignUpInput): Promise<SignUpResult> {
+    if (this.signUpMode !== 'on') throw new ValidationError(SIGNUP_CLOSED_MESSAGE, 'email');
+    const problem = validateSignUp(input);
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    const email = input.email.trim().toLowerCase();
+    const redirect = this.publicBase();
+    let res: Awaited<ReturnType<SupabaseClient['auth']['signUp']>>;
+    try {
+      res = await this.client.auth.signUp({
+        email,
+        password: input.password,
+        options: {
+          // kofi.handle_new_user makes the kofi.profiles row (role artist); ensure_my_artist makes the
+          // draft artist with the consent recorded from kofi_consent_version.
+          data: { kofi_role: 'artist', display_name: input.displayName.trim(), kofi_consent_version: input.consentVersion },
+          ...(redirect ? { emailRedirectTo: redirect } : {}),
+        },
+      });
+    } catch (e) {
+      throw mapPgError({ message: e instanceof Error ? e.message : String(e) });
+    }
+    if (res.error) throw signUpError(res.error);
+    const { user, session } = res.data;
+    // With email confirmation on, GoTrue answers an existing address with a user that has no identities.
+    if (user && Array.isArray(user.identities) && user.identities.length === 0) throw new ConflictError();
+    this.meCache.clear();
+    if (!session) return { viewer: { role: 'public', displayName: 'Visitor' }, emailConfirmationRequired: true };
+    await this.rpc(this.client, 'ensure_my_artist');
+    this.meCache.clear();
+    this.emit();
+    return { viewer: await this.currentViewer(), emailConfirmationRequired: false };
+  }
+
+  async importProfile(viewer: Viewer, url: string): Promise<ProfileImport> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role === 'public') throw new ForbiddenError('Sign in to do this.');
+    const n = normalizeLink(url);
+    if (!n || !isFetchableUrl(n.url)) throw new ValidationError('That link cannot be read. Use a public http or https address.', 'url');
+    const source: ArtistLink = { label: n.label, url: n.url, platform: n.platform, handle: n.handle, verification: 'claimed' };
+    const handleOnly = (note: string, at = new Date().toISOString()): ProfileImport => {
+      const imp = importFromSignals(source, {}, at);
+      imp.notes = [note, ...imp.notes.filter((x) => !/comes from the handle/.test(x))];
+      return imp;
+    };
+    const res = await this.invokeImport(db, { url: n.url });
+    if (res.kind === 'offline') {
+      if (me.role === 'artist' || me.role === 'admin') {
+        await this.rpc(db, 'log_audit', {
+          p_action: 'artist.import',
+          p_entity_type: 'artist',
+          p_entity_id: me.artistId ?? null,
+          p_meta: { stage: 'read', url: n.url, platform: n.platform, reachable: false, reason: 'reader offline' },
+        }).catch(() => undefined);
+      }
+      return handleOnly(READER_OFFLINE_NOTE);
+    }
+    if (res.kind === 'http') {
+      if (res.status === 400) throw new ValidationError(res.message ?? 'That link cannot be read. Use a public http or https address.', 'url');
+      if (res.status === 401) throw new ForbiddenError(SESSION_ENDED_MESSAGE);
+      if (res.status === 429) return handleOnly(`${res.message ?? 'Kofi\'s reader is busy.'} We used your handle for now.`);
+      return handleOnly(READER_OFFLINE_NOTE);
+    }
+    const fetchedAt = typeof res.data.fetchedAt === 'string' ? res.data.fetchedAt : new Date().toISOString();
+    if (res.data.reachable !== true) {
+      const reason = typeof res.data.reason === 'string' ? res.data.reason : 'We could not open that page.';
+      return handleOnly(`${reason} We used your handle.`, fetchedAt);
+    }
+    return importFromSignals(source, (res.data.signals ?? {}) as PageSignals, fetchedAt);
+  }
+
+  async recordImport(viewer: Viewer, record: ProfileImportRecord): Promise<ArtistView> {
+    const { db, me } = await this.ctx(viewer);
+    const artistId = this.requireMyArtist(me);
+    await this.rpc(db, 'record_import', { p_record: record });
+    this.emit();
+    const view = await this.fetchArtist(db, artistId);
+    if (!view) throw new NotFoundError('Artist profile not found.');
+    return view;
+  }
+
+  async checkMyLinks(viewer: Viewer, artistId?: string): Promise<ArtistLink[]> {
+    const { db, me } = await this.ctx(viewer);
+    let target: string;
+    if (artistId && !(me.role === 'artist' && me.artistId === artistId)) {
+      this.requireAdmin(me);
+      if (!isUuid(artistId)) throw new NotFoundError('Artist not found.');
+      target = artistId;
+    } else {
+      target = this.requireMyArtist(me);
+    }
+    const view = await this.fetchArtist(db, target);
+    if (!view) throw new NotFoundError('Artist not found.');
+    const profileUrl = this.profileUrlFor(target);
+    for (const link of view.links) {
+      const res = await this.invokeImport(db, {
+        url: link.url,
+        verify: true,
+        ...(me.role === 'admin' ? { artistId: target } : {}),
+        ...(profileUrl ? { profileUrl } : {}),
+      });
+      if (res.kind === 'offline') throw new Error(CHECKER_OFFLINE_MESSAGE);
+      if (res.kind === 'http') {
+        if (res.status === 404) continue; // the link was removed meanwhile
+        if (res.status === 401) throw new ForbiddenError(SESSION_ENDED_MESSAGE);
+        if (res.status === 403) throw new ForbiddenError(res.message ?? 'You do not have access to this.');
+        throw new Error(res.message ?? CHECKER_OFFLINE_MESSAGE);
+      }
+    }
+    this.emit();
+    const after = await this.fetchArtist(db, target);
+    return after?.links ?? [];
   }
 
   /* ------------------------------------------------- artist self-service -- */
@@ -1602,6 +1795,20 @@ export class SupabaseDataSource implements DataSource {
     this.meCache.clear();
     this.emit();
   }
+}
+
+/** GoTrue sign-up errors → the intake's field errors. */
+function signUpError(err: { message?: string; code?: string; status?: number }): Error {
+  const code = err.code ?? '';
+  const msg = err.message ?? '';
+  if (code === 'user_already_exists' || code === 'email_exists' || /already (been )?registered|already exists/i.test(msg)) return new ConflictError();
+  if (code === 'weak_password' || /password/i.test(msg)) return new ValidationError('That password is too easy to guess. Try a longer sentence.', 'password');
+  if (code === 'email_address_invalid' || code === 'email_address_not_authorized' || /invalid.*email|email.*invalid/i.test(msg)) {
+    return new ValidationError('Enter an email address we can reach you at.', 'email');
+  }
+  if (code === 'signup_disabled' || /signups? not allowed|signup.*disabled/i.test(msg)) return new ValidationError(SIGNUP_CLOSED_MESSAGE, 'email');
+  if (err.status === 429 || code.startsWith('over_') || /rate limit/i.test(msg)) return new Error('Too many sign-ups from here just now. Try again in a few minutes.');
+  return mapPgError({ message: msg, status: err.status ?? null });
 }
 
 function statusRank(s: Artist['status']): number {

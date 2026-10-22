@@ -8,7 +8,8 @@
 //                              (needs seed_auth.sql to have run first)
 //   supabase/seed_programme.sql  additive programme rows (insert-only)
 //   supabase/seed_sales.sql    additive lots + payouts (insert-only, 0009)
-//   supabase/apply/0008_live_patch.sql, apply/0009_live_patch.sql
+//   supabase/apply/0008_live_patch.sql, apply/0009_live_patch.sql,
+//   supabase/apply/0010_live_patch.sql
 //                              by-id corrections for the live project
 //
 //   node supabase/scripts/generate-seed.mjs
@@ -17,7 +18,7 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadSeed, projectRoot } from './load-seed.mjs';
 
-const { buildSeed, DEMO_IDENTITIES, DEMO_USERS, DEMO_UUIDS, DEMO_EMAILS, DEMO_PASSWORD } = await loadSeed();
+const { buildSeed, DEMO_IDENTITIES, DEMO_USERS, DEMO_UUIDS, DEMO_EMAILS, DEMO_PASSWORD, V4_SEED_LINKS } = await loadSeed();
 const seed = buildSeed();
 
 const U = (id) => {
@@ -262,7 +263,7 @@ out('insert into kofi.demo_institutions (id, name, type, website, city, country,
 out(seed.institutions.map((i) => `  (${uuid(i.id)}, ${s(i.name)}, '${i.type}', ${s(i.website)}, ${s(i.city)}, ${s(i.country)}, '2026-07-01T12:00:00Z', '2026-07-01T12:00:00Z')`).join(',\n') + ';');
 out();
 
-out(`insert into kofi.demo_artists (id, user_id, working_name, legal_name, pronouns, bio, statement, region_city, region_region, region_country, region_precision, mediums, career_stage, experience_commissions, experience_public_art, experience_residencies, experience_institutional_shows, experience_years_practicing, availability_commissions, availability_sales, availability_exhibitions, links, contact_email, contact_phone, contact_studio_address, kofi_notes, visibility, status, consent_version, consent_accepted_at, avatar_color, created_at, updated_at) values`);
+out(`insert into kofi.demo_artists (id, user_id, working_name, legal_name, pronouns, bio, statement, region_city, region_region, region_country, region_precision, mediums, career_stage, experience_commissions, experience_public_art, experience_residencies, experience_institutional_shows, experience_years_practicing, availability_commissions, availability_sales, availability_exhibitions, links, contact_email, contact_phone, contact_studio_address, kofi_notes, visibility, status, consent_version, consent_accepted_at, avatar_color, created_at, updated_at, verification_token, imports) values`);
 out(
   seed.artists
     .map(
@@ -272,7 +273,8 @@ out(
         `${b(a.experience.commissions)}, ${b(a.experience.publicArt)}, ${b(a.experience.residencies)}, ${b(a.experience.institutionalShows)}, ${n(a.experience.yearsPracticing)}, ` +
         `${b(a.availability.commissions)}, ${b(a.availability.sales)}, ${b(a.availability.exhibitions)}, ${json(a.links)}, ` +
         `${s(a.contact.email)}, ${s(a.contact.phone)}, ${s(a.contact.studioAddress)}, ${s(a.kofiNotes)}, '${a.visibility}', '${a.status}', ` +
-        `${s(a.consentVersion)}, ${ts(a.consentAcceptedAt)}, ${s(a.avatarColor)}, ${ts(a.createdAt)}, ${ts(a.updatedAt)})`,
+        `${s(a.consentVersion)}, ${ts(a.consentAcceptedAt)}, ${s(a.avatarColor)}, ${ts(a.createdAt)}, ${ts(a.updatedAt)}, ` +
+        `${s(a.verificationToken)}, ${json(a.imports ?? [])})`,
     )
     .join(',\n') + ';',
 );
@@ -596,3 +598,53 @@ out();
 out("select set_config('kofi.seeding', 'off', true);");
 out('commit;');
 writeOut('apply/0009_live_patch.sql');
+
+// ================================================ apply/0010_live_patch.sql ==
+// The live project's demo artists were loaded before 0010: no token, no
+// imports, the v4 placeholder links. Brings them to the seed by fixed id —
+// token only where still NULL, imports only where still empty, links only
+// where they are still exactly the v4 seed links — and adds the two columns to
+// the kofi.demo_* snapshot so "Reset demo data" keeps the same codes. Any
+// other artist without a token then gets a fresh one.
+lines = [];
+header('live patch: verification codes, typed links and import history for the demo artists', [
+  'For a project whose demo artists were loaded before 0010_intake (apply 0010_part*.sql first).',
+  'By fixed id: verification_token where NULL, imports where still [], links where they',
+  'still equal the v4 placeholder links. Updates the kofi.demo_artists snapshot too.',
+  'No inserts, no deletes, no other columns. Re-runnable. Kept out of the audit log.',
+]);
+out('begin;');
+out(`do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'kofi' and table_name = 'artists' and column_name = 'verification_token') then
+    raise exception '0010_live_patch.sql: run supabase/apply/0010_part*.sql (0010_intake) first.';
+  end if;
+end $$;`);
+out("select set_config('kofi.seeding', 'on', true);");
+out();
+out('-- the reset snapshot (created by seed_content.sql before 0010) gets the new columns, same order as kofi.artists');
+out(`do $$
+begin
+  if to_regclass('kofi.demo_artists') is not null then
+    alter table kofi.demo_artists add column if not exists verification_token text;
+    alter table kofi.demo_artists add column if not exists imports jsonb not null default '[]'::jsonb;
+  end if;
+end $$;`);
+out();
+for (const a of seed.artists) {
+  const v4 = V4_SEED_LINKS[a.id];
+  out(`-- ${a.workingName}`);
+  if (a.verificationToken) out(`update kofi.artists set verification_token = ${s(a.verificationToken)} where id = ${uuid(a.id)} and verification_token is null and not exists (select 1 from kofi.artists o where o.verification_token = ${s(a.verificationToken)});`);
+  if (a.imports?.length) out(`update kofi.artists set imports = ${json(a.imports)} where id = ${uuid(a.id)} and imports = '[]'::jsonb;`);
+  if (v4) out(`update kofi.artists set links = ${json(a.links)} where id = ${uuid(a.id)} and links = ${json(v4)};`);
+  out(`do $$ begin if to_regclass('kofi.demo_artists') is not null then
+  execute 'update kofi.demo_artists set verification_token = $1, imports = $2, links = $3 where id = $4' using ${s(a.verificationToken)}::text, ${json(a.imports ?? [])}, ${json(a.links)}, ${uuid(a.id)};
+end if; end $$;`);
+}
+out();
+out('-- every other artist (none on a demo project) gets a fresh code');
+out('update kofi.artists set verification_token = kofi.make_verification_token() where verification_token is null;');
+out();
+out("select set_config('kofi.seeding', 'off', true);");
+out('commit;');
+writeOut('apply/0010_live_patch.sql');

@@ -28,6 +28,11 @@ import type {
   Shortlist,
   Story,
   Viewer,
+  ProfileImport,
+  ProfileImportRecord,
+  SignUpInput,
+  SignUpResult,
+  ArtistLink,
 } from '@/domain/types';
 import type { BuyerInquiryInput } from '@/domain/programme';
 import type { LotInput, SaleInput } from '@/domain/sales';
@@ -55,6 +60,16 @@ export class StorageFullError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'StorageFullError';
+  }
+}
+
+/** The email already has an account (sign-up). Field is always 'email'. */
+export class ConflictError extends Error {
+  readonly code = 'conflict';
+  readonly field = 'email';
+  constructor(message = 'There is already an account with this email. Sign in instead.') {
+    super(message);
+    this.name = 'ConflictError';
   }
 }
 
@@ -155,6 +170,28 @@ export interface DataSource {
   listArtists(viewer: Viewer): Promise<ArtistView[]>;
   getArtist(viewer: Viewer, id: string): Promise<ArtistView | undefined>;
   listArtistArtworks(viewer: Viewer, artistId: string): Promise<ArtworkView[]>;
+
+  /* ---- intake (v5) ----
+   * signUpArtist: creates the account and an empty draft artist (status 'draft',
+   * visibility 'private', a fresh verificationToken) and records consent. Mock:
+   * returns a signed-in viewer plus a DemoIdentity for the picker. Supabase:
+   * auth.signUp with kofi_role=artist; emailConfirmationRequired when the
+   * project asks for confirmation. Audited as artist.signup. ValidationError
+   * (field) for a bad name/email/password or a consent version mismatch;
+   * ConflictError when the email already has an account.
+   * importProfile: reads what is public at the link and suggests fields. Never
+   * writes the profile — the intake applies what the artist confirms via
+   * updateMyArtist, then records the import with recordImport. Audited as
+   * artist.import. ValidationError for a URL that is not http(s) or points at a
+   * private address.
+   * checkMyLinks: re-reads every link looking for the verification token and
+   * updates verification/checkedAt. Admin may check any artist. Audited as
+   * artist.links. Mock mode cannot fetch: sample links verify, others stay
+   * 'unreachable' with the reason in the toast. */
+  signUpArtist(input: SignUpInput): Promise<SignUpResult>;
+  importProfile(viewer: Viewer, url: string): Promise<ProfileImport>;
+  recordImport(viewer: Viewer, record: ProfileImportRecord): Promise<ArtistView>;
+  checkMyLinks(viewer: Viewer, artistId?: string): Promise<ArtistLink[]>;
 
   /* ---- artist self-service ---- */
   getMyArtist(viewer: Viewer): Promise<ArtistView | undefined>;

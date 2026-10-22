@@ -3,6 +3,9 @@ import type { ArtistStatus } from '@/domain/types';
 import type { AdminArtistRow } from '@/data/DataSource';
 import { useQuery } from '@/state/session';
 import { Avatar, Chip, EmptyState, ErrorState, Icon, Panel, Segmented, Skeleton, StatusDot, TopBar } from '@/ui';
+import { platformName } from '@/domain/intake';
+import { deskIntakeCopy, linksSummary } from './intakeCopy';
+import { linkParts } from './links';
 import './admin.css';
 
 type Filter = 'all' | ArtistStatus;
@@ -122,6 +125,7 @@ export function AdminArtists() {
 }
 
 function ArtistRow({ a, unreviewed }: { a: AdminArtistRow; unreviewed: number }) {
+  const sources = [...new Set((a.imports ?? []).filter((r) => r.appliedFields.length > 0).map((r) => platformName(linkParts(r.source).platform)))];
   return (
     <li>
       <Link to={`/admin/artists/${a.id}`} className="list-row">
@@ -137,6 +141,18 @@ function ArtistRow({ a, unreviewed }: { a: AdminArtistRow; unreviewed: number })
             {a.artworkCount === 1 ? '1 work' : `${a.artworkCount} works`}
             {unreviewed > 0 && <strong style={{ color: 'var(--text-2)' }}>, {unreviewed} not reviewed</strong>}
           </span>
+          <span className="list-row__sub ad-intake-sub" data-testid="links-summary">
+            {linksSummary(a.links.length, a.links.filter((l) => l.verification === 'verified').length)}
+          </span>
+          {sources.length > 0 && (
+            <span className="ad-intake-chips">
+              {sources.map((p) => (
+                <span key={p} className="ad-intake-chip">
+                  {deskIntakeCopy.importedFrom} {p}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <span className="status-pill">
           <StatusDot status={a.status} />

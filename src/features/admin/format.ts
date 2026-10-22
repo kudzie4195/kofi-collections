@@ -1,4 +1,7 @@
-import type { AuditEvent, Role } from '@/domain/types';
+import type { AuditEvent, LinkPlatform, Role } from '@/domain/types';
+import { LINK_PLATFORMS } from '@/domain/types';
+import { normalizeLink, platformName } from '@/domain/intake';
+import { AUDIT_IMPORT, AUDIT_IMPORT_FALLBACK, AUDIT_SIGNUP, checkedSentence } from './intakeCopy';
 
 /** Tiny relative-time formatter. `now` is injectable for tests. */
 export function timeAgo(iso: string, now: Date = new Date()): string {
@@ -168,6 +171,12 @@ export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'> & Partial<
       return PAYOUT_STATUS_VERB[status] ?? 'updated a payout';
     case 'report.export':
       return 'ran a Kofi report';
+    case 'artist.signup':
+      return AUDIT_SIGNUP;
+    case 'artist.import':
+      return importSentence(meta);
+    case 'artist.links':
+      return linksSentence(meta);
   }
   // Exhaustive above; a row written by a newer schema still reads as a sentence.
   return 'made a change';
@@ -175,4 +184,28 @@ export function describeAudit(ev: Pick<AuditEvent, 'action' | 'meta'> & Partial<
 
 function visibilityWord(v: string): string {
   return { public: 'Public', institutions: 'Verified institutions', kofi: 'Kofi team only', private: 'Only me' }[v] ?? v;
+}
+
+type Meta = NonNullable<AuditEvent['meta']>;
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** "pulled details from Instagram @mara.paints" — from meta platform/handle, or derived from meta url. */
+function importSentence(meta: Meta): string {
+  const url = str(meta.url) ?? str(meta.source);
+  const n = url ? normalizeLink(url) : undefined;
+  const rawPlatform = str(meta.platform);
+  const platform: LinkPlatform | undefined = rawPlatform && (LINK_PLATFORMS as string[]).includes(rawPlatform) ? (rawPlatform as LinkPlatform) : n?.platform;
+  const handle = str(meta.handle) ?? n?.handle;
+  if (!platform && !handle) return AUDIT_IMPORT_FALLBACK;
+  if (!platform || platform === 'website' || platform === 'other') return `${AUDIT_IMPORT} ${handle ?? platformName(platform ?? 'other').toLowerCase()}`;
+  return `${AUDIT_IMPORT} ${platformName(platform)}${handle ? ` ${handle}` : ''}`;
+}
+
+/** "checked 2 links: 1 verified". Accepts checked/count/total/links for the count. */
+function linksSentence(meta: Meta): string {
+  const total = num(meta.checked) ?? num(meta.count) ?? num(meta.total) ?? num(meta.links);
+  const verified = num(meta.verified) ?? 0;
+  if (total === undefined) return 'checked their links';
+  return checkedSentence(total, verified);
 }

@@ -34,7 +34,10 @@ import {
   type OpenCallRow,
   type StoryRow,
 } from './mapping';
-import { assembleReport, createSupabaseDataSource } from './SupabaseDataSource';
+import { assembleReport, CHECKER_OFFLINE_MESSAGE, createSupabaseDataSource, READER_OFFLINE_NOTE, SIGNUP_CLOSED_MESSAGE } from './SupabaseDataSource';
+import { ConflictError } from '../DataSource';
+import { artistLinkToJson, toArtist, type ArtistRow } from './mapping';
+import { CONSENT_VERSION } from '@/domain/types';
 import { toLotRow, toPayoutRow, lotInputToJson, type LotViewRow, type PayoutViewRow } from './mapping';
 import { buildReport } from '@/domain/reports';
 import { projectLotForArtist } from '@/domain/sales';
@@ -709,5 +712,210 @@ describe('sales (0009)', () => {
     await expect(ds.kofiReport(visitor, { from: '2026-10-01', to: '2026-10-31' })).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
     await expect(ds.saveOpenCall(visitor, { title: 'x' } as never)).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
     expect(calls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------ intake (0010) -- */
+
+describe('intake (0010)', () => {
+  const base: ArtistViewRow = {
+    id: DEMO_UUIDS.art_mara, working_name: 'Mara Oyelaran', pronouns: null, bio: 'Painter.', statement: null, mediums: ['painting'],
+    career_stage: 'mid-career', experience_commissions: false, experience_public_art: false, experience_residencies: false,
+    experience_institutional_shows: false, experience_years_practicing: null, availability_commissions: false, availability_sales: false,
+    availability_exhibitions: false, links: [], status: 'approved', visibility: 'public', avatar_color: '#2436F5',
+    created_at: '2026-07-18T12:00:00Z', updated_at: '2026-08-29T12:00:00Z', region_label: 'Pittsburgh, Pennsylvania', region_city: null,
+    region_region: null, region_country: null, region_precision: null, legal_name: null, contact_email: null, contact_phone: null,
+    contact_studio_address: null, kofi_notes: null, consent_version: null, consent_accepted_at: null, can_edit: false,
+  };
+  const record = { source: { label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram' as const, handle: '@mara.paints' }, fetchedAt: '2026-10-22T12:00:00.000Z', appliedFields: ['workingName' as const, 'bio' as const], notes: [] };
+
+  it('an owner row carries the token, the imports and each link’s verification', () => {
+    const v = toArtistView({
+      ...base,
+      can_edit: true,
+      links: [
+        { label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints', verification: 'verified', checkedAt: '2026-10-22T12:00:00.000Z' },
+        { label: 'mara-oyelaran.com', url: 'https://www.mara-oyelaran.com', platform: 'website', handle: 'mara-oyelaran.com', verification: 'claimed' },
+      ],
+      verification_token: 'kofi-7f3a2k',
+      imports: [record],
+    });
+    expect(v.verificationToken).toBe('kofi-7f3a2k');
+    expect(v.imports).toEqual([record]);
+    expect(v.links[0]).toEqual({ label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints', verification: 'verified', checkedAt: '2026-10-22T12:00:00.000Z' });
+    expect(v.links[1]!.verification).toBe('claimed');
+  });
+
+  it('a public row (the view stripped them) has no token, no imports and no verification keys', () => {
+    const v = toArtistView({ ...base, links: [{ label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints' }], verification_token: null, imports: null });
+    expect('verificationToken' in v).toBe(false);
+    expect('imports' in v).toBe(false);
+    expect(v.links).toEqual([{ label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints' }]);
+    expect(JSON.stringify(v)).not.toMatch(/kofi-|verification|checkedAt/);
+    // A pre-0010 project: the columns are absent altogether.
+    expect(toArtistView(base).links).toEqual([]);
+  });
+
+  it('owner writes derive platform / handle from the URL and never send a verification', () => {
+    expect(artistLinkToJson({ label: 'IG', url: 'https://www.instagram.com/mara.paints', verification: 'verified', checkedAt: 'x' })).toEqual({ label: 'IG', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints' });
+    expect(artistLinkToJson({ label: 'Site', url: 'https://www.mara-oyelaran.com/' })).toEqual({ label: 'Site', url: 'https://www.mara-oyelaran.com/', platform: 'website', handle: 'mara-oyelaran.com' });
+    const row = artistPatchToRow({ links: [{ label: 'x', url: 'https://www.linkedin.com/in/mara-oyelaran', platform: 'other', handle: 'nope', verification: 'verified' }] });
+    expect(row).toEqual({ links: [{ label: 'x', url: 'https://www.linkedin.com/in/mara-oyelaran', platform: 'linkedin', handle: 'mara-oyelaran' }] });
+  });
+
+  it('the owner export round-trips token, imports and typed links', () => {
+    const row: ArtistRow = { ...base, user_id: DEMO_UUIDS.user_mara, contact_email: 'mara@example.com', region_region: 'Pennsylvania', region_country: 'United States', region_precision: 'region', links: [{ label: 'a', url: 'https://a.example', platform: 'website', handle: 'a.example', verification: 'failed', checkedAt: '2026-10-22T12:00:00.000Z' }], verification_token: 'kofi-7f3a2k', imports: [record] };
+    const a = toArtist(row);
+    expect(a.verificationToken).toBe('kofi-7f3a2k');
+    expect(a.imports).toEqual([record]);
+    expect(a.links[0]).toMatchObject({ verification: 'failed', checkedAt: '2026-10-22T12:00:00.000Z' });
+  });
+
+  /** fetch stand-in: routes by path; records calls. */
+  function stub(routes: Record<string, (body: unknown) => { status: number; body: unknown }>) {
+    const calls: { path: string; body: unknown }[] = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      let body: unknown = undefined;
+      try {
+        body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      } catch {
+        body = init?.body;
+      }
+      calls.push({ path: url.pathname, body });
+      const r = routes[url.pathname]?.(body) ?? { status: 404, body: { code: 'NOT_FOUND', message: 'Requested function was not found' } };
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { calls, fetchImpl: fetchImpl as typeof fetch };
+  }
+  const make = (fetchImpl: typeof fetch, signUp: 'on' | 'off' | undefined = 'on') =>
+    createSupabaseDataSource('http://127.0.0.1:1', 'test-anon-key', {
+      demoAutoSignIn: false,
+      ...(signUp ? { signUp } : {}),
+      publicAppUrl: 'https://app.koficollections.org/',
+      clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl } },
+    });
+  const ok = { displayName: 'Flow Tester', email: 'Flow@Example.com', password: 'rain on liberty avenue', consentVersion: CONSENT_VERSION };
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = (sub: string) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, role: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+  const userJson = (id: string, identities: unknown[] = [{ id: 'i' }]) => ({ id, aud: 'authenticated', role: 'authenticated', email: 'flow@example.com', identities, app_metadata: {}, user_metadata: {}, created_at: '2026-10-22T12:00:00Z' });
+
+  it('sign-up is off unless VITE_KOFI_SIGNUP=on, with no network call', async () => {
+    const { calls, fetchImpl } = stub({});
+    const ds = createSupabaseDataSource('http://127.0.0.1:1', 'k', { demoAutoSignIn: false, clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl } } });
+    await expect(ds.signUpArtist(ok)).rejects.toEqual(new ValidationError(SIGNUP_CLOSED_MESSAGE, 'email'));
+    await expect(make(fetchImpl, 'off').signUpArtist(ok)).rejects.toBeInstanceOf(ValidationError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('validates before calling GoTrue, then sends kofi_role / display name / consent', async () => {
+    const { calls, fetchImpl } = stub({ '/auth/v1/signup': () => ({ status: 200, body: userJson('11111111-1111-4111-8111-111111111111') }) });
+    const ds = make(fetchImpl);
+    const e = await ds.signUpArtist({ ...ok, password: 'short' }).catch((x) => x);
+    expect(e).toBeInstanceOf(ValidationError);
+    expect(e.field).toBe('password');
+    expect(calls).toHaveLength(0);
+    const res = await ds.signUpArtist(ok);
+    expect(res).toEqual({ viewer: { role: 'public', displayName: 'Visitor' }, emailConfirmationRequired: true });
+    const sent = calls.find((c) => c.path === '/auth/v1/signup')!.body as { email: string; data: Record<string, string> };
+    expect(sent.email).toBe('flow@example.com');
+    expect(sent.data).toEqual({ kofi_role: 'artist', display_name: 'Flow Tester', kofi_consent_version: CONSENT_VERSION });
+  });
+
+  it('an existing email is a ConflictError (obfuscated user and explicit error)', async () => {
+    const a = stub({ '/auth/v1/signup': () => ({ status: 200, body: userJson('22222222-2222-4222-8222-222222222222', []) }) });
+    await expect(make(a.fetchImpl).signUpArtist(ok)).rejects.toBeInstanceOf(ConflictError);
+    const b = stub({ '/auth/v1/signup': () => ({ status: 422, body: { code: 'user_already_exists', msg: 'User already registered' } }) });
+    const err = await make(b.fetchImpl).signUpArtist(ok).catch((x) => x);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.field).toBe('email');
+  });
+
+  it('with a session: makes the draft artist (ensure_my_artist) and returns the server’s viewer', async () => {
+    const uid = '33333333-3333-4333-8333-333333333333';
+    const aid = '44444444-4444-4444-8444-444444444444';
+    const { calls, fetchImpl } = stub({
+      '/auth/v1/signup': () => ({ status: 200, body: { access_token: jwt(uid), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: userJson(uid) } }),
+      '/rest/v1/rpc/ensure_my_artist': () => ({ status: 200, body: aid }),
+      '/rest/v1/rpc/whoami': () => ({ status: 200, body: [{ user_id: uid, role: 'artist', display_name: 'Flow Tester', artist_id: aid, curator_id: null, curator_verified: false }] }),
+    });
+    const res = await make(fetchImpl).signUpArtist(ok);
+    expect(res.emailConfirmationRequired).toBe(false);
+    expect(res.viewer).toEqual({ role: 'artist', userId: uid, displayName: 'Flow Tester', artistId: aid });
+    expect(calls.map((c) => c.path)).toEqual(['/auth/v1/signup', '/rest/v1/rpc/ensure_my_artist', '/rest/v1/rpc/whoami']);
+  });
+
+  async function signedIn(routes: Parameters<typeof stub>[0], role: 'artist' | 'admin' = 'artist') {
+    const uid = role === 'artist' ? DEMO_UUIDS.user_mara : DEMO_UUIDS.user_quincy;
+    const s = stub({
+      '/auth/v1/user': () => ({ status: 200, body: userJson(uid) }),
+      '/rest/v1/rpc/whoami': () => ({ status: 200, body: [{ user_id: uid, role, display_name: 'x', artist_id: role === 'artist' ? DEMO_UUIDS.art_mara : null, curator_id: null, curator_verified: false }] }),
+      '/rest/v1/rpc/log_audit': () => ({ status: 200, body: null }),
+      ...routes,
+    });
+    const ds = make(s.fetchImpl);
+    await (ds as unknown as { client: { auth: { setSession: (x: { access_token: string; refresh_token: string }) => Promise<unknown> } } }).client.auth.setSession({ access_token: jwt(uid), refresh_token: 'r' });
+    const viewer = role === 'artist'
+      ? { role: 'artist' as const, userId: uid, displayName: 'Mara', artistId: DEMO_UUIDS.art_mara }
+      : { role: 'admin' as const, userId: uid, displayName: 'Quincy' };
+    return { ds, viewer, calls: s.calls };
+  }
+
+  it('importProfile: refuses visitors and private addresses; falls back to the handle when the reader is not deployed', async () => {
+    const visitor = SUPABASE_DEMO_IDENTITIES.find((d) => d.viewer.role === 'public')!.viewer;
+    await expect(make(stub({}).fetchImpl).importProfile(visitor, '@mara.paints')).rejects.toBeInstanceOf(ForbiddenError);
+    const { ds, viewer, calls } = await signedIn({});
+    await expect(ds.importProfile(viewer, 'http://localhost:54321/x')).rejects.toEqual(new ValidationError('That link cannot be read. Use a public http or https address.', 'url'));
+    const imp = await ds.importProfile(viewer, '@mara.paints');
+    expect(imp.source).toEqual({ label: 'Instagram @mara.paints', url: 'https://www.instagram.com/mara.paints', platform: 'instagram', handle: '@mara.paints', verification: 'claimed' });
+    expect(imp.fields.workingName).toBe('Mara Paints');
+    expect(imp.confidence.workingName).toBe(0.3);
+    expect(imp.notes[0]).toBe(READER_OFFLINE_NOTE);
+    expect(calls.some((c) => c.path === '/functions/v1/profile-import')).toBe(true);
+    expect(calls.find((c) => c.path === '/rest/v1/rpc/log_audit')?.body).toMatchObject({ p_action: 'artist.import', p_entity_id: DEMO_UUIDS.art_mara });
+  });
+
+  it('importProfile: turns the reader’s signals into suggestions; an unreadable page keeps the handle and says why', async () => {
+    let reachable = true;
+    const { ds, viewer } = await signedIn({
+      '/functions/v1/profile-import': () => ({
+        status: 200,
+        body: reachable
+          ? { reachable: true, fetchedAt: '2026-10-22T12:00:00.000Z', signals: { ogTitle: 'Mara Oyelaran (@mara.paints) • Instagram photos and videos', ogDescription: '1,234 Followers, 56 Following, 78 Posts - Mara Oyelaran (@mara.paints) on Instagram: "Painter. Pittsburgh."' } }
+          : { reachable: false, fetchedAt: '2026-10-22T12:00:00.000Z', reason: 'The page could not be reached.', signals: {} },
+      }),
+    });
+    const imp = await ds.importProfile(viewer, 'instagram.com/mara.paints');
+    expect(imp.fields).toMatchObject({ workingName: 'Mara Oyelaran', bio: 'Painter. Pittsburgh.', followers: 1234, postCount: 78 });
+    expect(imp.fetchedAt).toBe('2026-10-22T12:00:00.000Z');
+    reachable = false;
+    const thin = await ds.importProfile(viewer, '@mara.paints');
+    expect(thin.notes[0]).toBe('The page could not be reached. We used your handle.');
+    expect(thin.fields.workingName).toBe('Mara Paints');
+  });
+
+  it('recordImport calls record_import; checkMyLinks says the checker is offline instead of guessing', async () => {
+    const { ds, viewer, calls } = await signedIn({
+      '/rest/v1/rpc/record_import': () => ({ status: 200, body: null }),
+      '/rest/v1/artists_visible': () => ({ status: 200, body: { ...base, can_edit: true, links: [{ label: 'a', url: 'https://www.instagram.com/mara.paints', verification: 'claimed' }], verification_token: 'kofi-7f3a2k', imports: [record] } }),
+    });
+    const v = await ds.recordImport(viewer, record);
+    expect(calls.find((c) => c.path === '/rest/v1/rpc/record_import')?.body).toEqual({ p_record: record });
+    expect(v.imports).toEqual([record]);
+    await expect(ds.checkMyLinks(viewer)).rejects.toThrow(CHECKER_OFFLINE_MESSAGE);
+    const sent = calls.find((c) => c.path === '/functions/v1/profile-import')!.body;
+    expect(sent).toEqual({ url: 'https://www.instagram.com/mara.paints', verify: true, profileUrl: `https://app.koficollections.org/#/artists/${DEMO_UUIDS.art_mara}` });
+  });
+
+  it('checkMyLinks: an artist cannot check someone else; Kofi passes the artist id', async () => {
+    const mara = await signedIn({});
+    await expect(mara.ds.checkMyLinks(mara.viewer, DEMO_UUIDS.art_june)).rejects.toEqual(new ForbiddenError('Kofi staff only.'));
+    const admin = await signedIn({
+      '/rest/v1/artists_visible': () => ({ status: 200, body: { ...base, id: DEMO_UUIDS.art_june, can_edit: true, links: [{ label: 'a', url: 'https://www.instagram.com/june.weaves' }], verification_token: 'kofi-jw4b8t', imports: [] } }),
+      '/functions/v1/profile-import': () => ({ status: 200, body: { verification: 'verified', checkedAt: '2026-10-22T12:00:00.000Z' } }),
+    }, 'admin');
+    const links = await admin.ds.checkMyLinks(admin.viewer, DEMO_UUIDS.art_june);
+    expect(links).toHaveLength(1);
+    expect(admin.calls.find((c) => c.path === '/functions/v1/profile-import')?.body).toMatchObject({ artistId: DEMO_UUIDS.art_june, verify: true });
   });
 });

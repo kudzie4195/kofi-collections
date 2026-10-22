@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CONSENT_VERSION, VISIBILITY_LABEL } from '@/domain/types';
-import type { ApplicationRow, ApplicationStatus, ArtworkView, LotRow, OpenCall, PayoutRow } from '@/domain/types';
+import type { ApplicationRow, ApplicationStatus, ArtistView, ArtworkView, LotRow, OpenCall, PayoutRow } from '@/domain/types';
+import { profileCompleteness, readyForReview } from '@/domain/intake';
 import { APPLICATION_STATUSES } from '@/domain/types';
 import { callPhase } from '@/domain/programme';
 import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, deadlineLabel } from '@/features/programme/format';
@@ -11,6 +12,7 @@ import { errorMessage, useToast } from '@/state/toast';
 import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Panel, Skeleton, StatusDot, TopBar, VisibilityBadge } from '@/ui';
 import { STATUS_COPY, VisibilityIcon, capitalize } from './shared';
 import { payoutTotals, totalsText } from './salesShared';
+import { studioIntakeCopy } from './intakeCopy';
 
 export function StudioHome() {
   const { viewer, data } = useSession();
@@ -99,6 +101,9 @@ export function StudioHome() {
               Signed in as <span className="strong">{artist.workingName}</span>
             </p>
           </header>
+
+        {artist.status === 'draft' && <FinishCard artist={artist} workCount={works.length} />}
+        {artist.status === 'pending' && <ReviewBanner />}
 
         <section className="st-status" aria-label="Profile status">
           <div className="row">
@@ -206,6 +211,78 @@ export function StudioHome() {
         </div>
       </main>
     </div>
+  );
+}
+
+/** Draft: how far along the profile is, what still blocks review, and the way back into the intake. */
+function FinishCard({ artist, workCount }: { artist: ArtistView; workCount: number }) {
+  const c = studioIntakeCopy.finish;
+  const shape = {
+    workingName: artist.workingName,
+    bio: artist.bio,
+    region: artist.region ?? { region: '', country: '' },
+    mediums: artist.mediums,
+    links: artist.links,
+    consentVersion: artist.consentVersion,
+  };
+  const pct = profileCompleteness(shape, workCount);
+  const left = readyForReview(shape, workCount);
+  return (
+    <section className="st-finish" aria-labelledby="st-finish-title" data-testid="finish-card">
+      <div className="st-finish__head">
+        <h2 className="st-finish__title" id="st-finish-title">
+          {c.title}
+        </h2>
+        <span className="st-finish__pct" aria-hidden="true">
+          {pct}
+          <span className="st-finish__unit">%</span>
+        </span>
+      </div>
+      <div className="st-finish__bar" role="progressbar" aria-label={c.progressLabel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-valuetext={`${pct}% ${c.done}`}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+      {left.length > 0 ? (
+        <div className="st-finish__left">
+          <h3 className="eyebrow st-finish__left-title">{c.leftTitle}</h3>
+          <ul className="st-finish__list">
+            {left.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="small st-finish__ready">{c.ready}</p>
+      )}
+      <LinkButton to="/join">
+        {c.cta}
+      </LinkButton>
+      <p className="tiny muted">{c.note}</p>
+    </section>
+  );
+}
+
+/** Pending: Kofi has it; what happens next; editing stays open. */
+function ReviewBanner() {
+  const c = studioIntakeCopy.pending;
+  return (
+    <section className="st-review" aria-labelledby="st-review-title" data-testid="review-banner">
+      <p className="eyebrow eyebrow--gold">{c.lede}</p>
+      <h2 className="st-review__title" id="st-review-title">
+        {c.title}
+      </h2>
+      <h3 className="eyebrow st-review__next">{c.nextTitle}</h3>
+      <ol className="st-review__list">
+        {c.next.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ol>
+      <p className="small st-review__edit">{c.keepEditing}</p>
+      <div>
+        <LinkButton to="profile" tone="secondary" size="sm" icon={<Icon.Edit />}>
+          {c.editProfile}
+        </LinkButton>
+      </div>
+    </section>
   );
 }
 

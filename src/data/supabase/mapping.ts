@@ -2,7 +2,12 @@
  * Pure mappers between Postgres rows (snake_case, flattened) and the domain
  * types in src/domain/types.ts. No network, no supabase-js — unit-testable.
  */
+import { normalizeLink } from '@/domain/intake';
 import type {
+  ArtistLink,
+  LinkPlatform,
+  LinkVerification,
+  ProfileImportRecord,
   ApplicationRow,
   ApplicationStatus,
   ArtDocument,
@@ -121,7 +126,7 @@ interface ArtistCommonRow {
   availability_commissions: boolean;
   availability_sales: boolean;
   availability_exhibitions: boolean;
-  links: { label: string; url: string }[] | null;
+  links: ArtistLinkJson[] | null;
   status: ArtistStatus;
   visibility: Artist['visibility'];
   avatar_color: string;
@@ -140,15 +145,76 @@ interface ArtistCommonRow {
   consent_accepted_at: Ts | null;
 }
 
+/**
+ * One element of artists.links (0010_intake.sql): label + url always; the v5
+ * keys when set. artists_visible strips verification / checkedAt for anyone but
+ * the owner and Kofi.
+ */
+export interface ArtistLinkJson {
+  label: string;
+  url: string;
+  platform?: LinkPlatform;
+  handle?: string;
+  verification?: LinkVerification;
+  checkedAt?: string;
+}
+
 /** kofi.artists_visible */
 export interface ArtistViewRow extends ArtistCommonRow {
   region_label: string | null;
   can_edit: boolean;
+  /** 0010: owner / Kofi only, NULL otherwise (absent on a pre-0010 project). */
+  verification_token?: string | null;
+  imports?: ProfileImportRecord[] | null;
 }
 
 /** Full kofi.artists row (owner export only). */
 export interface ArtistRow extends ArtistCommonRow {
   user_id: string;
+  verification_token?: string | null;
+  imports?: ProfileImportRecord[] | null;
+}
+
+const LINK_PLATFORM_SET = new Set<string>(['instagram', 'website', 'facebook', 'linkedin', 'tiktok', 'youtube', 'other']);
+const LINK_VERIFICATION_SET = new Set<string>(['claimed', 'verified', 'failed', 'unreachable']);
+
+/** links jsonb element → ArtistLink. Unknown / absent keys are omitted, never undefined. */
+export function toArtistLink(l: ArtistLinkJson): ArtistLink {
+  const out: ArtistLink = { label: l.label, url: l.url };
+  if (l.platform && LINK_PLATFORM_SET.has(l.platform)) out.platform = l.platform;
+  if (l.handle) out.handle = l.handle;
+  if (l.verification && LINK_VERIFICATION_SET.has(l.verification)) out.verification = l.verification;
+  if (l.checkedAt) out.checkedAt = l.checkedAt;
+  return out;
+}
+
+/**
+ * ArtistLink → what an owner write stores. platform / handle are derived from
+ * the URL (as the mock does); verification / checkedAt are never sent — the
+ * artists_links_guard trigger keeps the checker's result for an unchanged URL
+ * and starts a new URL at 'claimed'.
+ */
+export function artistLinkToJson(l: ArtistLink): ArtistLinkJson {
+  const out: ArtistLinkJson = { label: l.label, url: l.url };
+  const n = normalizeLink(l.url);
+  if (n) {
+    out.platform = n.platform;
+    out.handle = n.handle;
+  } else if (l.platform && LINK_PLATFORM_SET.has(l.platform)) {
+    out.platform = l.platform;
+    if (l.handle) out.handle = l.handle;
+  }
+  return out;
+}
+
+/** imports jsonb → ProfileImportRecord[] (newest last, as stored). */
+export function toImportRecords(rows: ProfileImportRecord[] | null | undefined): ProfileImportRecord[] {
+  return (rows ?? []).map((r) => ({
+    source: toArtistLink(r.source as ArtistLinkJson),
+    fetchedAt: r.fetchedAt,
+    appliedFields: [...(r.appliedFields ?? [])],
+    notes: [...(r.notes ?? [])],
+  }));
 }
 
 /** Full kofi.artworks row + images (owner export only). */
@@ -375,7 +441,7 @@ export function toArtistView(row: ArtistViewRow): ArtistView {
       sales: !!row.availability_sales,
       exhibitions: !!row.availability_exhibitions,
     },
-    links: (row.links ?? []).map((l) => ({ label: l.label, url: l.url })),
+    links: (row.links ?? []).map(toArtistLink),
     status: row.status,
     visibility: row.visibility,
     avatarColor: row.avatar_color,
@@ -399,6 +465,8 @@ export function toArtistView(row: ArtistViewRow): ArtistView {
   if (row.kofi_notes) view.kofiNotes = row.kofi_notes;
   if (row.consent_version) view.consentVersion = row.consent_version;
   if (row.consent_accepted_at) view.consentAcceptedAt = iso(row.consent_accepted_at);
+  if (row.verification_token) view.verificationToken = row.verification_token;
+  if (row.imports && (row.verification_token || row.can_edit)) view.imports = toImportRecords(row.imports);
   return view;
 }
 
@@ -429,6 +497,8 @@ export function toArtist(row: ArtistRow): Artist {
   if (row.kofi_notes) artist.kofiNotes = row.kofi_notes;
   if (row.consent_version) artist.consentVersion = row.consent_version;
   if (row.consent_accepted_at) artist.consentAcceptedAt = iso(row.consent_accepted_at);
+  if (row.verification_token) artist.verificationToken = row.verification_token;
+  if (row.imports) artist.imports = toImportRecords(row.imports);
   return artist;
 }
 
@@ -594,7 +664,7 @@ export function artistPatchToRow(patch: ArtistPatch): Record<string, unknown> {
     row.availability_sales = patch.availability.sales;
     row.availability_exhibitions = patch.availability.exhibitions;
   }
-  if (patch.links !== undefined) row.links = patch.links.map((l) => ({ label: l.label, url: l.url }));
+  if (patch.links !== undefined) row.links = patch.links.map(artistLinkToJson);
   if (patch.contact !== undefined) {
     row.contact_email = patch.contact.email;
     row.contact_phone = patch.contact.phone || null;

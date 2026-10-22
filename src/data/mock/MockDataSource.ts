@@ -6,6 +6,7 @@ import type {
   ApplicationStatus,
   ArtDocument,
   Artist,
+  ArtistLink,
   ArtistView,
   Artwork,
   ArtworkView,
@@ -31,9 +32,14 @@ import type {
   Payout,
   PayoutRow,
   PayoutStatus,
+  ProfileImport,
+  ProfileImportFields,
+  ProfileImportRecord,
   ProgrammeEvent,
   ProgrammeImage,
   ReportRange,
+  SignUpInput,
+  SignUpResult,
   Shortlist,
   Story,
   Venue,
@@ -54,8 +60,10 @@ import {
   type BuyerInquiryInput,
   KOFI_TIME_ZONE,
 } from '@/domain/programme';
+import { importFromSignals, isFetchableUrl, makeVerificationToken, MAX_LINKS, normalizeLink, TOKEN_RE, validateSignUp, verificationFromPage } from '@/domain/intake';
 import { canMoveLot, canMovePayout, isCallOrganizer, projectLotForArtist, splitSale, validateCallTerms, validateLot, validateSale, type LotInput, type SaleInput } from '@/domain/sales';
 import {
+  ConflictError,
   ForbiddenError,
   NotFoundError,
   StorageFullError,
@@ -72,7 +80,8 @@ import {
   type ApplicationInput,
   type ProgrammeInput,
 } from '../DataSource';
-import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, PROGRAMME_KEYS, SALES_KEYS, type MockState, type ProgrammeState } from './seed';
+import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, DEMO_USERS, PROGRAMME_KEYS, SALES_KEYS, seedIntake, V4_SEED_LINKS, type MockAccount, type MockState, type ProgrammeState } from './seed';
+import { fixtureFor, KOFI_PROFILE_BASE } from './importFixtures';
 
 const STORAGE_KEY = 'kofi.mock.state.v1';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -83,7 +92,19 @@ export interface MockOptions {
   persist?: boolean;
   now?: () => Date;
   idFactory?: (prefix: string) => string;
+  /**
+   * Simulated network time for importProfile / checkMyLinks, [min, max] ms, so the
+   * intake's per-link progress line is visible. Default [300, 700]; 0 under vitest.
+   */
+  ioDelayMs?: [number, number];
 }
+
+const IS_TEST = (import.meta as { env?: { MODE?: string } }).env?.MODE === 'test';
+
+/** Brand avatar colours (same set as ui AVATAR_COLORS; duplicated so the data layer never imports React). */
+const AVATAR_PALETTE = ['#c8322b', '#e3b23c', '#7fa344', '#4f6a25', '#f3eee6', '#242424'] as const;
+const IMPORT_FIELD_KEYS: (keyof ProfileImportFields)[] = ['workingName', 'bio', 'photoUrl', 'city', 'region', 'country', 'links', 'followers', 'postCount'];
+const MAX_IMPORT_RECORDS = 30;
 
 export class MockDataSource implements DataSource {
   readonly mode = 'mock' as const;
@@ -94,11 +115,13 @@ export class MockDataSource implements DataSource {
   private readonly persist: boolean;
   private readonly now: () => Date;
   private readonly makeId: (prefix: string) => string;
+  private readonly ioDelay: [number, number];
 
   constructor(opts: MockOptions = {}) {
     this.persist = opts.persist ?? typeof localStorage !== 'undefined';
     this.now = opts.now ?? (() => new Date());
     this.makeId = opts.idFactory ?? ((p) => `${p}_${Math.random().toString(36).slice(2, 10)}`);
+    this.ioDelay = opts.ioDelayMs ?? (IS_TEST ? [0, 0] : [300, 700]);
     this.state = this.load() ?? buildSeed();
     this.lastPersisted = JSON.stringify(this.state);
   }
@@ -279,8 +302,9 @@ export class MockDataSource implements DataSource {
 
   /* ---------- identities ---------- */
 
+  /** The fixed demo cast, then everyone who signed up on this device (persisted, so they survive a reload). */
   async listDemoIdentities(): Promise<DemoIdentity[]> {
-    return DEMO_IDENTITIES;
+    return [...DEMO_IDENTITIES, ...this.state.accounts.map((a) => clone(a.identity))];
   }
 
   /* ---------- discovery ---------- */
@@ -324,7 +348,7 @@ export class MockDataSource implements DataSource {
     const out: ArtistView[] = [];
     for (const a of this.state.artists) {
       if (a.status !== 'approved' && v.role !== 'admin') continue;
-      const view = projectArtist(a, v);
+      const view = viewArtist(a, v);
       if (view) out.push(view);
     }
     return out.sort((x, y) => x.workingName.localeCompare(y.workingName));
@@ -334,7 +358,7 @@ export class MockDataSource implements DataSource {
     const a = this.artistById(id);
     if (!a) return undefined;
     const v = this.resolve(viewer);
-    const view = projectArtist(a, v);
+    const view = viewArtist(a, v);
     if (view && v.role === 'admin' && (a.visibility === 'private' || a.status !== 'approved')) {
       this.audit(v, 'private.view', 'artist', a.id);
       this.commit(true);
@@ -351,13 +375,184 @@ export class MockDataSource implements DataSource {
       .sort((x, y) => y.year - x.year || y.createdAt.localeCompare(x.createdAt));
   }
 
+  /* ---------- intake (v5) ---------- */
+
+  private async simulateNetwork(): Promise<void> {
+    const [min, max] = this.ioDelay;
+    if (max <= 0) return;
+    await new Promise((r) => setTimeout(r, min + Math.random() * Math.max(0, max - min)));
+  }
+
+  private emailTaken(email: string): boolean {
+    const e = email.toLowerCase();
+    return (
+      this.state.accounts.some((x) => x.email === e) ||
+      this.state.artists.some((a) => a.contact.email.trim().toLowerCase() === e) ||
+      this.state.curators.some((c) => c.workEmail.trim().toLowerCase() === e)
+    );
+  }
+
+  /** "Flow Tester" → flow_tester, unique across artist ids, user ids and picker ids. */
+  private uniqueSlug(name: string): string {
+    const base =
+      name
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 24)
+        .replace(/_+$/, '') || 'artist';
+    const users = new Set<string>([
+      ...Object.values(DEMO_USERS),
+      ...this.state.artists.map((a) => a.userId),
+      ...this.state.curators.map((c) => c.userId),
+      ...this.state.accounts.map((x) => x.userId),
+    ]);
+    const ids = new Set<string>([...DEMO_IDENTITIES.map((i) => i.id), ...this.state.accounts.map((x) => x.identity.id)]);
+    const free = (s: string) => !this.artistById(`art_${s}`) && !users.has(`user_${s}`) && !ids.has(`user_${s}`);
+    if (free(base)) return base;
+    for (let n = 2; ; n++) if (free(`${base}_${n}`)) return `${base}_${n}`;
+  }
+
+  private uniqueToken(): string {
+    const used = new Set(this.state.artists.map((a) => a.verificationToken).filter(Boolean));
+    for (;;) {
+      const t = makeVerificationToken();
+      if (!used.has(t)) return t;
+    }
+  }
+
+  async signUpArtist(input: SignUpInput): Promise<SignUpResult> {
+    const problem = validateSignUp({
+      displayName: String(input?.displayName ?? ''),
+      email: String(input?.email ?? ''),
+      password: String(input?.password ?? ''),
+      consentVersion: String(input?.consentVersion ?? ''),
+    });
+    if (problem) throw new ValidationError(problem.message, problem.field);
+    const email = input.email.trim().toLowerCase();
+    if (this.emailTaken(email)) throw new ConflictError();
+    const name = input.displayName.trim().replace(/\s+/g, ' ');
+    const slug = this.uniqueSlug(name);
+    const now = this.iso();
+    const userId = `user_${slug}`;
+    const artistId = `art_${slug}`;
+    const artist: Artist = {
+      id: artistId,
+      userId,
+      workingName: name,
+      bio: '',
+      region: { region: '', country: '', precision: 'region' }, // same default as kofi.ensure_my_artist()
+      mediums: [],
+      careerStage: 'emerging',
+      experience: { commissions: false, publicArt: false, residencies: false, institutionalShows: false },
+      availability: { commissions: false, sales: false, exhibitions: false },
+      links: [],
+      contact: { email },
+      visibility: 'private',
+      status: 'draft',
+      consentVersion: CONSENT_VERSION,
+      consentAcceptedAt: now,
+      avatarColor: AVATAR_PALETTE[hash(slug) % AVATAR_PALETTE.length]!,
+      verificationToken: this.uniqueToken(),
+      imports: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const viewer: Viewer = { role: 'artist', userId, artistId, displayName: name };
+    const identity: DemoIdentity = { id: userId, label: name, caption: 'Artist · new profile', viewer };
+    const account: MockAccount = { email, userId, artistId, identity, createdAt: now };
+    this.state.artists.push(artist);
+    this.state.accounts.push(account);
+    // Never the email or the code in the trail.
+    this.audit(viewer, 'artist.signup', 'artist', artistId, { status: 'draft' });
+    this.audit(viewer, 'artist.consent', 'artist', artistId, { version: CONSENT_VERSION });
+    this.commit();
+    return { viewer: { ...viewer }, identity: clone(identity), emailConfirmationRequired: false };
+  }
+
+  /**
+   * Mock mode cannot fetch: the sample artists' links return their canned page
+   * (importFixtures.ts); anything else gets handle-only suggestions with a note.
+   */
+  async importProfile(viewer: Viewer, url: string): Promise<ProfileImport> {
+    const v = this.resolve(viewer);
+    if (v.role !== 'artist' && v.role !== 'admin') throw new ForbiddenError('Sign in as an artist to do this.');
+    if (v.role === 'artist') this.requireMyArtist(v); // must have a profile, even a draft
+    const n = typeof url === 'string' ? normalizeLink(url) : undefined;
+    if (!n) throw new ValidationError('That does not look like a profile or website link. Try the address from your browser.', 'url');
+    if (!isFetchableUrl(n.url)) throw new ValidationError('Kofi cannot read that address. Use a public profile or website link.', 'url');
+    await this.simulateNetwork();
+    const source: ArtistLink = { label: n.label, url: n.url, platform: n.platform, handle: n.handle, verification: 'claimed' };
+    const fixture = fixtureFor(n.url);
+    const result = importFromSignals(source, fixture?.signals ?? {}, this.iso());
+    if (!fixture) result.notes.unshift('The demo cannot read live pages, so we used your handle.');
+    // Reading a page is not a profile change: only an applied import (recordImport) is audited.
+    return result;
+  }
+
+  async recordImport(viewer: Viewer, record: ProfileImportRecord): Promise<ArtistView> {
+    const a = this.requireMyArtist(viewer);
+    const n = record && typeof record.source?.url === 'string' ? normalizeLink(record.source.url) : undefined;
+    if (!n || !isFetchableUrl(n.url)) throw new ValidationError('That import has no usable source link.', 'source');
+    const applied = Array.isArray(record.appliedFields) ? [...new Set(record.appliedFields)] : [];
+    if (applied.some((f) => !IMPORT_FIELD_KEYS.includes(f))) throw new ValidationError('Unknown imported field.', 'appliedFields');
+    const fetchedAt = typeof record.fetchedAt === 'string' && !Number.isNaN(Date.parse(record.fetchedAt)) ? new Date(record.fetchedAt).toISOString() : this.iso();
+    const notes = Array.isArray(record.notes) ? record.notes.filter((x): x is string => typeof x === 'string').map((x) => x.slice(0, 300)).slice(0, 5) : [];
+    const row: ProfileImportRecord = {
+      source: { label: n.label, url: n.url, platform: n.platform, handle: n.handle, verification: 'claimed' },
+      fetchedAt,
+      appliedFields: applied,
+      notes,
+    };
+    a.imports = [...(a.imports ?? []), row].slice(-MAX_IMPORT_RECORDS);
+    a.updatedAt = this.iso();
+    this.audit(viewer, 'artist.import', 'artist', a.id, { platform: n.platform, handle: n.handle, applied: applied.join(',') || 'none' });
+    this.commit();
+    return viewArtist(a, this.resolve(viewer))!;
+  }
+
+  /**
+   * Mock rule: a link whose page is in the fixtures is "read"; it verifies when the
+   * page text carries the artist's code (or links back to their Kofi page), else
+   * 'failed'. Any other link is 'unreachable'. checkedAt is set either way.
+   */
+  async checkMyLinks(viewer: Viewer, artistId?: string): Promise<ArtistLink[]> {
+    const v = this.resolve(viewer);
+    let a: Artist;
+    if (artistId !== undefined && v.role === 'admin') {
+      const found = this.artistById(artistId);
+      if (!found) throw new NotFoundError('Artist not found.');
+      a = found;
+    } else {
+      a = this.requireMyArtist(v);
+      if (artistId !== undefined && artistId !== a.id) throw new ForbiddenError('You can only check your own links.');
+    }
+    if (!a.verificationToken || !TOKEN_RE.test(a.verificationToken)) a.verificationToken = this.uniqueToken();
+    await this.simulateNetwork();
+    const now = this.iso();
+    const token = a.verificationToken;
+    const counts = { verified: 0, failed: 0, unreachable: 0 };
+    a.links = typeLinks(a.links, a.links).map((l) => {
+      const page = fixtureFor(l.url);
+      const verification = page ? verificationFromPage(page.pageText, token, KOFI_PROFILE_BASE + a.id) : 'unreachable';
+      counts[verification]++;
+      return { ...l, verification, checkedAt: now };
+    });
+    a.updatedAt = now;
+    this.audit(v, 'artist.links', 'artist', a.id, { links: a.links.length, ...counts });
+    this.commit();
+    return a.links.map((l) => ({ ...l }));
+  }
+
   /* ---------- artist self-service ---------- */
 
   async getMyArtist(viewer: Viewer): Promise<ArtistView | undefined> {
     const v = this.resolve(viewer);
     if (v.role !== 'artist' || !v.artistId) return undefined;
     const a = this.artistById(v.artistId);
-    return a ? projectArtist(a, v) : undefined;
+    return a ? viewArtist(a, v) : undefined;
   }
 
   async updateMyArtist(viewer: Viewer, patch: ArtistPatch): Promise<ArtistView> {
@@ -369,10 +564,13 @@ export class MockDataSource implements DataSource {
     for (const link of patch.links ?? []) {
       if (!/^https?:\/\//i.test(link.url)) throw new ValidationError(`Link "${link.label || link.url}" must start with http:// or https://`, 'links');
     }
+    if (patch.links && patch.links.length > MAX_LINKS) throw new ValidationError(`Up to ${MAX_LINKS} links. Remove one to add another.`, 'links');
     const prevVisibility = a.visibility;
     // Runtime whitelist: status, kofiNotes, consent and identity fields can never arrive through a patch.
     const safe: ArtistPatch = {};
     for (const key of ARTIST_PATCH_KEYS) if (key in patch) (safe as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+    // Platform and handle are derived; verification is Kofi's checker's, never the client's.
+    if (safe.links) safe.links = typeLinks(safe.links, a.links);
     Object.assign(a, safe, { updatedAt: this.iso() });
     // An approved artist who hides their profile is paused, not deleted; re-publishing needs no re-review.
     if (patch.visibility && patch.visibility !== prevVisibility) {
@@ -381,7 +579,7 @@ export class MockDataSource implements DataSource {
       this.audit(viewer, 'artist.update', 'artist', a.id);
     }
     this.commit();
-    return projectArtist(a, this.resolve(viewer))!;
+    return viewArtist(a, this.resolve(viewer))!;
   }
 
   async acceptConsent(viewer: Viewer, version: string): Promise<ArtistView> {
@@ -391,18 +589,18 @@ export class MockDataSource implements DataSource {
     a.updatedAt = a.consentAcceptedAt;
     this.audit(viewer, 'artist.consent', 'artist', a.id, { version });
     this.commit();
-    return projectArtist(a, this.resolve(viewer))!;
+    return viewArtist(a, this.resolve(viewer))!;
   }
 
   async submitForReview(viewer: Viewer): Promise<ArtistView> {
     const a = this.requireMyArtist(viewer);
     if (a.consentVersion !== CONSENT_VERSION) throw new ValidationError('Accept the current consent terms before submitting.', 'consent');
-    if (a.status === 'approved') return projectArtist(a, this.resolve(viewer))!;
+    if (a.status === 'approved') return viewArtist(a, this.resolve(viewer))!;
     a.status = 'pending';
     a.updatedAt = this.iso();
     this.audit(viewer, 'artist.status', 'artist', a.id, { status: 'pending' });
     this.commit();
-    return projectArtist(a, this.resolve(viewer))!;
+    return viewArtist(a, this.resolve(viewer))!;
   }
 
   async saveArtwork(viewer: Viewer, input: ArtworkInput): Promise<ArtworkView> {
@@ -728,7 +926,7 @@ export class MockDataSource implements DataSource {
   async listAllArtists(viewer: Viewer): Promise<AdminArtistRow[]> {
     this.requireAdmin(viewer);
     return this.state.artists
-      .map((a) => ({ ...projectArtist(a, viewer)!, artworkCount: this.state.artworks.filter((w) => w.artistId === a.id).length }))
+      .map((a) => ({ ...viewArtist(a, viewer)!, artworkCount: this.state.artworks.filter((w) => w.artistId === a.id).length }))
       .sort((x, y) => statusRank(x.status) - statusRank(y.status) || x.workingName.localeCompare(y.workingName));
   }
 
@@ -741,7 +939,7 @@ export class MockDataSource implements DataSource {
     if (note?.trim()) a.kofiNotes = [a.kofiNotes, `${this.iso().slice(0, 10)}: ${note.trim()}`].filter(Boolean).join('\n');
     this.audit(viewer, 'artist.status', 'artist', a.id, { status });
     this.commit();
-    return projectArtist(a, viewer)!;
+    return viewArtist(a, viewer)!;
   }
 
   async setKofiNotes(viewer: Viewer, artistId: string, notes: string): Promise<ArtistView> {
@@ -751,7 +949,7 @@ export class MockDataSource implements DataSource {
     a.kofiNotes = notes;
     this.audit(viewer, 'artist.update', 'artist', a.id, { field: 'kofiNotes' });
     this.commit();
-    return projectArtist(a, viewer)!;
+    return viewArtist(a, viewer)!;
   }
 
   async markArtworkReviewed(viewer: Viewer, artworkId: string): Promise<ArtworkView> {
@@ -1589,6 +1787,60 @@ const ARTIST_PATCH_KEYS = [
   'avatarColor',
 ] as const satisfies readonly (keyof ArtistPatch)[];
 
+/**
+ * The artist projection plus the v5 intake fields: the verification code and the
+ * import trail go to the owner and Kofi admins only; everyone else gets each link's
+ * label, url, platform and handle, never its verification state.
+ */
+export function viewArtist(a: Artist, v: Viewer): ArtistView | undefined {
+  const view = projectArtist(a, v);
+  if (!view) return undefined;
+  if (canEdit(v, a.id)) {
+    if (a.verificationToken) view.verificationToken = a.verificationToken;
+    view.imports = clone(a.imports ?? []);
+  } else {
+    view.links = a.links.map((l) => {
+      const out: ArtistLink = { label: l.label, url: l.url };
+      if (l.platform) out.platform = l.platform;
+      if (l.handle) out.handle = l.handle;
+      return out;
+    });
+  }
+  return view;
+}
+
+/**
+ * Give each link its platform and handle (derived from the URL), keeping the
+ * verification a link already earned when its URL is unchanged; a new or edited
+ * URL starts as 'claimed'. The URL itself is kept as the artist typed it.
+ */
+export function typeLinks(next: ArtistLink[], prev: ArtistLink[]): ArtistLink[] {
+  const before = new Map(prev.map((l) => [l.url.trim().toLowerCase(), l]));
+  return next.map((l) => {
+    const url = String(l.url ?? '').trim();
+    const n = normalizeLink(url);
+    const out: ArtistLink = { label: String(l.label ?? '').trim(), url, platform: n?.platform ?? 'other', handle: n?.handle ?? hostOf(url) };
+    const old = before.get(url.toLowerCase());
+    out.verification = old?.verification ?? 'claimed';
+    if (old?.verification && old.checkedAt) out.checkedAt = old.checkedAt;
+    return out;
+  });
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 function cloneShortlist(s: Shortlist): Shortlist {
   return { ...s, items: s.items.map((i) => ({ ...i })) };
 }
@@ -1629,6 +1881,10 @@ export function validateArtwork(input: ArtworkInput): void {
  *   anything that points at an artist or work the user has since deleted.
  */
 export function migrateState(parsed: Partial<MockState>): MockState {
+  return migrateIntake(migrateProgramme(parsed));
+}
+
+function migrateProgramme(parsed: Partial<MockState>): MockState {
   const missing = PROGRAMME_KEYS.filter((k) => !Array.isArray(parsed[k]));
   const preV4 = SALES_KEYS.some((k) => !Array.isArray(parsed[k]));
   const kindless = Array.isArray(parsed.openCalls) && parsed.openCalls.some((c) => !c.kind);
@@ -1660,6 +1916,37 @@ export function migrateState(parsed: Partial<MockState>): MockState {
   for (const c of out.openCalls) if (!c.kind) c.kind = seedKind.get(c.id) ?? 'exhibition';
   if (preV4) mergeSalesSeed(out, seed, workIds, artistIds);
   return out;
+}
+
+/**
+ * v4 → v5 (idempotent): sign-ups collection; every artist gets a verification code,
+ * an import trail and typed links. Seeded artists whose links are still exactly the
+ * v4 sample links get the v5 sample links (and their seeded code and import trail);
+ * every other link keeps its URL and label and is marked 'claimed'.
+ */
+function migrateIntake(out: MockState): MockState {
+  if (!Array.isArray(out.accounts)) out.accounts = [];
+  const seed = seedIntake();
+  const used = new Set(out.artists.map((a) => a.verificationToken).filter((t): t is string => !!t && TOKEN_RE.test(t)));
+  for (const a of out.artists) {
+    const s = seed[a.id];
+    const v4 = V4_SEED_LINKS[a.id];
+    const untouched = !!s && !!v4 && sameLinks(a.links ?? [], v4);
+    if (untouched) a.links = clone(s.links);
+    else a.links = typeLinks(Array.isArray(a.links) ? a.links : [], Array.isArray(a.links) ? a.links : []);
+    if (!a.verificationToken || !TOKEN_RE.test(a.verificationToken)) {
+      let t = s && !used.has(s.verificationToken) ? s.verificationToken : makeVerificationToken();
+      while (used.has(t)) t = makeVerificationToken();
+      a.verificationToken = t;
+      used.add(t);
+    }
+    if (!Array.isArray(a.imports)) a.imports = untouched ? clone(s.imports) : [];
+  }
+  return out;
+}
+
+function sameLinks(a: ArtistLink[], b: { label: string; url: string }[]): boolean {
+  return a.length === b.length && a.every((l, i) => l.label === b[i]!.label && l.url === b[i]!.url && !l.platform);
 }
 
 function mergeSalesSeed(out: MockState, seed: ProgrammeState, workIds: Set<string>, artistIds: Set<string>): void {

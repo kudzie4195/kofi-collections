@@ -34,11 +34,13 @@ Migrations live in `supabase/migrations/` and run in filename order:
 | `0006_realtime.sql` | Adds the eight main `kofi.*` tables to the `supabase_realtime` publication |
 | `0007_expose_schema.sql` | **Does not expose the schema** (see step 2). Grants everything in `kofi` to `service_role` and asks PostgREST to reload its schema cache |
 | `0008_programme.sql` | The programme (§9): six tables, five enums, six views, five RPCs, RLS, the public `kofi-programme` bucket + four storage policies, six realtime tables. Idempotent, one transaction, recorded in `kofi.applied_migrations` |
+| `0009_sales.sql` | Partners, auctions, payouts, reports (§10) |
+| `0010_intake.sql` | Intake (§11): `artists.verification_token` / `imports`, typed links, `ensure_my_artist`, `record_import`, `set_link_verification`; plus the `profile-import` edge function in `supabase/functions/` |
 
-**On the shared project — psql or the SQL editor (recommended).** Run each file above in order (0000 → 0008):
+**On the shared project — psql or the SQL editor (recommended).** Run each file above in order (0000 → 0010; on the live project use the `apply/` parts, §10 / §11):
 
 ```bash
-for f in supabase/migrations/000*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || break; done
+for f in supabase/migrations/00*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || break; done
 ```
 
 or open each file in the SQL editor, paste, run.
@@ -370,3 +372,83 @@ Generated: parts by `node supabase/scripts/split-0009.mjs`, seeds and patches by
 - Two live lots cannot share a work or a lot number even transiently (partial unique indexes); mock mode only checks this in `validateLot`.
 - Report placements with the same day and artist may come in a different (stable, deterministic) order than mock mode; every other row order and all totals are identical.
 - Lot, payout, sale and report ids are UUIDs.
+
+## 11. Intake: sign-up, profile import, link verification (0010)
+
+An artist signs up, pastes their links, Kofi reads what is public there and suggests fields (the artist ticks what to keep), and each link can be checked for the artist's code (`kofi-xxxxxx`). Shapes are the v5 section of `src/domain/types.ts`; rules are `src/domain/intake.ts`. Nothing an import suggests is written without the artist's click; a check result is never self-asserted.
+
+### Objects (all in `kofi`)
+
+| Kind | Names |
+|---|---|
+| Columns on `artists` | `verification_token text` (default `make_verification_token()`, unique index, CHECK `artists_verification_token_format` = `TOKEN_RE`), `imports jsonb` (`ProfileImportRecord[]`, newest last, CHECK ≤ 20) |
+| `links` elements | may carry `platform`, `handle`, `verification`, `checkedAt` — CHECK `artists_links_shape` (`links_shape_ok()`: ≤ 6, known keys only, strings, http(s), known platform / verification). Added `NOT VALID` and validated at once when every row conforms |
+| Trigger | `artists_links_guard` (before insert / update; client writes only): an unchanged URL keeps the checker's `verification` / `checkedAt` (case-insensitive), a new URL starts `claimed`; a direct insert gets a server token and empty imports |
+| Replaced | `artists_audit` (intake-only changes are logged by the RPCs instead), `log_audit` (+ `artist.import`, `artist.links`), `artists_visible` (links via `artist_intake()`, `verification_token` + `imports` appended); audit vocabulary = 0009's + `artist.signup`, `artist.import`, `artist.links` |
+| Read helper | `artist_intake(p_artist_id)` (definer): owner / Kofi get stored links, token, imports; anyone else who may see the artist gets `links_public()` (label / url / platform / handle) and NULLs |
+| RPCs | `ensure_my_artist()`, `record_import(p_record jsonb)`, `set_link_verification(p_url, p_verification, p_checked_at, p_artist_id)` |
+| Pure helpers | `token_ok`, `links_shape_ok`, `links_public`, `links_core`; `make_verification_token` (definer: checks uniqueness) |
+| Privileges | `select (links)` on `artists` revoked from anon / authenticated (read through the view); the new columns were never granted; new RPCs revoked from `public` / `anon`; `set_link_verification` also for `service_role` |
+| Unchanged | `kofi.handle_new_user` (still creates the `kofi.profiles` row only) |
+
+### How the pieces fit
+
+- **Sign-up** (`signUpArtist`): `auth.signUp` with `options.data = { kofi_role: 'artist', display_name, kofi_consent_version }`. The existing trigger makes the profile (role artist). The draft `artists` row is made by `ensure_my_artist()`: right after sign-up when the project returns a session, otherwise on the first sign-in (the data source calls it from `whoami` when the role is artist and there is no artist id). The draft is private, named as signed, contact = the account email (lower-cased), with a server token; the consent version from the form is recorded on the row and in `consents`. Audited `artist.create` + `artist.signup`. An existing profile without a token gets one from the same call. `emailConfirmationRequired = !session`; with confirmation on, GoTrue answers a taken address with a user without identities — reported as `ConflictError`, like the explicit `user_already_exists`.
+- **Import** (`importProfile`): the `profile-import` edge function reads the page; the client turns its `PageSignals` into suggestions with the same `importFromSignals()` mock mode uses. When the function is not deployed / unreachable (platform 404, 5xx, network) the import falls back to the handle with the note *"Kofi's reader is offline; we used your handle."* — never an error. A private address is a `ValidationError` (field `url`) before any request.
+- **Record** (`recordImport`): `record_import()` — owner only, cleaned to the record shape (known field names, notes ≤ 10 × 300), newest 20 kept, audited `artist.import {stage: applied}`.
+- **Check** (`checkMyLinks`): one function call per link in verify mode. The function reads the artist's token **itself**, through `artists_visible` with the caller's JWT (so only the owner or Kofi get one), fetches the stored link, searches the page text (visible text, meta contents, hrefs — not scripts or styles) for the token or a link back to `…/#/artists/<id>`, and writes the result with the **service role** through `set_link_verification()`; it logs `artist.links` as the caller. A link whose own URL contains the token is `failed` (pages echo their URL). When the function is offline the call fails with *"Kofi's link checker is offline right now. Your links keep their last result."* — nothing is overwritten.
+- **set_link_verification by hand**: Kofi staff may set any value (audited `artist.links {by: staff}`); the owner may only reset a link to `claimed`.
+
+### The `profile-import` edge function
+
+`supabase/functions/profile-import/`: `index.ts` (Deno entry), `handler.ts` (API, CORS, rate limit), `fetch.ts` (guards), `parse.ts` (HTML reading + the `intake.ts` rules re-implemented), `deps.ts` (Supabase wiring), `parse_test.ts`.
+
+- `POST { url }` → `{ source, reachable: true, signals, status, finalUrl, truncated, fetchedAt }` or `{ source, reachable: false, reason, signals: {}, fetchedAt }`.
+- `POST { url, verify: true, artistId?, profileUrl? }` → `{ verification: 'verified' | 'failed' | 'unreachable', checkedAt, reason? }`. A `token` in the body is ignored. `artistId` is for Kofi; `profileUrl` must end in `/artists/<that artist's id>`.
+- Errors `{ error, message }`: 400 not fetchable / bad body, 401 no signed-in user (the anon key alone is refused), 403 not owner / Kofi, 404 link not on the profile, 405, 429 (20 calls per user per 10 minutes, in memory per instance), 500.
+- Guards: `isFetchableUrl()` on the URL **and on every redirect** (≤ 3, followed by hand), DNS answers checked against private / link-local / CGNAT / IPv6 ULA ranges (`Deno.resolveDns`), 6 s for the whole exchange, 1 MB body cap, HTML only, browser user agent.
+- CORS: `http://localhost:5173`, `http://localhost:4173`, `capacitor://localhost`, `https://localhost`, `http://localhost`, plus `KOFI_ALLOWED_ORIGINS` (comma-separated).
+
+Deploy (not done from here — no deploy access in this session):
+
+```bash
+supabase functions deploy profile-import --project-ref cdcavlfcbecylvkevxfi      # verify_jwt stays on (default)
+supabase secrets set KOFI_ALLOWED_ORIGINS="https://<the app's origin>" --project-ref cdcavlfcbecylvkevxfi
+```
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are provided by the platform. The function only calls `kofi.whoami`, `kofi.artists_visible`, `kofi.log_audit` (as the caller) and `kofi.set_link_verification` (service role); it touches nothing of the other product.
+
+### Sign-up switch: `VITE_KOFI_SIGNUP`
+
+The shared project's `auth.users` also carries the other product's own `public.handle_new_user` trigger, so **every real sign-up there also creates a row in that product's `public.profiles`**. Sign-up is therefore off unless switched on:
+
+| `VITE_KOFI_SIGNUP` | `signUpArtist` |
+|---|---|
+| unset / `off` | `ValidationError('Sign-up is not open on this demo yet. Ask Kofi for an invite.', 'email')`, no request |
+| `on` | `auth.signUp` as above |
+
+Turn it on only on a Kofi-owned project (or once the other product's trigger ignores `kofi_role` sign-ups). With email confirmation on, add the app's URL to Auth → URL configuration → Redirect URLs (the sign-up passes `emailRedirectTo` = the page's origin + path, or `VITE_KOFI_PUBLIC_URL`). `VITE_KOFI_PUBLIC_URL` (optional) is also the base of the link-back URL the checker accepts (`<base>#/artists/<id>`); default: the current page.
+
+### Applying 0010 to the shared production project
+
+Needs 0000–0009 (live). Run in order, each file on its own:
+
+| # | File | Bytes | What |
+|---|---|---|---|
+| 1 | `supabase/apply/0010_part1.sql` | 13 613 | helpers, `artists` columns + CHECKs, audit vocabulary, `artists_links_guard`, `artists_audit`, `artist_intake`, `artists_visible` |
+| 2 | `supabase/apply/0010_part2.sql` | 13 700 | `ensure_my_artist`, `record_import`, `set_link_verification`, `log_audit`, privileges (revokes `select (links)`), records `0010_intake`, reloads PostgREST |
+| 3 | `supabase/apply/0010_live_patch.sql` | 9 805 | demo artists by fixed id: token where NULL, imports where `[]`, links where still the v4 placeholders; adds the two columns to `kofi.demo_artists` and fills them so *Reset demo data* keeps the codes; any other artist without a token gets one. No audit rows |
+
+Then deploy the function (above). Generated: parts by `node supabase/scripts/split-0010.mjs`, the patch by `node supabase/scripts/generate-seed.mjs`. Every file is one transaction and safe to re-run; 0010 does **not** undo 0009 (it restates 0009's audit list plus three actions and touches no 0009 object). **Never re-run 0008 after 0009 / 0010**; if it happens, run 0009 and then 0010 again. A fresh project runs 0000–0010 and then the seeds (`seed_content.sql` now needs 0010).
+
+### Verification
+
+- `supabase/tests/intake_test.sql` (28 assertions, run on both databases): seed tokens / typed links / imports, CHECKs and helpers (`TOKEN_RE`, 200 unique tokens, links shape, `links_public`), projection for anon / verified curator / another artist / owner / Kofi (view and `/rpc`, base columns not selectable), owner writes cannot forge a verification, token or imports, `set_link_verification` per caller (owner, Kofi, curator, anon, service role), `record_import` rules + cap + audit, `log_audit`, the sign-up trigger path (`kofi_role` metadata → profile → `ensure_my_artist`, consent, audit, idempotent, curator refused, token backfill), demo reset, 0009 state preserved, privileges, `search_path`, `handle_new_user` unchanged. `run-local.sh` also applies 0010 twice, and on the live path loads the **v4** seed (`tests/fixtures/seed_content_v4.sql`), applies the 0010 parts twice and the live patch twice, and checks the artists equal the seed with no audit rows and that a reset keeps them.
+- `deno test supabase/functions/profile-import/` (20 tests): the `intake.test.ts` link / SSRF / verification cases, the HTML parser on fixture pages (og / twitter meta, entities, JSON-LD `@graph` Person, relative URLs, `rel=me`, social anchors, scripts ignored), redirects / DNS / size / timeout / non-HTML guards, the handler (CORS, auth, import, verify, owner vs Kofi, echo guard, rate limit, 500).
+- `SupabaseDataSource` end to end against PostgREST 12.2.3 with a GoTrue sign-up stand-in and the **real** handler + Supabase deps mounted at `/functions/v1/profile-import` (pages from fixtures): sign-up (off by default, validation, conflict, confirmation then first sign-in), imports (og tags, JSON-LD, unreachable, private addresses), forged verification ignored, record, check (failed → verified by code → verified by link back → unreachable), Mara's seeded Instagram verifies, Kofi re-check, visitor / curator never see the token, imports or verification, audit trail.
+
+### Known differences from mock mode
+
+- Mock mode cannot fetch: fixtures stand in for pages. Supabase mode reads real pages, so Instagram / Facebook may or may not serve their og tags to a server, and LinkedIn almost never does — the import then says so and keeps the handle.
+- When the function is not deployed, imports fall back to the handle and `checkMyLinks` reports the checker offline (mock: unknown links become `unreachable`).
+- New artist ids are UUIDs; the sign-up returns no `DemoIdentity`.

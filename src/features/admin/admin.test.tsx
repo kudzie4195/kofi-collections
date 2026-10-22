@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { MockDataSource } from '@/data/mock/MockDataSource';
 import type { Viewer } from '@/domain/types';
+import { CONSENT_VERSION } from '@/domain/types';
 import { identity, renderAt } from '@/features/curator/testUtils';
 import { describeAudit, timeAgo } from './format';
 
@@ -132,5 +133,87 @@ describe('activity log', () => {
     expect(timeAgo('2026-09-01T12:00:00Z', now)).toBe('2 months ago');
     expect(describeAudit({ action: 'document.open' })).toBe('opened a private document');
     expect(describeAudit({ action: 'inquiry.status', meta: { status: 'forwarded' } })).toBe('forwarded an introduction request to the artist');
+  });
+});
+
+/* ---------------- v5 intake on the Kofi desk ---------------- */
+
+describe('artist queue: links and import sources', () => {
+  it('summarises links and shows where each profile was imported from', async () => {
+    renderAt('/admin/artists', identity('admin'));
+    const mara = (await screen.findByText('Mara Oyelaran')).closest('a')!;
+    expect(within(mara).getByTestId('links-summary')).toHaveTextContent('2 links · 1 verified');
+    expect(within(mara).getByText('Imported from Instagram')).toBeInTheDocument();
+    expect(within(mara).getByText('Imported from Website')).toBeInTheDocument();
+    const priya = screen.getByText('Priya Venkataraman').closest('a')!;
+    expect(within(priya).getByTestId('links-summary')).toHaveTextContent(/^2 links$/);
+  });
+});
+
+describe('admin artist detail: links, sources, code', () => {
+  it('shows pills, the imported-from list and the code; Re-check updates the pills', async () => {
+    renderAt('/admin/artists/art_priya', identity('admin'));
+    const links = await screen.findByRole('list', { name: 'Priya Venkataraman: links' });
+    const pill = (handle: string) =>
+      within(links).getByText(handle).closest('li')!.querySelector('[data-verification]')!.getAttribute('data-verification');
+    expect(pill('priyavenkataraman.art')).toBe('claimed');
+    expect(pill('priya-venkataraman')).toBe('unreachable');
+
+    const sources = screen.getByRole('list', { name: 'Imported from' });
+    const items = within(sources).getAllByRole('listitem').filter((li) => li.classList.contains('ad-import'));
+    expect(items).toHaveLength(2);
+    expect(within(sources).getByText('name, bio')).toBeInTheDocument();
+    expect(within(sources).getByText('Looked, used nothing')).toBeInTheDocument();
+    expect(within(sources).getByText(/could not read a name from the page/)).toBeInTheDocument();
+
+    const call = screen.getByRole('region', { name: 'If they call' });
+    expect(within(call).getByTestId('artist-token')).toHaveTextContent('kofi-pv3h8x');
+
+    // Approve/decline are still there.
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-check links' }));
+    expect(await screen.findByText('Checked 2 links: 1 verified.')).toBeInTheDocument();
+    await waitFor(() => {
+      const fresh = screen.getByRole('list', { name: 'Priya Venkataraman: links' });
+      expect(within(fresh).getByText('priyavenkataraman.art').closest('li')!.querySelector('[data-verification]')!.getAttribute('data-verification')).toBe('verified');
+    });
+  });
+
+  it('says so plainly when a profile has no links or imports', async () => {
+    const ds = new MockDataSource({ persist: false });
+    const { viewer } = await ds.signUpArtist({ displayName: 'Ada Brightwater', email: 'ada@example.com', password: 'rain on liberty avenue', consentVersion: CONSENT_VERSION });
+    renderAt(`/admin/artists/${viewer.artistId}`, identity('admin'), ds);
+    expect(await screen.findByText('No links on this profile yet.')).toBeInTheDocument();
+    expect(screen.getByText(/Typed in by hand/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-check links' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('artist-token').textContent).toMatch(/^kofi-[a-z2-9]{6}$/);
+  });
+});
+
+describe('audit wording for the intake', () => {
+  it('reads as a sentence after the actor name', () => {
+    expect(describeAudit({ action: 'artist.signup', meta: { status: 'draft' } })).toBe('created a profile');
+    expect(describeAudit({ action: 'artist.import', meta: { platform: 'instagram', handle: '@mara.paints' } })).toBe('pulled details from Instagram @mara.paints');
+    expect(describeAudit({ action: 'artist.import', meta: { url: 'https://www.instagram.com/mara.paints' } })).toBe('pulled details from Instagram @mara.paints');
+    expect(describeAudit({ action: 'artist.import', meta: { platform: 'instagram', applied: 'workingName' } })).toBe('pulled details from Instagram');
+    expect(describeAudit({ action: 'artist.import', meta: { url: 'https://www.mara-oyelaran.com' } })).toBe('pulled details from mara-oyelaran.com');
+    expect(describeAudit({ action: 'artist.import' })).toBe('pulled details from a link');
+    expect(describeAudit({ action: 'artist.links', meta: { links: 2, verified: 1, failed: 1, unreachable: 0 } })).toBe('checked 2 links: 1 verified');
+    expect(describeAudit({ action: 'artist.links', meta: { links: 1, verified: 0 } })).toBe('checked 1 link: 0 verified');
+  });
+
+  it('shows sign-up, import and link checks in the activity log', async () => {
+    const ds = new MockDataSource({ persist: false });
+    const { viewer } = await ds.signUpArtist({ displayName: 'Ada Brightwater', email: 'ada@example.com', password: 'rain on liberty avenue', consentVersion: CONSENT_VERSION });
+    const imp = await ds.importProfile(viewer, '@ada.paints');
+    // Reading a page is not audited; applying what it suggested is.
+    await ds.recordImport(viewer, { source: imp.source, fetchedAt: imp.fetchedAt, appliedFields: ['workingName'], notes: imp.notes });
+    await ds.updateMyArtist(viewer, { links: [{ label: 'Instagram @ada.paints', url: 'https://www.instagram.com/ada.paints' }] });
+    await ds.checkMyLinks(viewer);
+    renderAt('/admin/activity', identity('admin'), ds);
+    expect(await screen.findByText(/created a profile/)).toBeInTheDocument();
+    expect(screen.getByText(/pulled details from Instagram/)).toBeInTheDocument();
+    expect(screen.getByText(/checked 1 link: 0 verified/)).toBeInTheDocument();
   });
 });

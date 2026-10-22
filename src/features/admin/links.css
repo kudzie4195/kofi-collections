@@ -1,0 +1,139 @@
+/* Link rows + verification pills (v5 intake), shared by the Kofi desk and the studio.
+   Kofi Noir: hairline rows, small coloured dots, tracked uppercase pill labels. */
+
+.lk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.lk-list > li {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lk-line {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  align-items: start;
+  padding-block: var(--space-3);
+}
+@media (min-width: 640px) {
+  .lk-line {
+    align-items: center;
+  }
+}
+.lk-line__icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--cream-2);
+}
+.lk-line__icon svg {
+  width: 18px;
+  height: 18px;
+}
+.lk-line[data-platform='instagram'] .lk-line__icon,
+.lk-line[data-platform='tiktok'] .lk-line__icon {
+  color: var(--gold);
+}
+.lk-line[data-platform='website'] .lk-line__icon {
+  color: var(--green);
+}
+.lk-line__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.lk-line__platform {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.lk-line__handle {
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.lk-line__handle:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.lk-line__help {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+/* on a phone the pill (and any action) drops under the handle, aligned with it */
+.lk-line__side {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .lk-line {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+  .lk-line__side {
+    grid-column: 3;
+    justify-content: flex-end;
+  }
+}
+
+.lk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+.lk-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cream-3);
+  flex: none;
+}
+.lk-pill__when {
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+.lk-pill--verified {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+}
+.lk-pill--verified .lk-pill__dot {
+  background: var(--green);
+}
+.lk-pill--failed {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--red) 60%, transparent);
+}
+.lk-pill--failed .lk-pill__dot {
+  background: var(--red);
+}
+.lk-pill--unreachable .lk-pill__dot {
+  background: transparent;
+  border: 1px solid var(--gold);
+}
+.lk-pill--claimed .lk-pill__dot {
+  background: transparent;
+  border: 1px solid var(--cream-3);
+}

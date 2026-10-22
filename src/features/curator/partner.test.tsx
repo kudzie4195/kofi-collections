@@ -194,6 +194,8 @@ describe('partner desk: lots', () => {
     fireEvent.change(within(sale).getByLabelText(/Hammer price/), { target: { value: '1,500.00' } });
     expect(within(sale).getByText('$1,050.00')).toBeInTheDocument(); // artist 70%
     expect(within(sale).getByText('$1,650.00')).toBeInTheDocument(); // buyer pays with 10% premium
+    // The sheet defaults to the real clock's today; the data source's clock is NOW, so pin the date.
+    fireEvent.change(within(sale).getByLabelText('Sold on'), { target: { value: '2026-10-20' } });
     fireEvent.change(within(sale).getByLabelText('Buyer reference'), { target: { value: 'Paddle 9' } });
     fireEvent.click(within(sale).getByRole('button', { name: 'Record sale' }));
     await waitFor(() => expect(ds._raw().lots.find((l) => l.lotNumber === 7)?.status).toBe('sold'));

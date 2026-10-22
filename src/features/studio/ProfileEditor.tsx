@@ -3,6 +3,10 @@ import type { ArtistLink, ArtistView, CareerStage, Medium, RegionPrecision, Visi
 import { CAREER_STAGES, MEDIUMS } from '@/domain/types';
 import { regionLabel } from '@/domain/visibility';
 import type { ArtistPatch } from '@/data/DataSource';
+import { MAX_LINKS, normalizeLink, validateLinkInput } from '@/domain/intake';
+import { LinkLine } from '@/features/admin/links';
+import { VerifyBox } from '@/features/join/VerifyBox';
+import { checkedToast, studioIntakeCopy } from './intakeCopy';
 import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
 import {
@@ -136,11 +140,45 @@ function toPatch(f: ProfileForm): ArtistPatch {
       ...(years !== undefined ? { yearsPracticing: years } : {}),
     },
     availability: { commissions: f.availCommissions, sales: f.availSales, exhibitions: f.availExhibitions },
-    links: f.links.map((l) => ({ label: l.label.trim(), url: l.url.trim() })).filter((l) => l.label || l.url),
+    links: patchLinks(f.links),
     contact,
     visibility: f.visibility,
     avatarColor: f.avatarColor,
   };
+}
+
+/**
+ * Typed links (pasted, imported or already normalised) keep their platform,
+ * handle and last check. A free-text label/url pair is normalised when it can
+ * be, and starts as 'claimed'; one that cannot be read stays as typed.
+ */
+function patchLinks(links: ArtistLink[]): ArtistLink[] {
+  const out: ArtistLink[] = [];
+  for (const l of links) {
+    const label = l.label.trim();
+    const url = l.url.trim();
+    if (!label && !url) continue;
+    if (l.platform) {
+      const kept: ArtistLink = { label: label || url, url, platform: l.platform };
+      if (l.handle) kept.handle = l.handle;
+      if (l.verification) kept.verification = l.verification;
+      if (l.checkedAt) kept.checkedAt = l.checkedAt;
+      out.push(kept);
+      continue;
+    }
+    const n = normalizeLink(url);
+    out.push(n ? { label: label || n.label, url: n.url, platform: n.platform, handle: n.handle, verification: 'claimed' } : { label, url });
+  }
+  return out;
+}
+
+/** Replace the links inside a serialised form (keeps the unsaved-changes baseline honest after a save or check). */
+function withLinks(serialised: string, links: ArtistLink[]): string {
+  try {
+    return JSON.stringify({ ...(JSON.parse(serialised) as ProfileForm), links });
+  } catch {
+    return serialised;
+  }
 }
 
 type Errors = Record<string, string>;
@@ -158,6 +196,7 @@ function validate(f: ProfileForm): { errors: Errors; linkErrors: Record<number, 
   if (y && (!/^\d{1,2}$/.test(y) || Number(y) > 80)) errors.yearsPracticing = 'Use a whole number of years, like 6.';
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) errors.contact = 'Enter an email Kofi can reach you at, like name@example.com.';
   f.links.forEach((l, i) => {
+    if (l.platform) return;
     if (!l.label.trim() && !l.url.trim()) return;
     if (!/^https?:\/\/\S+\.\S+/i.test(l.url.trim())) linkErrors[i] = 'Start the address with https:// — for example https://yourstudio.com';
     else if (!l.label.trim()) linkErrors[i] = 'Give this link a label, like Website or Instagram.';
@@ -175,6 +214,9 @@ export function ProfileEditor() {
   const [errors, setErrors] = useState<Errors>({});
   const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
+  const [newLink, setNewLink] = useState('');
+  const [newLinkError, setNewLinkError] = useState('');
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (q.data && !form) {
@@ -239,8 +281,11 @@ export function ProfileEditor() {
     setErrors({});
     setSaving(true);
     try {
-      await data.updateMyArtist(viewer, toPatch(form));
-      setBaseline(JSON.stringify(form));
+      const saved = await data.updateMyArtist(viewer, toPatch(form));
+      const next = { ...form, links: saved.links.map((l) => ({ ...l })) };
+      setForm(next);
+      setLinkErrors({});
+      setBaseline(JSON.stringify(next));
       toast.push('Profile saved', 'success');
     } catch (e) {
       const fe = fieldErrorFrom(e);
@@ -257,6 +302,58 @@ export function ProfileEditor() {
   }
 
   const bioLen = f.bio.trim().length;
+  const lc = studioIntakeCopy.links;
+  const token = q.data?.verificationToken;
+
+  function addLink() {
+    const problem = validateLinkInput(newLink, f.links);
+    if (problem) {
+      setNewLinkError(problem.message);
+      return;
+    }
+    const n = normalizeLink(newLink)!;
+    const key = (u: string) => u.toLowerCase().replace('://www.', '://');
+    if (f.links.some((l) => key(l.url) === key(n.url))) {
+      setNewLinkError(lc.duplicate);
+      return;
+    }
+    set('links', [...f.links, { label: n.label, url: n.url, platform: n.platform, handle: n.handle, verification: 'claimed' }]);
+    setNewLink('');
+    setNewLinkError('');
+  }
+
+  /** Saves unsaved link edits first (the checker reads the saved profile), then merges the results into the form. */
+  async function checkLinks() {
+    if (!form) return;
+    const savedLinks = (JSON.parse(baseline) as ProfileForm).links;
+    const linksDirty = JSON.stringify(form.links) !== JSON.stringify(savedLinks);
+    setChecking(true);
+    try {
+      if (linksDirty) {
+        const v = validate(form);
+        if (Object.values(v.linkErrors).some(Boolean)) {
+          setLinkErrors(v.linkErrors);
+          setErrors((e) => ({ ...e, links: v.errors.links ?? '' }));
+          toast.push(v.errors.links ?? 'Fix the highlighted links.', 'error');
+          return;
+        }
+        await data.updateMyArtist(viewer, { links: patchLinks(form.links) });
+      }
+      const checked = await data.checkMyLinks(viewer);
+      const links = checked.map((l) => ({ ...l }));
+      setForm((cur) => (cur ? { ...cur, links } : cur));
+      setBaseline((b) => withLinks(b, links));
+      setLinkErrors({});
+      const verified = links.filter((l) => l.verification === 'verified').length;
+      const unreachable = links.some((l) => l.verification === 'unreachable');
+      const tail = verified === 0 ? ` ${lc.checkedNone}` : unreachable ? ` ${lc.unreachable}` : '';
+      toast.push(`${linksDirty ? `${lc.savedFirst} ` : ''}${checkedToast(links.length, verified)}${tail}`, verified ? 'success' : 'info');
+    } catch (e) {
+      toast.push(errorMessage(e), 'error');
+    } finally {
+      setChecking(false);
+    }
+  }
 
   return (
     <Shell>
@@ -398,49 +495,109 @@ export function ProfileEditor() {
         </Panel>
 
         <Panel title="Links">
-          <div className="stack">
-            {f.links.length === 0 && <p className="small muted">Add your website, portfolio or social accounts. Links are public.</p>}
-            {f.links.map((l, i) => (
-              <div key={i} className="st-link-row">
-                <Input
-                  label={`Link ${i + 1} label`}
-                  value={l.label}
-                  placeholder="Website"
-                  onChange={(e) => set('links', f.links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                />
-                <Input
-                  label={`Link ${i + 1} address`}
-                  value={l.url}
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://"
-                  error={linkErrors[i]}
-                  onChange={(e) => {
-                    set('links', f.links.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)));
-                    if (linkErrors[i]) setLinkErrors((le) => ({ ...le, [i]: '' }));
-                  }}
-                />
-                <Button
-                  tone="ghost"
-                  icon={<Icon.Trash />}
-                  aria-label={`Remove link ${i + 1}${l.label ? ` (${l.label})` : ''}`}
-                  className="st-link-row__remove"
-                  onClick={() => {
-                    set('links', f.links.filter((_, j) => j !== i));
-                    setLinkErrors({});
-                  }}
-                />
-              </div>
-            ))}
+          <div className="stack st-links">
+            <p className="small muted">{lc.lede}</p>
+            {f.links.length > 0 && (
+              <ul className="st-links__list" aria-label="Your links">
+                {f.links.map((l, i) =>
+                  l.platform ? (
+                    <li key={`${l.url}-${i}`}>
+                      <LinkLine
+                        link={l}
+                        action={
+                          <Button
+                            tone="ghost"
+                            icon={<Icon.Trash />}
+                            aria-label={`${lc.remove} ${l.label || l.url}`}
+                            className="st-links__remove"
+                            onClick={() => {
+                              set('links', f.links.filter((_, j) => j !== i));
+                              setLinkErrors({});
+                            }}
+                          />
+                        }
+                      />
+                    </li>
+                  ) : (
+                    <li key={i} className="st-link-row">
+                      <Input
+                        label={`Link ${i + 1} label`}
+                        value={l.label}
+                        placeholder="Website"
+                        onChange={(e) => set('links', f.links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                      />
+                      <Input
+                        label={`Link ${i + 1} address`}
+                        value={l.url}
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://"
+                        error={linkErrors[i]}
+                        onChange={(e) => {
+                          set('links', f.links.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)));
+                          if (linkErrors[i]) setLinkErrors((le) => ({ ...le, [i]: '' }));
+                        }}
+                      />
+                      <Button
+                        tone="ghost"
+                        icon={<Icon.Trash />}
+                        aria-label={`Remove link ${i + 1}${l.label ? ` (${l.label})` : ''}`}
+                        className="st-link-row__remove"
+                        onClick={() => {
+                          set('links', f.links.filter((_, j) => j !== i));
+                          setLinkErrors({});
+                        }}
+                      />
+                    </li>
+                  ),
+                )}
+              </ul>
+            )}
             {errors.links && !Object.values(linkErrors).some(Boolean) && (
               <p className="field__error" role="alert">
                 {errors.links}
               </p>
             )}
-            <div>
-              <Button tone="secondary" size="sm" icon={<Icon.Plus />} onClick={() => set('links', [...f.links, { label: '', url: '' }])}>
-                Add a link
+            <div className="st-links__add">
+              <Input
+                label={lc.inputLabel}
+                hint={newLinkError ? undefined : lc.inputHint}
+                error={newLinkError || undefined}
+                value={newLink}
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                disabled={f.links.length >= MAX_LINKS}
+                onChange={(e) => {
+                  setNewLink(e.target.value);
+                  if (newLinkError) setNewLinkError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addLink();
+                  }
+                }}
+              />
+              <Button tone="secondary" icon={<Icon.Plus />} onClick={addLink} disabled={f.links.length >= MAX_LINKS} className="st-links__add-btn">
+                {lc.add}
               </Button>
+            </div>
+            <div>
+              <Button
+                tone="ghost"
+                size="sm"
+                className="ghost-flat"
+                icon={<Icon.Plus />}
+                disabled={f.links.length >= MAX_LINKS}
+                onClick={() => set('links', [...f.links, { label: '', url: '' }])}
+              >
+                {lc.addManual}
+              </Button>
+            </div>
+            <div className="st-links__verify">
+              <VerifyBox token={token} links={f.links} onCheck={() => void checkLinks()} checking={checking} />
             </div>
           </div>
         </Panel>

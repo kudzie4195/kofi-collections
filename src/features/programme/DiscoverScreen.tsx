@@ -1,13 +1,18 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import bundledArt from 'virtual:bundled-art';
 import { Link } from 'react-router-dom';
 import type { ArtworkView, Exhibition, OpenCall, ProgrammeEvent, Story } from '@/domain/types';
 import { callPhase, exhibitionPhase } from '@/domain/programme';
-import { useQuery } from '@/state/session';
-import { Icon, LinkButton, SiteFooter, TopBar, WallLabel } from '@/ui';
+import { useQuery, useViewer } from '@/state/session';
+import { Button, Icon, LinkButton, SiteFooter, TopBar, WallLabel } from '@/ui';
 import { plural } from '@/features/gallery/helpers';
-import { DeadlineBadge, EventRow, ExhibitionVisual, PhaseEyebrow, SampleTag, SectionHead, StoryCard, useToday, workImage } from './shared';
-import { eventIsPast, formatDateRange } from './format';
+import { DeadlineBadge, EventRow, SampleTag, SectionHead, StoryCard, useToday, workImage } from './shared';
+import { eventIsPast } from './format';
+import { CollectorInquirySheet } from './CollectorInquirySheet';
+import { homeCopy } from './homeCopy';
+
+// "Now showing" sits far below the fold: its own chunk keeps the first load under budget.
+const NowShowing = lazy(() => import('./DiscoverNowShowing').then((m) => ({ default: m.NowShowing })));
 
 const heroSrc: string = bundledArt['hero.jpg'] ?? '/art/hero.jpg';
 
@@ -42,6 +47,12 @@ interface DiscoverData {
 
 export function DiscoverScreen() {
   const today = useToday();
+  const viewer = useViewer();
+  const h = homeCopy;
+  const [askOpen, setAskOpen] = useState(false);
+  // The hero speaks to artists: visitors start a profile, artists go to their studio, staff browse.
+  const primary =
+    viewer.role === 'public' ? { to: '/join', label: h.hero.start } : viewer.role === 'artist' ? { to: '/studio', label: h.hero.studio } : { to: '/works', label: h.hero.browse };
   const q = useQuery<DiscoverData>(async (data, viewer) => {
     const [exhibitions, calls, events, stories, works] = await Promise.all([
       data.listExhibitions(viewer),
@@ -81,12 +92,12 @@ export function DiscoverScreen() {
         <span className="band__stripe band__stripe--2" aria-hidden="true" />
         <span className="band__stripe band__stripe--3" aria-hidden="true" />
         <div className="container container--wide band__inner kg-hero__inner">
-          <p className="eyebrow kg-hero__eyebrow">Pittsburgh · Artist-owned records</p>
+          <p className="eyebrow kg-hero__eyebrow">{h.hero.eyebrow}</p>
           <h2 id="kg-hero-title" className="display kg-hero__title">
-            <span className="kg-hero__line">Artists keep the record.</span> <span className="kg-hero__line kg-hero__line--offset">Curators find the work.</span>
+            <span className="kg-hero__line">{h.hero.line1}</span> <span className="kg-hero__line kg-hero__line--offset">{h.hero.line2}</span>
           </h2>
           <p className="kg-hero__lede">
-            Every work here was catalogued by the artist who made it, with price and detail shown only to the people they choose.
+            {h.hero.lede}
             {works.length > 0 && (
               <span className="kg-hero__count">
                 {' '}
@@ -96,18 +107,110 @@ export function DiscoverScreen() {
             )}
           </p>
           <div className="kp-hero__ctas">
-            <LinkButton to="/works">Browse the works</LinkButton>
-            <LinkButton to="/whats-on" tone="secondary">
-              What’s on
-            </LinkButton>
+            <LinkButton to={primary.to}>{primary.label}</LinkButton>
+            <a
+              href="#kp-how"
+              className="btn btn--secondary"
+              onClick={(e) => {
+                e.preventDefault();
+                const el = document.getElementById('kp-how');
+                if (!el) return;
+                el.setAttribute('tabindex', '-1');
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                el.focus({ preventScroll: true });
+              }}
+            >
+              {h.hero.how}
+            </a>
           </div>
         </div>
       </section>
 
       <main className="kp-discover__main">
-        {nowShowing && <NowShowing ex={nowShowing} today={today} byId={byId} />}
+        <section className="container container--wide kp-block kp-how" aria-labelledby="kp-how">
+          <SectionHead id="kp-how" eyebrow={h.how.eyebrow} title={h.how.title} />
+          <ol className="kp-how__steps">
+            {h.how.steps.map((st, i) => (
+              <li key={st.title} className="kp-how__step">
+                <span className="kp-how__num" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <h3 className="kp-how__title">{st.title}</h3>
+                <p className="kp-how__body">{st.body}</p>
+              </li>
+            ))}
+          </ol>
+          {viewer.role === 'public' && (
+            <div className="kp-how__cta">
+              <LinkButton to="/join" tone="secondary">
+                {h.how.cta}
+                <Icon.ArrowRight />
+              </LinkButton>
+            </div>
+          )}
+        </section>
+
+        <section className="container container--wide kp-block kp-why" aria-labelledby="kp-why">
+          <SectionHead id="kp-why" eyebrow={h.why.eyebrow} title={h.why.title} tone="gold" />
+          <ul className="kp-facts">
+            {h.why.facts.map((f, i) => (
+              <li key={f.title} className={`kp-fact kp-fact--${(['red', 'gold', 'green'] as const)[i % 3]}`}>
+                <span className="kp-fact__stroke" aria-hidden="true" />
+                <h3 className="kp-fact__title">{f.title}</h3>
+                <p className="kp-fact__body">{f.body}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         {openCalls.length > 0 && <OpenCallBand calls={openCalls} today={today} />}
+
+        {featuredArtistId && <ArtistSpotlight artistId={featuredArtistId} exhibition={nowShowing} />}
+
+        <section className="kp-collectors" aria-labelledby="kp-collectors-title">
+          <div className="container container--wide kp-collectors__inner">
+            <div className="kp-collectors__text">
+              <p className="eyebrow eyebrow--green">{h.collectors.eyebrow}</p>
+              <h2 id="kp-collectors-title" className="kp-collectors__title">
+                {h.collectors.title}
+              </h2>
+              <p className="kp-collectors__body">{h.collectors.body}</p>
+            </div>
+            <div className="kp-collectors__ctas">
+              <LinkButton to="/works" tone="secondary">
+                {h.collectors.browse}
+              </LinkButton>
+              <Button tone="ghost" icon={<Icon.Mail />} onClick={() => setAskOpen(true)}>
+                {h.collectors.ask}
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="container container--wide kp-block" aria-labelledby="kp-services">
+          <SectionHead id="kp-services" eyebrow="Kofi Collections" title="How Kofi works with you" to="/about" linkLabel="About Kofi" />
+          <ul className="kp-services">
+            {SERVICES.map((s) => (
+              <li key={s.id}>
+                <Link to={`/about#${s.id}`} className={`kp-service kp-service--${s.tone}`}>
+                  <span className="kp-service__stroke" aria-hidden="true" />
+                  <h3 className="kp-service__title">{s.title}</h3>
+                  <p className="kp-service__body">{s.summary}</p>
+                  <span className="kp-more">
+                    Read more
+                    <Icon.ArrowRight />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {nowShowing && (
+          <Suspense fallback={null}>
+            <NowShowing ex={nowShowing} today={today} byId={byId} />
+          </Suspense>
+        )}
 
         {newest.length > 0 && (
           <section className="container container--wide kp-block" aria-labelledby="kp-new">
@@ -121,8 +224,6 @@ export function DiscoverScreen() {
             </ul>
           </section>
         )}
-
-        {featuredArtistId && <ArtistSpotlight artistId={featuredArtistId} exhibition={nowShowing} />}
 
         {stories.length > 0 && (
           <section className="container container--wide kp-block" aria-labelledby="kp-journal">
@@ -149,72 +250,10 @@ export function DiscoverScreen() {
             </ul>
           </section>
         )}
-
-        <section className="container container--wide kp-block" aria-labelledby="kp-services">
-          <SectionHead id="kp-services" eyebrow="Kofi Collections" title="How Kofi works with you" to="/about" linkLabel="About Kofi" />
-          <ul className="kp-services">
-            {SERVICES.map((s) => (
-              <li key={s.id}>
-                <Link to={`/about#${s.id}`} className={`kp-service kp-service--${s.tone}`}>
-                  <span className="kp-service__stroke" aria-hidden="true" />
-                  <h3 className="kp-service__title">{s.title}</h3>
-                  <p className="kp-service__body">{s.summary}</p>
-                  <span className="kp-more">
-                    Read more
-                    <Icon.ArrowRight />
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
       </main>
+      <CollectorInquirySheet open={askOpen} onClose={() => setAskOpen(false)} />
       <SiteFooter />
     </div>
-  );
-}
-
-function NowShowing({ ex, today, byId }: { ex: Exhibition; today: string; byId: Map<string, ArtworkView> }) {
-  const works = ex.artworkIds.map((id) => byId.get(id)).filter((w): w is ArtworkView => !!w);
-  const phase = exhibitionPhase(ex, today);
-  return (
-    <section className="kp-now" aria-labelledby="kp-now-title">
-      <div className="container container--wide kp-now__inner">
-        <Link to={`/exhibitions/${ex.id}`} className="kp-now__media" tabIndex={-1} aria-hidden="true">
-          <ExhibitionVisual ex={ex} size="lg" fallback={workImage(works[0])} />
-        </Link>
-        <div className="kp-now__text">
-          <PhaseEyebrow ex={ex} today={today} sample={ex.sample} />
-          <h2 id="kp-now-title" className="kp-now__title">
-            <Link to={`/exhibitions/${ex.id}`}>{ex.title}</Link>
-          </h2>
-          {ex.subtitle && <p className="kp-now__sub">{ex.subtitle}</p>}
-          <p className="kp-meta kp-now__meta">
-            {formatDateRange(ex.startsOn, ex.endsOn)}
-            {ex.venue ? ` · ${ex.venue.name}, ${ex.venue.city}` : ''}
-          </p>
-          <p className="kp-now__summary">{ex.summary}</p>
-          {works.length > 0 && (
-            <ul className="kp-now__thumbs" aria-label="Works in the exhibition">
-              {works.slice(0, 4).map((w) => {
-                const im = workImage(w);
-                return (
-                  <li key={w.id}>
-                    <Link to={`/work/${w.id}`} aria-label={`${w.title} by ${w.artistWorkingName}`}>
-                      {im && <img src={im.src} alt="" loading="lazy" />}
-                    </Link>
-                  </li>
-                );
-              })}
-              {works.length > 4 && <li className="kp-now__more">+{works.length - 4}</li>}
-            </ul>
-          )}
-          <LinkButton to={`/exhibitions/${ex.id}`} tone="secondary">
-            {phase === 'upcoming' ? 'Preview the exhibition' : 'Visit the exhibition'}
-          </LinkButton>
-        </div>
-      </div>
-    </section>
   );
 }
 

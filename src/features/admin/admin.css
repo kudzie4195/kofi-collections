@@ -420,3 +420,126 @@
     min-height: 44px;
   }
 }
+
+/* ---------- v5 intake: queue summaries ---------- */
+.list-row__sub.ad-intake-sub {
+  display: block;
+  color: var(--text-3);
+}
+.ad-intake-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ad-intake-chip {
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* ---------- v5 intake: artist detail ---------- */
+/* "If they call": quiet, staff-only, the code large enough to read down a phone line */
+.ad-call {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  border-block: 1px solid var(--line-soft);
+}
+.eyebrow.ad-call__title {
+  color: var(--text-3);
+}
+.ad-call__code code {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  user-select: all;
+}
+.ad-call__body {
+  color: var(--text-2);
+  max-width: 44ch;
+}
+.panel.ad-links .row--between,
+.panel.ad-imports .row--between {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ad-imports__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ad-import {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.ad-import__icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--gold);
+}
+.ad-import__icon svg {
+  width: 18px;
+  height: 18px;
+}
+.ad-import__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ad-import__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.ad-import__platform,
+.ad-import__label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ad-import__handle {
+  color: var(--text);
+  text-decoration: none;
+}
+.ad-import__handle:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ad-import__when {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.ad-import__used {
+  color: var(--text-2);
+}
+.ad-import__notes {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}

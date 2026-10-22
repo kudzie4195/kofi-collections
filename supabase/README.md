@@ -14,6 +14,10 @@ Backend for Kofi Collections' Supabase mode. Full guide: [`docs/SUPABASE.md`](..
 | `migrations/0007_expose_schema.sql` | No-op for exposure (exposing `kofi` is a **manual dashboard step**, see docs/SUPABASE.md §2); `service_role` grants; schema-cache reload |
 | `migrations/0008_programme.sql` | The programme: exhibitions, open calls, events, stories, applications, collector inquiries; their views, RPCs, RLS, the public `kofi-programme` image bucket; recorded in `kofi.applied_migrations` (docs/SUPABASE.md §9) |
 | `migrations/0009_sales.sql` | Partners, auctions, payouts, reports: `open_calls.kind / organizer_institution_id / terms`, `lots`, `payouts`, their views, RPCs (`save_lot`, `set_lot_status`, `record_sale`, `delete_lot`, `set_payout_status`, `kofi_report`), partner RLS; recorded as `0009_sales` (docs/SUPABASE.md §10). **Do not re-run 0008 after it** |
+| `migrations/0010_intake.sql` | Intake: `artists.verification_token` / `imports`, typed links (`artists_links_shape`, `artists_links_guard`), owner/admin-only projection in `artists_visible`, RPCs `ensure_my_artist`, `record_import`, `set_link_verification`; recorded as `0010_intake` (docs/SUPABASE.md §11). Safe to re-run; does not undo 0009 |
+| `functions/profile-import/` | Edge function (Deno): reads public profile pages (import) and checks links for the artist's code (verify). `deno test supabase/functions/profile-import/`; deploy with `supabase functions deploy profile-import --project-ref <ref>` (§11) |
+| `apply/0010_part1..2.sql` | **Generated** (`scripts/split-0010.mjs`) from 0010: two ≤ 25 KB pieces, one transaction each |
+| `apply/0010_live_patch.sql` | **Generated.** Demo artists' tokens / typed links / imports by fixed id (only where still empty / v4), and the same in the `kofi.demo_artists` snapshot |
 | `apply/0008_part1..4.sql` | **Generated** (`scripts/split-0008.mjs`) from 0008: the same migration in four ≤ 25 KB pieces for pasting into a live project, one transaction each |
 | `apply/0009_part1..5.sql` | **Generated** (`scripts/split-0009.mjs`) from 0009: five ≤ 25 KB pieces, one transaction each |
 | `apply/0009_live_patch.sql` | **Generated.** Sets the sample calls' `kind` (and organiser / terms where empty) by fixed id on the live project |
@@ -30,8 +34,10 @@ Backend for Kofi Collections' Supabase mode. Full guide: [`docs/SUPABASE.md`](..
 | `tests/rpc_test.sql` | RPC, audit-trigger, cascade and reset assertions |
 | `tests/programme_test.sql` | Programme visibility, admin writes, application + collector-inquiry RPCs (every rule), storage and isolation of the 0008 objects |
 | `tests/sales_test.sql` | Partners, lots, sales, payouts, reports (every rule), visibility per identity, storage and isolation of the 0009 objects |
+| `tests/intake_test.sql` | Intake: projection per caller, forged verification / token / imports refused, RPC role checks, the sign-up trigger path, live patch, 0009 state preserved |
+| `tests/fixtures/seed_content_v4.sql` | Frozen pre-0010 `seed_content.sql`: the live-path database is loaded with it to test `0010_part*` + `0010_live_patch.sql` on old rows |
 | `tests/isolation_test.sql` | Proves nothing lands in or changes `public`, and that `drop schema kofi cascade` removes Kofi cleanly |
-| `tests/run-local.sh` | Recreates a throwaway database, loads shim + migrations (0008 and 0009 twice each) + seeds (content twice, then the additive programme + sales seeds) + all five test files, then repeats on a "live path" database built from the apply/ parts; writes `tests/LAST_RUN.log` |
+| `tests/run-local.sh` | Recreates a throwaway database, loads shim + migrations (0008, 0009 and 0010 twice each) + seeds (content twice, then the additive programme + sales seeds) + all five test files, then repeats on a "live path" database built from the apply/ parts; writes `tests/LAST_RUN.log` |
 
 ```bash
 # local verification against a throwaway Postgres 15+ (drops/recreates the database)

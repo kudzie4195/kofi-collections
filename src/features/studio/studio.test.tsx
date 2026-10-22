@@ -222,3 +222,109 @@ describe('vault', () => {
     expect(screen.getByText(/Kofi never estimates or labels an appraised value/)).toBeInTheDocument();
   });
 });
+
+/* ---------------- v5 intake: studio home card, links, verification ---------------- */
+
+const pillsIn = (list: HTMLElement) =>
+  Object.fromEntries(
+    within(list)
+      .getAllByRole('listitem')
+      .map((li) => [li.querySelector('.lk-line__handle')?.textContent?.replace(' (opens in a new tab)', '') ?? '', li.querySelector('[data-verification]')?.getAttribute('data-verification')]),
+  );
+
+describe('studio home: intake states', () => {
+  it('draft: shows the finish card with completeness, what is left and a link back into /join', async () => {
+    const ds = new MockDataSource({ persist: false });
+    const { viewer } = await ds.signUpArtist({ displayName: 'Ada Brightwater', email: 'ada@example.com', password: 'rain on liberty avenue', consentVersion: CONSENT_VERSION });
+    renderStudio('/studio', viewer, ds);
+    const card = await screen.findByTestId('finish-card');
+    expect(within(card).getByRole('heading', { name: 'Finish your profile' })).toBeInTheDocument();
+    // Name only: 15%.
+    expect(within(card).getByRole('progressbar', { name: 'Profile complete' })).toHaveAttribute('aria-valuenow', '15');
+    expect(within(card).getByText('Tell us where you are based.')).toBeInTheDocument();
+    expect(within(card).getByText('Add at least one work. Three is better.')).toBeInTheDocument();
+    expect(within(card).queryByText('Add the name you work under.')).not.toBeInTheDocument();
+    expect(within(card).getByRole('link', { name: 'Pick up where you left off' })).toHaveAttribute('href', '/join');
+    expect(screen.queryByTestId('review-banner')).not.toBeInTheDocument();
+  });
+
+  it('pending: shows the review banner with what happens next, not the finish card', async () => {
+    renderStudio('/studio', viewerOf('priya'));
+    const banner = await screen.findByTestId('review-banner');
+    expect(within(banner).getByRole('heading', { name: 'Kofi is reviewing your profile' })).toBeInTheDocument();
+    expect(within(banner).getByText(/your studio shows the result/)).toBeInTheDocument();
+    expect(within(banner).queryByText(/about a week|by email/)).not.toBeInTheDocument();
+    expect(within(banner).getByText(/Keep editing/)).toBeInTheDocument();
+    expect(within(banner).getByRole('link', { name: 'Edit profile' })).toHaveAttribute('href', '/studio/profile');
+    expect(screen.queryByTestId('finish-card')).not.toBeInTheDocument();
+  });
+
+  it('approved: neither card appears', async () => {
+    renderStudio('/studio');
+    expect(await screen.findByRole('heading', { name: 'Hello, Mara.' })).toBeInTheDocument();
+    expect(screen.queryByTestId('finish-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('review-banner')).not.toBeInTheDocument();
+  });
+});
+
+describe('profile: links and verification', () => {
+  it('adds a pasted link as a normalised handle with a Claimed pill and saves it typed', async () => {
+    const { ds } = renderStudio('/studio/profile');
+    const list = await screen.findByRole('list', { name: 'Your links' });
+    expect(pillsIn(list)).toEqual({ 'mara-oyelaran.com': 'claimed', '@mara.paints': 'verified' });
+
+    const input = screen.getByLabelText('Paste a link or type a handle');
+    fireEvent.change(input, { target: { value: 'mara-oyelaran.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('That link is already on your profile.')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'instagram.com/mara.studio/?utm_source=ig' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(pillsIn(list)['@mara.studio']).toBe('claimed');
+    expect(input).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Profile saved')).toBeInTheDocument();
+    const saved = (await ds.getMyArtist(MARA))!.links.find((l) => l.handle === '@mara.studio');
+    expect(saved).toMatchObject({ url: 'https://www.instagram.com/mara.studio', platform: 'instagram', verification: 'claimed' });
+    // The verified Instagram kept its check through the save.
+    expect((await ds.getMyArtist(MARA))!.links.find((l) => l.handle === '@mara.paints')?.verification).toBe('verified');
+  });
+
+  it('keeps the free-text label/url pair and types it on save', async () => {
+    const { ds } = renderStudio('/studio/profile');
+    fireEvent.click(await screen.findByRole('button', { name: 'Add with your own label' }));
+    fireEvent.change(screen.getByLabelText('Link 3 label'), { target: { value: 'Shop' } });
+    fireEvent.change(screen.getByLabelText('Link 3 address'), { target: { value: 'https://shop.example.org/mara' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Profile saved')).toBeInTheDocument();
+    expect((await ds.getMyArtist(MARA))!.links.find((l) => l.label === 'Shop')).toMatchObject({ platform: 'website', handle: 'shop.example.org' });
+  });
+
+  it('Check my links shows the code and updates the pills', async () => {
+    renderStudio('/studio/profile');
+    const list = await screen.findByRole('list', { name: 'Your links' });
+    expect(screen.getByText('kofi-7f3a2k')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check my links' }));
+    });
+    // The website fixture is readable but has no code: Failed. Instagram carries it: Verified.
+    await waitFor(() => expect(pillsIn(list)).toEqual({ 'mara-oyelaran.com': 'failed', '@mara.paints': 'verified' }));
+    expect(await screen.findByText('Checked 2 links. 1 verified.')).toBeInTheDocument();
+    // A check is not an unsaved change.
+    expect(screen.getByText('All changes saved')).toBeInTheDocument();
+  });
+
+  it('saves a newly added link before checking it', async () => {
+    const { ds } = renderStudio('/studio/profile');
+    const list = await screen.findByRole('list', { name: 'Your links' });
+    fireEvent.change(screen.getByLabelText('Paste a link or type a handle'), { target: { value: '@mara.studio' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check my links' }));
+    });
+    await waitFor(() => expect(pillsIn(list)['@mara.studio']).toBe('unreachable'));
+    expect(await screen.findByText(/We saved your links first\. Checked 3 links\. 1 verified\./)).toBeInTheDocument();
+    expect((await ds.getMyArtist(MARA))!.links).toHaveLength(3);
+  });
+});

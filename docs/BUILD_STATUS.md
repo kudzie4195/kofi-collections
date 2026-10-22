@@ -2,6 +2,30 @@
 
 Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-20.
 
+## v5 — artist-first home, intake, link import and self-verification (2026-10-22)
+
+Client feedback: the app is two-way (artists and the public who buy), but the main goal is getting artists on board — 80/20 on the first page — through an intake that builds a profile end to end, pulls what it can from the artist's Instagram / website / Facebook / LinkedIn, and gives the artist a way to self-verify before Kofi reviews.
+
+- **Home** leads with artists: "Bring your work. Kofi brings the room.", **Start your profile**, how it works in three steps, why artists join, open calls, the artist spotlight; then the collectors band (Browse works / Ask Kofi), services and what's showing. Desktop nav gets a cream Start your profile button for visitors; mobile keeps five tabs.
+- **Intake** (`/join`): five short steps, resumable, one column, phone first — account (name, email, password, consent), links (paste anything; up to six), **import review** (what we read at each link, per field, with its source; the artist ticks what to keep; nothing is written without a tick), about you (prefilled), one work (three is better), check and send. Sends the profile for Kofi review and makes it public on approval.
+- **Import** reads what is public at a link: JSON-LD Person, then OpenGraph, then the handle, with a plain note when a page gives nothing. Platforms don't let third parties read private data, so this is the honest version of "auto-fill": public page + the artist's confirmation.
+- **Self-verification**: each artist gets a code (`kofi-xxxxxx`). Put it in an Instagram/TikTok bio, a website page or a LinkedIn About; Kofi's checker reads the page and marks the link Verified. A link back to the Kofi profile also verifies. Reviewer sees Claimed / Verified / Failed / Unreachable per link, the import sources, and the code "if they call".
+- **Supabase**: migration `0010_intake` (token, imports, link guard trigger, projections, RPCs), edge function `profile-import` (server-side reader + checker with SSRF guard, 1 MB cap, 6 s timeout, 20 calls/user/10 min, JWT), and a `VITE_KOFI_SIGNUP` switch that defaults to **off** — real sign-up on the shared ColorLab project would create rows in ColorLab's own `public.profiles` (its `handle_new_user` trigger), so live sign-up waits for Kofi's own project.
+
+| Check (v5) | Result |
+|---|---|
+| typecheck / unit + screen tests / build / cap sync | clean / 502 / clean (main chunk 499 kB) / ok |
+| Browser smoke: 153 routes × (375, 900, 1280, 375 dark) | 612 / 612 |
+| Intake flow end to end at 390 px and 1280 px (sign-up → import → work → verify → send → Kofi approves → public) | 28 / 28 |
+| Earlier flows (demo, programme, partner/auction) and focus gates (v3, v4, new sheets) | 18 · 16 · 20 · 17 · 61 · 21, all pass |
+| Copy gate on every new copy file (burstiness, sentence length, short-sentence share, em-dashes, banned words) | 4 / 4 pass |
+| SQL suite (RLS, RPCs, programme, sales, intake, isolation, live path run twice) | 414 assertions pass |
+| PostgREST harness (v4 113 + v5 intake 27 incl. the edge-function handler on fixture pages) | 140 / 140 |
+| Edge-function parser tests (Deno) | 20 / 20 |
+| Independent review (fresh Fable reviewer: walked the intake itself, probed SQL projections as anon/curator, fuzzed link parsing, reproduced an Instagram login wall) | SHIP-WITH-FIXES, 1 P1 + 8 P2 → all fixed and re-gated |
+
+Known limits (v5): token-based verification proves control of the page, not identity (same as rel=me) — Kofi still approves by hand; Instagram/Facebook og tags are served to server fetches intermittently and LinkedIn almost never, so the reader is best on websites; partner (curator) sign-up is not in scope; no PWA manifest yet (the site works as a bookmark); the mobile tab bar has no Join tab — the hero carries it.
+
 ## v4 — partner calls, auction lots, payouts, reports (2026-10-20)
 
 Built against the client's five-point checklist (artist profile + works; apply with existing work and reuse it; a partner creates a call, reviews, records selections; a selected work becomes an auction lot with compensation and sale records; Kofi exports participation, placement and payment data). Registration stays out of scope until Kofi decides on its own Supabase project.
