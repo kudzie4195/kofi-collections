@@ -1,41 +1,63 @@
-import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { ArtworkFilters, SortKey } from '@/domain/filters';
-import { applyFilters, countActiveFilters } from '@/domain/filters';
-import type { Medium, Unit } from '@/domain/types';
-import { MEDIUMS } from '@/domain/types';
+import { applyFilters, countActiveFilters, tagFacets, toggleTag } from '@/domain/filters';
+import { mediumFromTagId, selectableTags } from '@/domain/taxonomy';
+import type { Unit } from '@/domain/types';
 import { useQuery } from '@/state/session';
 import { Button, Chip, EmptyState, ErrorState, FictionalFooter, GallerySkeleton, Icon, LinkButton, Segmented, TopBar, WallLabel } from '@/ui';
 import { PageHead } from '@/features/programme/shared';
+import { activeChips } from './activeChips';
 import { FilterSheet } from './FilterSheet';
-import { cap, plural, SearchBox } from './helpers';
-import { clearedFilters, compact, filtersFromParams, paramsFromFilters, SORT_OPTIONS, toggleIn, withUnit } from './params';
+import { FILTER_COPY as C } from './filterCopy';
+import { plural, SearchBox } from './helpers';
+import { clearedFilters, compact, filtersFromParams, searchFromFilters, SORT_OPTIONS, withMediumTag, withUnit } from './params';
 
 export function GalleryScreen() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const filters = useMemo(() => filtersFromParams(params), [params]);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Always fetch the full visible set; filtering happens locally through applyFilters
   // so facets, chip counts and the sheet's live count all share one source.
   const q = useQuery((data, viewer) => data.listArtworks(viewer), []);
-  const all = q.data;
+  const all = useMemo(() => q.data?.map(withMediumTag), [q.data]);
 
-  const commit = (next: ArtworkFilters, replace = false) => setParams(paramsFromFilters(compact(next)), { replace });
+  // navigate (not setSearchParams) so commas stay readable in shared links: ?tags=style.abstract,theme.joy
+  const commit = (next: ArtworkFilters, replace = false) => {
+    const qs = searchFromFilters(compact(next));
+    navigate({ pathname, search: qs ? `?${qs}` : '' }, { replace });
+  };
 
   const results = useMemo(() => (all ? applyFilters(all, filters) : []), [all, filters]);
   const active = countActiveFilters(filters);
+
+  // Removing an active chip unmounts the button under the keyboard. Keep focus in the bar:
+  // the next remaining chip, else the Filters button, never <body>.
+  const barRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLElement>(null);
+  const refocus = useRef<number | null>(null);
+  const removeChip = (index: number, next: ArtworkFilters) => {
+    refocus.current = index;
+    commit(next);
+  };
+  useEffect(() => {
+    if (refocus.current === null) return;
+    const i = refocus.current;
+    refocus.current = null;
+    const remaining = activeRef.current?.querySelectorAll<HTMLButtonElement>('.kg-active__chip') ?? [];
+    const target = remaining[Math.min(i, remaining.length - 1)] ?? barRef.current?.querySelector<HTMLButtonElement>('.kg-controls button');
+    target?.focus();
+  });
   const unit: Unit = filters.sizeUnit ?? 'cm';
 
   // Medium chip counts reflect every other active filter, so the numbers say what a tap would give.
-  const mediumCounts = useMemo(() => {
-    const m = new Map<Medium, number>();
-    if (!all) return m;
-    for (const w of applyFilters(all, { ...filters, mediums: undefined })) m.set(w.medium, (m.get(w.medium) ?? 0) + 1);
-    return m;
-  }, [all, filters]);
-  const presentMediums = useMemo(() => new Set((all ?? []).map((w) => w.medium)), [all]);
-  const chipMediums = MEDIUMS.filter((m) => presentMediums.has(m) || filters.mediums?.includes(m));
+  const facets = useMemo(() => (all ? tagFacets(all, filters) : {}), [all, filters]);
+  const presentTags = useMemo(() => new Set((all ?? []).flatMap((w) => w.tagIds)), [all]);
+  const chipMediums = selectableTags('medium').filter((t) => presentTags.has(t.id) || filters.tags?.medium?.includes(t.id));
+  const chips = activeChips(filters);
   const artistCount = useMemo(() => new Set((all ?? []).map((w) => w.artistId)).size, [all]);
 
   return (
@@ -63,16 +85,16 @@ export function GalleryScreen() {
             onChange={(v) => commit({ ...filters, query: v || undefined }, true)}
           />
           <div className="chips chips--scroll" role="group" aria-label="Medium">
-            {chipMediums.map((m) => (
+            {chipMediums.map((t) => (
               <Chip
-                key={m}
-                medium={m}
+                key={t.id}
+                medium={mediumFromTagId(t.id)}
                 small
-                on={filters.mediums?.includes(m) ?? false}
-                count={mediumCounts.get(m) ?? 0}
-                onClick={() => commit({ ...filters, mediums: toggleIn(filters.mediums, m) })}
+                on={filters.tags?.medium?.includes(t.id) ?? false}
+                count={facets[t.id] ?? 0}
+                onClick={() => commit(toggleTag(filters, t.id))}
               >
-                {cap(m)}
+                {t.label}
               </Chip>
             ))}
           </div>
@@ -80,7 +102,7 @@ export function GalleryScreen() {
       </div>
 
       <main className="container container--wide kg-gallery">
-        <div className="kg-bar">
+        <div className="kg-bar" ref={barRef}>
           <div className="kg-controls">
             <Button tone={active ? 'primary' : 'secondary'} size="sm" icon={<Icon.Filter />} onClick={() => setSheetOpen(true)} aria-haspopup="dialog">
               {active ? `Filters (${active})` : 'Filters'}
@@ -117,13 +139,26 @@ export function GalleryScreen() {
             <p className="eyebrow" aria-live="polite" data-testid="result-count">
               {q.loading && !all ? 'Loading works' : plural(results.length, 'work')}
             </p>
-            {active > 0 && (
-              <Button tone="ghost" size="sm" onClick={() => commit(clearedFilters(filters))}>
-                Clear filters
-              </Button>
-            )}
           </div>
         </div>
+
+        {chips.length > 0 && (
+          <section className="kg-active" aria-label={C.activeLabel} data-testid="active-filters" ref={activeRef}>
+            <ul className="kg-active__list">
+              {chips.map((c, i) => (
+                <li key={c.key}>
+                  <button type="button" className="chip chip--small kg-active__chip" data-category={c.category} aria-label={c.name} title={c.name} onClick={() => removeChip(i, c.without)}>
+                    <span>{c.label}</span>
+                    <Icon.Close aria-hidden="true" className="kg-active__x" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <Button tone="ghost" size="sm" className="kg-active__clear" onClick={() => removeChip(0, clearedFilters(filters))}>
+              {C.clearAll}
+            </Button>
+          </section>
+        )}
 
         {q.error && !all ? (
           <ErrorState error={q.error} retry={q.reload} />

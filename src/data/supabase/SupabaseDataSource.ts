@@ -1,6 +1,7 @@
 import { createClient, FunctionsHttpError, type SupabaseClient, type SupabaseClientOptions } from '@supabase/supabase-js';
 import { importFromSignals, isFetchableUrl, normalizeLink, validateSignUp, type PageSignals } from '@/domain/intake';
-import { applyFilters, type ArtworkFilters } from '@/domain/filters';
+import { applyFilters, sortArtworks, type ArtworkFilters } from '@/domain/filters';
+import { effectiveCriteria, rankWorks, type MatchResult } from '@/domain/matching';
 import { artworksToCsv, buildArtistExport } from '@/domain/export';
 import type {
   ApplicationRow,
@@ -46,7 +47,7 @@ import { BUYER_INQUIRY_STATUSES } from '@/domain/types';
 import { callPhase, kofiToday, sortExhibitions, validateBuyerInquiry, type BuyerInquiryInput } from '@/domain/programme';
 import { validateRange } from '@/domain/reports';
 import type { LotInput, SaleInput } from '@/domain/sales';
-import { cleanEvent, cleanExhibition, cleanOpenCall, cleanStory, validateArtwork } from '../mock/MockDataSource';
+import { cleanArtworkV6, cleanEvent, cleanExhibition, cleanOpenCall, cleanStory, validateArtwork } from '../mock/MockDataSource';
 import {
   ConflictError,
   ForbiddenError,
@@ -497,6 +498,13 @@ export class SupabaseDataSource implements DataSource {
 
   async listArtworks(viewer: Viewer, filters: ArtworkFilters = {}): Promise<ArtworkView[]> {
     const { db, me } = await this.ctx(viewer);
+    if (usesSearchRpc(filters)) {
+      // v6 filters run in SQL (kofi.search_artworks, same rules as domain/filters.ts, over the
+      // caller's own artworks_visible rows). The client re-sorts with sortArtworks so the order
+      // is exactly mock mode's.
+      const res = await this.rpc<SearchResult | null>(db, 'search_artworks', { p_filters: filters, p_limit: null, p_offset: 0 });
+      return sortArtworks(await this.projectArtworks(db, res?.rows ?? []), filters.sort);
+    }
     let q = kofi(db).from(SCHEMA_ARTWORKS).select('*').neq('visibility', 'private');
     if (filters.mediums?.length) q = q.in('medium', filters.mediums);
     const rows = await this.run<ArtworkViewRow[]>(q);
@@ -536,6 +544,36 @@ export class SupabaseDataSource implements DataSource {
     const rows = await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').eq('artist_id', artistId));
     const visible = rows.filter((r) => owner || (r.visibility !== 'private' && r.visibility !== 'kofi'));
     return (await this.projectArtworks(db, visible)).sort((x, y) => y.year - x.year || y.createdAt.localeCompare(x.createdAt));
+  }
+
+  /* ----------------------------------------------------- matching (v6) -- */
+
+  /**
+   * Organiser / Kofi: kofi.match_works (the server checks the caller runs the call and
+   * returns their discovery rows). Artist: their own works except Only me ones, for a
+   * call they can see. Ranking is domain/matching.rankWorks over effectiveCriteria(call),
+   * the same code as mock mode, so wording and order never differ.
+   */
+  async listMatchingWorks(viewer: Viewer, callId: string): Promise<{ work: ArtworkView; match: MatchResult }[]> {
+    const { db, me } = await this.ctx(viewer);
+    if (me.role !== 'artist' && me.role !== 'admin' && me.role !== 'curator') throw new ForbiddenError('Only the call’s organiser can see which works fit.');
+    if (me.role === 'artist' && !me.artistId) throw new NotFoundError('Artist profile not found.');
+    const callRow = await this.fetchProgramme<OpenCallRow>(db, 'open_call', callId);
+    let rows: ArtworkViewRow[];
+    if (me.role === 'artist') {
+      if (!callRow) throw new NotFoundError('Open call not found.');
+      rows = await this.run<ArtworkViewRow[]>(kofi(db).from(SCHEMA_ARTWORKS).select('*').eq('artist_id', me.artistId!).neq('visibility', 'private'));
+    } else {
+      if (!isUuid(callId)) {
+        if (me.role === 'admin') throw new NotFoundError('Open call not found.');
+        this.requireOrganiser(me);
+        throw new ForbiddenError('You can only manage calls your institution runs.');
+      }
+      rows = (await this.rpc<ArtworkViewRow[] | null>(db, 'match_works', { p_call: callId })) ?? [];
+      if (!callRow) throw new NotFoundError('Open call not found.');
+    }
+    const works = await this.projectArtworks(db, rows);
+    return rankWorks(works, effectiveCriteria(toOpenCall(callRow)));
   }
 
   /* ------------------------------------------------------- intake (v5) -- */
@@ -748,6 +786,9 @@ export class SupabaseDataSource implements DataSource {
     const artistId = this.requireMyArtist(me);
     const normalized: ArtworkInput = { ...input, images: input.images.map((im) => ({ ...im, src: this.toRef(im.src) })) };
     validateArtwork(normalized);
+    // v6 fields: the mock's rules and messages before any network call (save_artwork and
+    // the artworks_taxonomy trigger apply the same rules server-side).
+    cleanArtworkV6(normalized);
 
     const existing = new Map<string, string>(); // image id → src currently stored
     if (input.id) {
@@ -1410,7 +1451,15 @@ export class SupabaseDataSource implements DataSource {
       cleaned.sample = existing?.sample ?? false;
     }
     this.refIdsOrThrow(cleaned);
-    const id = await this.writeProgrammeRow<OpenCall>(db, 'open_call', input.id, cleaned, openCallToRow);
+    // lookingFor: key present (even undefined) → written (undefined/empty → NULL); key absent on
+    // an update → the column is left as stored (an older editor never wipes the criteria).
+    const sendsCriteria = Object.prototype.hasOwnProperty.call(input, 'lookingFor');
+    const toRow = (c: Omit<OpenCall, 'id' | 'createdAt' | 'updatedAt'>) => {
+      const row = openCallToRow(c);
+      if (input.id && !sendsCriteria) delete row.looking_for;
+      return row;
+    };
+    const id = await this.writeProgrammeRow<OpenCall>(db, 'open_call', input.id, cleaned, toRow);
     const row = await this.fetchProgramme<OpenCallRow>(db, 'open_call', id);
     if (!row) throw new NotFoundError(GONE);
     return toOpenCall(row, this.programmeImageResolver(db));
@@ -1894,4 +1943,16 @@ export async function signInDemo(ds: DataSource, identityId: string): Promise<Vi
   if (!email) throw new NotFoundError('Unknown demo identity.');
   await ds.signInWithPassword(email, DEMO_PASSWORD);
   return ds.currentViewer();
+}
+
+/** kofi.search_artworks() result: the page of artworks_visible rows, every match counted, tag facets. */
+export interface SearchResult {
+  rows: ArtworkViewRow[];
+  total: number;
+  facets: Record<string, number>;
+}
+
+/** The v6 filters (tags, orientation, edition, uses) are evaluated by kofi.search_artworks. */
+export function usesSearchRpc(f: ArtworkFilters): boolean {
+  return Object.values(f.tags ?? {}).some((l) => l.length > 0) || !!f.orientations?.length || !!f.editionTypes?.length || !!f.uses?.length;
 }

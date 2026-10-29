@@ -24,6 +24,12 @@ export const CONSTRAINT_ERRORS: Record<string, { message: string; field?: string
   artworks_price_nonnegative: { message: 'Price cannot be negative.', field: 'price' },
   artworks_price_currency_format: { message: 'Currency must be a 3-letter code (USD, CAD).', field: 'price' },
   artworks_price_pair: { message: 'Enter both a price and a currency, or leave both empty.', field: 'price' },
+  // 0011_taxonomy.sql (the triggers raise the mock's exact messages first; these are the last line)
+  artworks_tag_ids_shape: { message: 'Tags must be a list.', field: 'tags' },
+  artworks_uses_shape: { message: 'Choose what the work is available for.', field: 'uses' },
+  artworks_edition_shape: { message: 'Choose an edition type.', field: 'edition' },
+  artworks_location_shape: { message: 'Enter where the work is.', field: 'location' },
+  open_calls_looking_for_shape: { message: 'The criteria are not valid.', field: 'lookingFor' },
   artwork_images_src_kind: { message: 'Unsupported image.', field: 'images' },
   artwork_images_src_size: { message: 'Images must be under 6 MB.', field: 'images' },
   artists_working_name_required: { message: 'Working name is required.', field: 'workingName' },

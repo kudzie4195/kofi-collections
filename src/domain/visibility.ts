@@ -7,6 +7,8 @@ import type {
   Viewer,
   Visibility,
 } from './types';
+import { NO_USES } from './types';
+import { orientationOf } from './taxonomy';
 
 /**
  * The single rule that decides whether a viewer may see something tagged with
@@ -101,12 +103,19 @@ export function projectArtwork(
     rightsNote: artwork.rightsNote,
     priceWithheld: artwork.price !== undefined && !priceVisible,
     tags: [...artwork.tags],
+    tagIds: [...(artwork.tagIds ?? [])],
+    uses: { ...(artwork.uses ?? NO_USES) },
+    orientation: orientationOf(artwork.dimensions, artwork.medium),
+    // The work's own location (at the artist's chosen precision) when set, else the artist's region.
+    locationLabel: artwork.location ? regionLabel({ ...artwork.location, precision: artist?.region.precision ?? artwork.location.precision }) : artist ? regionLabel(artist.region) : '',
     visibility: artwork.visibility,
     priceVisibility: artwork.priceVisibility,
     canEdit: canEdit(viewer, artwork.artistId),
     createdAt: artwork.createdAt,
     updatedAt: artwork.updatedAt,
   };
+  if (artwork.edition) view.edition = { ...artwork.edition };
+  if (artwork.location && canEdit(viewer, artwork.artistId)) view.location = { ...artwork.location };
   if (priceVisible && artwork.price) view.price = { ...artwork.price };
   if (artwork.reviewedAt) view.reviewedAt = artwork.reviewedAt;
   return view;

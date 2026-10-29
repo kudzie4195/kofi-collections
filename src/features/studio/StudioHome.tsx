@@ -13,6 +13,9 @@ import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Panel, Skelet
 import { STATUS_COPY, VisibilityIcon, capitalize } from './shared';
 import { payoutTotals, totalsText } from './salesShared';
 import { studioIntakeCopy } from './intakeCopy';
+import { mediumTagId } from '@/domain/taxonomy';
+import { NUDGE_COPY } from './tagCopy';
+import './tags.css';
 
 export function StudioHome() {
   const { viewer, data } = useSession();
@@ -165,6 +168,7 @@ export function StudioHome() {
         </div>
 
         <div className="st-home__main stack--lg">
+        <TagNudge works={works} />
         <section aria-labelledby="your-works" className="stack">
           <div className="row row--between row--wrap">
             <h2 className="section-title st-works-title" id="your-works">
@@ -354,6 +358,37 @@ function OpportunitiesBlock({ calls, apps, lots, payouts }: { calls: OpenCall[];
             <Icon.Back className="st-chevron" aria-hidden="true" />
           </Link>
         </li>
+      </ul>
+    </section>
+  );
+}
+
+/** Works carrying no controlled tags beyond their own medium. */
+export function untaggedWorks(works: ArtworkView[]): ArtworkView[] {
+  return works.filter((w) => (w.tagIds ?? []).every((t) => t === mediumTagId(w.medium)));
+}
+
+const NUDGE_SHOWN = 3;
+
+function TagNudge({ works }: { works: ArtworkView[] }) {
+  const list = untaggedWorks(works);
+  if (list.length === 0) return null;
+  const shown = list.slice(0, NUDGE_SHOWN);
+  return (
+    <section className="st-nudge" aria-labelledby="st-nudge-title" data-testid="tag-nudge">
+      <h2 className="st-nudge__title" id="st-nudge-title">
+        {NUDGE_COPY.title}
+      </h2>
+      <p className="st-nudge__body">{NUDGE_COPY.body(list.length)}</p>
+      <ul className="st-nudge__list">
+        {shown.map((w) => (
+          <li key={w.id}>
+            <Link to={`work/${w.id}?section=tags`} className="tagchip">
+              {w.title}
+            </Link>
+          </li>
+        ))}
+        {list.length > NUDGE_SHOWN && <li className="st-nudge__more">{NUDGE_COPY.more(list.length - NUDGE_SHOWN)}</li>}
       </ul>
     </section>
   );

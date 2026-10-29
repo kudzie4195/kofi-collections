@@ -972,3 +972,88 @@
   color: var(--text-2);
   gap: 8px;
 }
+
+/* ---------- v6: tags, uses, edition, location, orientation ---------- */
+.st-orientation {
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+}
+.st-orientation__label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.st-edition {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: end;
+}
+.st-edition__type {
+  grid-column: 1 / -1;
+}
+@media (min-width: 560px) {
+  .st-edition__type {
+    grid-column: auto;
+  }
+  .st-edition:has(> .st-dim:nth-child(2)) {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+}
+.st-edition > .st-edition__type:only-child {
+  max-width: 320px;
+}
+.st-location {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+@media (min-width: 560px) {
+  .st-location {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.st-anchor {
+  scroll-margin-top: calc(var(--nav-h, 0px) + var(--topbar-h) + var(--safe-top) + var(--space-4));
+}
+.st-tags__intro {
+  margin: 0;
+  max-width: 62ch;
+}
+/* Studio home: "Add tags" nudge */
+.st-nudge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gold);
+  border-radius: var(--radius-md);
+}
+.st-nudge__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-lg);
+}
+.st-nudge__body {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.st-nudge__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.st-nudge__more {
+  align-self: center;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}

@@ -222,12 +222,54 @@ export interface Artwork {
   priceVisibility: Visibility;
   /** Visibility of the record itself. 'private' = draft. */
   visibility: Visibility;
+  /**
+   * Free-text keywords the artist typed (the workbook's tag_custom_keywords). Searchable,
+   * never a filter value. Before v6 this field held every tag.
+   */
   tags: string[];
+  /**
+   * Stable tag IDs from the controlled library (domain/taxonomy.data.ts), e.g.
+   * "style.abstract", "social_impact.youth_empowerment". The primary `medium` is
+   * mirrored here as its medium.* id. Artist-selected only; never inferred.
+   */
+  tagIds: string[];
+  /** Separate from `status` (inventory): what the artist allows this work to be used for. */
+  uses: ArtworkUses;
+  edition?: Edition;
+  /** Where the work physically is, when it differs from the artist's region. Shown at region precision only. */
+  location?: Region;
   /** Set by Kofi when the listing has been reviewed. */
   reviewedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Permitted uses, independent of inventory status: a work can be not-for-sale but available for exhibition. */
+export interface ArtworkUses {
+  auction: boolean;
+  exhibition: boolean;
+  licensing: boolean;
+  commission: boolean;
+}
+export const NO_USES: ArtworkUses = { auction: false, exhibition: false, licensing: false, commission: false };
+export type UseKey = keyof ArtworkUses;
+export const USE_KEYS: UseKey[] = ['auction', 'exhibition', 'licensing', 'commission'];
+export const USE_LABEL: Record<UseKey, string> = { auction: 'Auction', exhibition: 'Exhibition', licensing: 'Licensing', commission: 'Commission' };
+
+export type EditionType = 'unique' | 'limited' | 'open' | 'artist_proof' | 'reproduction';
+export const EDITION_TYPES: EditionType[] = ['unique', 'limited', 'open', 'artist_proof', 'reproduction'];
+export const EDITION_LABEL: Record<EditionType, string> = { unique: 'Unique work', limited: 'Limited edition', open: 'Open edition', artist_proof: 'Artist proof', reproduction: 'Reproduction' };
+export interface Edition {
+  type: EditionType;
+  /** This copy's number within the edition (limited / artist proof). */
+  number?: number;
+  size?: number;
+}
+
+/** Derived, never stored: from dimensions for 2D work, 'three_dimensional' when the work has depth or a 3D medium. */
+export type Orientation = 'portrait' | 'landscape' | 'square' | 'panoramic' | 'three_dimensional';
+export const ORIENTATIONS: Orientation[] = ['portrait', 'landscape', 'square', 'panoramic', 'three_dimensional'];
+export const ORIENTATION_LABEL: Record<Orientation, string> = { portrait: 'Portrait', landscape: 'Landscape', square: 'Square', panoramic: 'Panoramic', three_dimensional: 'Three-dimensional' };
 
 export type InstitutionType = 'museum' | 'gallery' | 'university' | 'nonprofit' | 'corporate' | 'municipal' | 'other';
 
@@ -403,6 +445,15 @@ export interface ArtworkView {
   /** True when a price exists but is hidden from this viewer. */
   priceWithheld: boolean;
   tags: string[];
+  tagIds: string[];
+  uses: ArtworkUses;
+  edition?: Edition;
+  /** Derived from dimensions/medium. */
+  orientation: Orientation;
+  /** Region label of the work's own location when set, else the artist's. */
+  locationLabel: string;
+  /** The stored location, owner/admin only (so the editor can show it). */
+  location?: Region;
   visibility: Visibility;
   priceVisibility: Visibility;
   /** True when the viewer owns the record (or is admin). Enables editing UI. */
@@ -514,6 +565,25 @@ export interface Exhibition extends ProgrammeBase {
 }
 export type ExhibitionPhase = 'upcoming' | 'current' | 'past';
 
+/**
+ * What a call is looking for, in the same tag language as works. Used to show
+ * curators the works that fit and to tell an artist how well a work matches.
+ * Every field optional; an empty object means "any work".
+ */
+export interface CallCriteria {
+  /** OR within a category, AND across categories — same as the Works filters. */
+  tags?: Record<string, string[]>;
+  /** The work must allow at least one of these uses (auction call → 'auction'). */
+  uses?: UseKey[];
+  /** Case-insensitive substring on the work's location label. */
+  region?: string;
+  /** Longest edge bounds in cm. */
+  maxLongestEdgeCm?: number;
+  minLongestEdgeCm?: number;
+  /** Plain words the organiser adds, shown to artists next to the criteria. */
+  note?: string;
+}
+
 export interface OpenCall extends ProgrammeBase {
   title: string;
   /** Partner organisation, e.g. the institution commissioning the show. */
@@ -524,6 +594,8 @@ export interface OpenCall extends ProgrammeBase {
   eligibility: string;
   /** Empty = any medium. */
   mediums: Medium[];
+  /** v6: what the call is looking for, for matching. Optional. */
+  lookingFor?: CallCriteria;
   /** ISO date the call opens. */
   opensOn: string;
   /** ISO date of the last day to apply (inclusive). Omitted = open until filled. */

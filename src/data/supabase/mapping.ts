@@ -3,6 +3,7 @@
  * types in src/domain/types.ts. No network, no supabase-js — unit-testable.
  */
 import { normalizeLink } from '@/domain/intake';
+import { orientationOf } from '@/domain/taxonomy';
 import type {
   ArtistLink,
   LinkPlatform,
@@ -22,12 +23,14 @@ import type {
   BuyerInquiryRow,
   BuyerInquiryStatus,
   BuyerIntent,
+  CallCriteria,
   CallKind,
   CallTerms,
   CareerStage,
   Curator,
   CuratorStatus,
   DocumentType,
+  Edition,
   EventKind,
   Exhibition,
   Inquiry,
@@ -39,6 +42,7 @@ import type {
   LotStatus,
   Medium,
   OpenCall,
+  Orientation,
   Payout,
   PayoutRow,
   PayoutStatus,
@@ -53,6 +57,7 @@ import type {
   StoryKind,
   Sale,
   Unit,
+  ArtworkUses,
   Venue,
   Visibility,
 } from '@/domain/types';
@@ -107,6 +112,22 @@ export interface ArtworkViewRow {
   artist_region_label: string | null;
   can_edit: boolean;
   images: ImageJson[] | null;
+  /** 0011_taxonomy.sql */
+  tag_ids?: string[] | null;
+  uses?: ArtworkUses | null;
+  edition?: Edition | null;
+  orientation?: Orientation | null;
+  location_label?: string | null;
+  /** Owner / Kofi only (NULL for everyone else). */
+  location?: RegionJson | null;
+}
+
+/** Region as stored in jsonb (artworks.location). */
+export interface RegionJson {
+  city?: string;
+  region: string;
+  country: string;
+  precision?: RegionPrecision;
 }
 
 /** Columns shared by kofi.artists_visible and the full kofi.artists row. */
@@ -241,6 +262,11 @@ export interface ArtworkRow {
   created_at: Ts;
   updated_at: Ts;
   images?: ImageJson[] | null;
+  /** 0011_taxonomy.sql */
+  tag_ids?: string[] | null;
+  uses?: ArtworkUses | null;
+  edition?: Edition | null;
+  location?: RegionJson | null;
 }
 
 export interface DocumentRow {
@@ -373,6 +399,28 @@ function images(list: ImageJson[] | null | undefined, resolve: (src: string) => 
 
 /* --------------------------------------------------------------- mappers -- */
 
+/** jsonb uses → ArtworkUses (missing keys false). */
+export function toUses(u: ArtworkUses | null | undefined): ArtworkUses {
+  return { auction: !!u?.auction, exhibition: !!u?.exhibition, licensing: !!u?.licensing, commission: !!u?.commission };
+}
+
+/** jsonb edition → Edition, optional parts omitted. */
+export function toEdition(e: Edition | null | undefined): Edition | undefined {
+  if (!e || typeof e !== 'object' || !e.type) return undefined;
+  const out: Edition = { type: e.type };
+  if (e.number !== null && e.number !== undefined) out.number = Number(e.number);
+  if (e.size !== null && e.size !== undefined) out.size = Number(e.size);
+  return out;
+}
+
+/** jsonb location → Region (precision defaults like cleanLocation: city when there is a city, else region). */
+export function toRegion(l: RegionJson | null | undefined): Region | undefined {
+  if (!l || typeof l !== 'object' || !l.region || !l.country) return undefined;
+  const out: Region = { region: l.region, country: l.country, precision: l.precision ?? (l.city ? 'city' : 'region') };
+  if (l.city) out.city = l.city;
+  return out;
+}
+
 export function toArtworkView(row: ArtworkViewRow, resolve: (src: string) => string = (s) => s): ArtworkView {
   const view: ArtworkView = {
     id: row.id,
@@ -397,6 +445,10 @@ export function toArtworkView(row: ArtworkViewRow, resolve: (src: string) => str
     rightsNote: row.rights_note ?? '',
     priceWithheld: !!row.price_withheld,
     tags: [...(row.tags ?? [])],
+    tagIds: [...(row.tag_ids ?? [])],
+    uses: toUses(row.uses),
+    orientation: 'square',
+    locationLabel: row.location_label ?? row.artist_region_label ?? '',
     visibility: row.visibility,
     priceVisibility: row.price_visibility,
     canEdit: !!row.can_edit,
@@ -407,6 +459,12 @@ export function toArtworkView(row: ArtworkViewRow, resolve: (src: string) => str
     view.artistExperience.yearsPracticing = row.artist_experience_years_practicing;
   }
   if (row.depth !== null && row.depth !== undefined) view.dimensions.depth = num(row.depth);
+  // The view derives it with the same rule (kofi.orientation_of); derive here for older rows.
+  view.orientation = row.orientation ?? orientationOf(view.dimensions, view.medium);
+  const edition = toEdition(row.edition);
+  if (edition) view.edition = edition;
+  const location = toRegion(row.location);
+  if (location) view.location = location;
   if (row.price_amount !== null && row.price_amount !== undefined && row.price_currency) {
     view.price = { amount: num(row.price_amount), currency: row.price_currency };
   }
@@ -519,6 +577,8 @@ export function toArtwork(row: ArtworkRow, resolve: (src: string) => string = (s
     priceVisibility: row.price_visibility,
     visibility: row.visibility,
     tags: [...(row.tags ?? [])],
+    tagIds: [...(row.tag_ids ?? [])],
+    uses: toUses(row.uses),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -527,6 +587,10 @@ export function toArtwork(row: ArtworkRow, resolve: (src: string) => string = (s
     w.price = { amount: num(row.price_amount), currency: row.price_currency };
   }
   if (row.reviewed_at) w.reviewedAt = iso(row.reviewed_at);
+  const edition = toEdition(row.edition);
+  if (edition) w.edition = edition;
+  const location = toRegion(row.location);
+  if (location) w.location = location;
   return w;
 }
 
@@ -697,6 +761,13 @@ export function artworkInputToJson(input: ArtworkInput): Record<string, unknown>
     tags: input.tags,
   };
   if (input.id) out.id = input.id;
+  // v6: a key the caller left out keeps the stored value (server and mock alike);
+  // an edition / location key present but undefined clears it (JSON would drop it).
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(input, k);
+  if (input.tagIds !== undefined) out.tagIds = input.tagIds;
+  if (input.uses !== undefined) out.uses = input.uses;
+  if (has('edition')) out.edition = input.edition ?? null;
+  if (has('location')) out.location = input.location ?? null;
   return out;
 }
 
@@ -810,6 +881,8 @@ export interface OpenCallRow extends ProgrammeBaseRow {
   kind?: CallKind | null;
   organizer_institution_id?: string | null;
   terms?: CallTerms | null;
+  /** 0011_taxonomy.sql */
+  looking_for?: CallCriteria | null;
 }
 
 /** kofi.events_visible */
@@ -935,7 +1008,26 @@ export function toOpenCall(row: OpenCallRow, resolve: (src: string) => string = 
   if (row.organizer_institution_id) c.organizerInstitutionId = row.organizer_institution_id;
   const terms = toTerms(row.terms);
   if (terms) c.terms = terms;
+  const lookingFor = toCriteria(row.looking_for);
+  if (lookingFor) c.lookingFor = lookingFor;
   return c;
+}
+
+/** looking_for jsonb (camelCase, as CallCriteria; the server stores it cleaned) → CallCriteria. */
+export function toCriteria(v: CallCriteria | null | undefined): CallCriteria | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const out: CallCriteria = {};
+  if (v.tags && typeof v.tags === 'object') {
+    const tags: Record<string, string[]> = {};
+    for (const [cat, list] of Object.entries(v.tags)) if (Array.isArray(list) && list.length) tags[cat] = [...list];
+    if (Object.keys(tags).length) out.tags = tags;
+  }
+  if (Array.isArray(v.uses) && v.uses.length) out.uses = [...v.uses];
+  if (typeof v.region === 'string' && v.region) out.region = v.region;
+  if (typeof v.maxLongestEdgeCm === 'number') out.maxLongestEdgeCm = v.maxLongestEdgeCm;
+  if (typeof v.minLongestEdgeCm === 'number') out.minLongestEdgeCm = v.minLongestEdgeCm;
+  if (typeof v.note === 'string' && v.note) out.note = v.note;
+  return out;
 }
 
 /** terms jsonb (camelCase, as CallTerms) → CallTerms; paymentNote only when set. */
@@ -1101,6 +1193,7 @@ export function openCallToRow(c: Authored<OpenCall>): Record<string, unknown> {
     kind: c.kind ?? 'exhibition',
     organizer_institution_id: c.organizerInstitutionId ?? null,
     terms: termsToJson(c.terms),
+    looking_for: c.lookingFor && Object.keys(c.lookingFor).length ? c.lookingFor : null,
   };
 }
 

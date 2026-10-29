@@ -9,7 +9,7 @@
 //   supabase/seed_programme.sql  additive programme rows (insert-only)
 //   supabase/seed_sales.sql    additive lots + payouts (insert-only, 0009)
 //   supabase/apply/0008_live_patch.sql, apply/0009_live_patch.sql,
-//   supabase/apply/0010_live_patch.sql
+//   supabase/apply/0010_live_patch.sql, apply/0011_live_patch.sql
 //                              by-id corrections for the live project
 //
 //   node supabase/scripts/generate-seed.mjs
@@ -94,7 +94,7 @@ const d8 = (v) => (v ? `${s(v)}::date` : 'null');
 const jsonOrNull = (v) => (v === undefined || v === null ? 'null' : json(v));
 const uuidArr = (ids) => arr((ids ?? []).map(U), 'uuid');
 const imageJson = (im) => (im ? json({ src: im.src, alt: im.alt, ...(im.credit ? { credit: im.credit } : {}) }) : 'null');
-function programmeInserts(table, onConflict = '') {
+function programmeInserts(table, onConflict = '', v6 = false) {
   const L = [];
   const end = onConflict ? `\n${onConflict};` : ';';
   const emit = (name, cols, rows) => {
@@ -107,11 +107,12 @@ function programmeInserts(table, onConflict = '') {
     P.exhibitions.map((e) =>
       `  (${uuid(e.id)}, ${s(e.title)}, ${s(e.subtitle)}, ${d8(e.startsOn)}, ${d8(e.endsOn)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.body)}, ` +
       `${imageJson(e.image)}, ${uuidArr(e.artworkIds)}, ${s(e.externalUrl)}, ${s(e.curatedBy)}, ${b(e.sample)}, ${b(e.published)}, ${ts(e.createdAt)}, ${ts(e.updatedAt)})`));
-  emit('open_calls', 'id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at, kind, organizer_institution_id, terms',
+  // looking_for (0011) only in the snapshot: seed_programme.sql also runs on projects without 0011.
+  emit('open_calls', 'id, title, partner, summary, body, eligibility, mediums, opens_on, deadline, max_works, fee, award, image, external_url, exhibition_id, sample, published, created_at, updated_at, kind, organizer_institution_id, terms' + (v6 ? ', looking_for' : ''),
     P.openCalls.map((c) =>
       `  (${uuid(c.id)}, ${s(c.title)}, ${s(c.partner)}, ${s(c.summary)}, ${s(c.body)}, ${s(c.eligibility)}, ${arr(c.mediums ?? [], 'kofi.medium')}, ${d8(c.opensOn)}, ${d8(c.deadline)}, ` +
       `${n(c.maxWorks)}, ${s(c.fee)}, ${s(c.award)}, ${imageJson(c.image)}, ${s(c.externalUrl)}, ${uuidOrNull(c.exhibitionId)}, ${b(c.sample)}, ${b(c.published)}, ${ts(c.createdAt)}, ${ts(c.updatedAt)}, ` +
-      `'${c.kind ?? 'exhibition'}', ${uuidOrNull(c.organizerInstitutionId)}, ${jsonOrNull(c.terms)})`));
+      `'${c.kind ?? 'exhibition'}', ${uuidOrNull(c.organizerInstitutionId)}, ${jsonOrNull(c.terms)}` + (v6 ? `, ${jsonOrNull(c.lookingFor)}` : '') + ')'));
   emit('events', 'id, title, kind, starts_at, ends_at, venue, summary, rsvp_url, exhibition_id, sample, published, created_at, updated_at',
     P.events.map((e) =>
       `  (${uuid(e.id)}, ${s(e.title)}, '${e.kind}', ${ts(e.startsAt)}, ${ts(e.endsAt)}, ${jsonOrNull(e.venue)}, ${s(e.summary)}, ${s(e.rsvpUrl)}, ${uuidOrNull(e.exhibitionId)}, ` +
@@ -280,14 +281,17 @@ out(
 );
 out();
 
-out(`insert into kofi.demo_artworks (id, artist_id, title, year, medium, materials, height, width, depth, unit, description, status, rights_note, price_amount, price_currency, price_visibility, visibility, tags, reviewed_at, created_at, updated_at) values`);
+// v6 (0011): tag ids (stable library ids), uses, edition, location.
+const usesOf = (w) => ({ auction: !!w.uses?.auction, exhibition: !!w.uses?.exhibition, licensing: !!w.uses?.licensing, commission: !!w.uses?.commission });
+out(`insert into kofi.demo_artworks (id, artist_id, title, year, medium, materials, height, width, depth, unit, description, status, rights_note, price_amount, price_currency, price_visibility, visibility, tags, reviewed_at, created_at, updated_at, tag_ids, uses, edition, location) values`);
 out(
   seed.artworks
     .map(
       (w) =>
         `  (${uuid(w.id)}, ${uuid(w.artistId)}, ${s(w.title)}, ${w.year}, '${w.medium}', ${arr(w.materials, 'text')}, ` +
         `${n(w.dimensions.height)}, ${n(w.dimensions.width)}, ${n(w.dimensions.depth)}, '${w.dimensions.unit}', ${s(w.description)}, '${w.status}', ${s(w.rightsNote)}, ` +
-        `${n(w.price?.amount)}, ${s(w.price?.currency)}, '${w.priceVisibility}', '${w.visibility}', ${arr(w.tags, 'text')}, ${ts(w.reviewedAt)}, ${ts(w.createdAt)}, ${ts(w.updatedAt)})`,
+        `${n(w.price?.amount)}, ${s(w.price?.currency)}, '${w.priceVisibility}', '${w.visibility}', ${arr(w.tags, 'text')}, ${ts(w.reviewedAt)}, ${ts(w.createdAt)}, ${ts(w.updatedAt)}, ` +
+        `${arr(w.tagIds ?? [], 'text')}, ${json(usesOf(w))}, ${jsonOrNull(w.edition)}, ${jsonOrNull(w.location)})`,
     )
     .join(',\n') + ';',
 );
@@ -349,7 +353,7 @@ out(
 out();
 
 out('-- Programme (0008): exhibitions, open calls, events, stories, applications, collector inquiries.');
-for (const l of programmeInserts((t) => `kofi.demo_${t}`)) out(l);
+for (const l of programmeInserts((t) => `kofi.demo_${t}`, '', true)) out(l);
 out('-- Sales (0009): lots and payouts.');
 for (const l of salesInserts((t) => `kofi.demo_${t}`)) out(l);
 
@@ -642,9 +646,77 @@ for (const a of seed.artists) {
 end if; end $$;`);
 }
 out();
-out('-- every other artist (none on a demo project) gets a fresh code');
-out('update kofi.artists set verification_token = kofi.make_verification_token() where verification_token is null;');
+out('-- Other artists are left alone: kofi.ensure_my_artist() gives them a code the first time they sign in.');
 out();
 out("select set_config('kofi.seeding', 'off', true);");
 out('commit;');
 writeOut('apply/0010_live_patch.sql');
+
+// ================================================ apply/0011_live_patch.sql ==
+// The live project's demo works and calls were loaded before 0011: every work got
+// its medium as its only tag (0011's backfill) and NO_USES, the calls no criteria.
+// Brings them to the seed by fixed id — tag ids only where the work still has at
+// most its medium tag, uses only where still all false, edition / location only
+// where empty, a call's looking_for only where empty — and adds the new columns
+// to the kofi.demo_* snapshot (same order as the live tables) so "Reset demo data"
+// restores the same classification.
+lines = [];
+header('live patch: tags, uses, editions and call criteria for the demo works and calls', [
+  'For a project whose demo works / calls were loaded before 0011_taxonomy (apply 0011_part*.sql first).',
+  'By fixed id: artworks.tag_ids where it is still empty or only the medium tag, uses where still',
+  'all false, edition / location where NULL; open_calls.looking_for where NULL. Updates the',
+  'kofi.demo_artworks / kofi.demo_open_calls snapshot too. No inserts, no deletes, no other',
+  'columns. Re-runnable. Kept out of the audit log.',
+]);
+out('begin;');
+out(`do $$
+begin
+  if to_regclass('kofi.tags') is null or not exists (select 1 from information_schema.columns where table_schema = 'kofi' and table_name = 'artworks' and column_name = 'tag_ids') then
+    raise exception '0011_live_patch.sql: run supabase/apply/0011_part*.sql (0011_taxonomy) first.';
+  end if;
+end $$;`);
+out("select set_config('kofi.seeding', 'on', true);");
+out('-- A data fix, not an edit: updated_at must not move (ArtistsScreen orders works by it), same as the');
+out('-- migration\'s own fix. The touch trigger is off for the patch and back on before commit.');
+out('alter table kofi.artworks disable trigger artworks_touch;');
+out();
+out('-- the reset snapshot (created by seed_content.sql before 0011) gets the new columns, same order as the live tables');
+out(`do $$
+begin
+  if to_regclass('kofi.demo_artworks') is not null then
+    alter table kofi.demo_artworks add column if not exists tag_ids text[] not null default '{}';
+    alter table kofi.demo_artworks add column if not exists uses jsonb not null default '{"auction": false, "exhibition": false, "licensing": false, "commission": false}'::jsonb;
+    alter table kofi.demo_artworks add column if not exists edition jsonb;
+    alter table kofi.demo_artworks add column if not exists location jsonb;
+  end if;
+  if to_regclass('kofi.demo_open_calls') is not null then
+    alter table kofi.demo_open_calls add column if not exists looking_for jsonb;
+  end if;
+end $$;`);
+out();
+const NO_USES_JSON = `'{"auction": false, "exhibition": false, "licensing": false, "commission": false}'::jsonb`;
+for (const w of seed.artworks) {
+  out(`-- ${w.title}`);
+  if (w.tagIds?.length) out(`update kofi.artworks set tag_ids = ${arr(w.tagIds, 'text')} where id = ${uuid(w.id)} and cardinality(tag_ids) <= 1 and tag_ids <@ array[kofi.medium_tag_id(medium)];`);
+  const u = usesOf(w);
+  if (Object.values(u).some(Boolean)) out(`update kofi.artworks set uses = ${json(u)} where id = ${uuid(w.id)} and uses = ${NO_USES_JSON};`);
+  if (w.edition) out(`update kofi.artworks set edition = ${json(w.edition)} where id = ${uuid(w.id)} and edition is null;`);
+  if (w.location) out(`update kofi.artworks set location = ${json(w.location)} where id = ${uuid(w.id)} and location is null;`);
+  out(`do $$ begin if to_regclass('kofi.demo_artworks') is not null then
+  execute 'update kofi.demo_artworks set tag_ids = $1, uses = $2, edition = $3, location = $4 where id = $5' using ${arr(w.tagIds ?? [], 'text')}, ${json(u)}, ${w.edition ? json(w.edition) : 'null::jsonb'}, ${w.location ? json(w.location) : 'null::jsonb'}, ${uuid(w.id)};
+end if; end $$;`);
+}
+out();
+for (const c of P.openCalls) {
+  if (!c.lookingFor) continue;
+  out(`-- ${c.title}`);
+  out(`update kofi.open_calls set looking_for = ${json(c.lookingFor)} where id = ${uuid(c.id)} and looking_for is null;`);
+  out(`do $$ begin if to_regclass('kofi.demo_open_calls') is not null then
+  execute 'update kofi.demo_open_calls set looking_for = $1 where id = $2' using ${json(c.lookingFor)}, ${uuid(c.id)};
+end if; end $$;`);
+}
+out();
+out('alter table kofi.artworks enable trigger artworks_touch;');
+out("select set_config('kofi.seeding', 'off', true);");
+out('commit;');
+writeOut('apply/0011_live_patch.sql');

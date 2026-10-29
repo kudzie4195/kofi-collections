@@ -1,4 +1,6 @@
 import { applyFilters, type ArtworkFilters } from '@/domain/filters';
+import { effectiveCriteria, rankWorks, validateCriteria, type MatchResult } from '@/domain/matching';
+import { ARTIST_TAG_CATEGORIES, categoryOf, mediumTagId, normalizeTagIds, tagDef } from '@/domain/taxonomy';
 import { artworksToCsv, buildArtistExport } from '@/domain/export';
 import type {
   Application,
@@ -9,13 +11,16 @@ import type {
   ArtistLink,
   ArtistView,
   Artwork,
+  ArtworkUses,
   ArtworkView,
   AuditAction,
   AuditEvent,
   BuyerInquiry,
   BuyerInquiryRow,
   BuyerInquiryStatus,
+  CallCriteria,
   CallKind,
+  Edition,
   CallPhase,
   CallTerms,
   CuratorStatus,
@@ -37,6 +42,7 @@ import type {
   ProfileImportRecord,
   ProgrammeEvent,
   ProgrammeImage,
+  Region,
   ReportRange,
   SignUpInput,
   SignUpResult,
@@ -45,7 +51,7 @@ import type {
   Venue,
   Viewer,
 } from '@/domain/types';
-import { BUYER_INQUIRY_STATUSES, CALL_KINDS, CONSENT_VERSION, EVENT_KINDS, LOT_STATUSES, MEDIUMS, PAYOUT_STATUSES, STORY_KINDS } from '@/domain/types';
+import { BUYER_INQUIRY_STATUSES, CALL_KINDS, CONSENT_VERSION, EDITION_TYPES, EVENT_KINDS, LOT_STATUSES, MEDIUMS, NO_USES, PAYOUT_STATUSES, STORY_KINDS, USE_KEYS } from '@/domain/types';
 import { artistVisibleTo, artworkVisibleTo, canEdit, projectArtist, projectArtwork } from '@/domain/visibility';
 import {
   BUYER_INQUIRY_DAILY_LIMIT,
@@ -80,7 +86,7 @@ import {
   type ApplicationInput,
   type ProgrammeInput,
 } from '../DataSource';
-import { buildProgrammeSeed, buildSeed, DEMO_IDENTITIES, DEMO_USERS, PROGRAMME_KEYS, SALES_KEYS, seedIntake, V4_SEED_LINKS, type MockAccount, type MockState, type ProgrammeState } from './seed';
+import { buildProgrammeSeed, buildSeed, criteriaFor, DEMO_IDENTITIES, DEMO_USERS, MOCK_SCHEMA, PROGRAMME_KEYS, SALES_KEYS, SEED_CLASSIFICATION, seedIntake, V4_SEED_LINKS, type MockAccount, type MockState, type ProgrammeState } from './seed';
 import { fixtureFor, KOFI_PROFILE_BASE } from './importFixtures';
 
 const STORAGE_KEY = 'kofi.mock.state.v1';
@@ -319,16 +325,43 @@ export class MockDataSource implements DataSource {
     return out;
   }
 
-  async listArtworks(viewer: Viewer, filters: ArtworkFilters = {}): Promise<ArtworkView[]> {
+  /** The discovery set listArtworks filters: what this (resolved) viewer may browse. */
+  private discoveryWorks(v: Viewer): ArtworkView[] {
     // Discovery lists never include the viewer's own drafts — those live in the studio.
-    const v = this.resolve(viewer);
-    const items = this.visibleArtworks(v).filter((a) => {
+    return this.visibleArtworks(v).filter((a) => {
       if (a.visibility === 'private') return false;
       if (a.visibility === 'kofi' && v.role !== 'admin') return false;
       const artist = this.artistById(a.artistId);
       return artist?.status === 'approved' || v.role === 'admin';
     });
-    return applyFilters(items, filters);
+  }
+
+  async listArtworks(viewer: Viewer, filters: ArtworkFilters = {}): Promise<ArtworkView[]> {
+    return applyFilters(this.discoveryWorks(this.resolve(viewer)), filters);
+  }
+
+  /**
+   * Works ranked against a call's effective criteria. The call's partner and Kofi
+   * admins get the discovery set (exactly what listArtworks shows them); an artist
+   * gets only their own works that could be attached to an application (never Only
+   * me), for calls they can see. Everyone else: ForbiddenError.
+   */
+  async listMatchingWorks(viewer: Viewer, callId: string): Promise<{ work: ArtworkView; match: MatchResult }[]> {
+    const v = this.resolve(viewer);
+    let call: OpenCall;
+    let works: ArtworkView[];
+    if (v.role === 'artist' && v.artistId) {
+      const found = this.state.openCalls.find((c) => c.id === callId);
+      if (!found || !canSeeProgramme(found, v)) throw new NotFoundError('Open call not found.');
+      call = found;
+      works = this.visibleArtworks(v).filter((w) => w.artistId === v.artistId && w.visibility !== 'private');
+    } else if (v.role === 'admin' || v.role === 'curator') {
+      call = this.requireCallManager(v, callId);
+      works = this.discoveryWorks(v);
+    } else {
+      throw new ForbiddenError('Only the call’s organiser can see which works fit.');
+    }
+    return rankWorks(works, effectiveCriteria(call));
   }
 
   async getArtwork(viewer: Viewer, id: string): Promise<ArtworkView | undefined> {
@@ -611,11 +644,13 @@ export class MockDataSource implements DataSource {
       const existing = this.state.artworks.find((x) => x.id === input.id);
       if (!existing) throw new NotFoundError('Artwork not found.');
       if (existing.artistId !== a.id) throw new ForbiddenError('You can only edit your own work.');
+      const v6 = cleanArtworkV6(input, existing);
       const visibilityChanged = existing.visibility !== input.visibility || existing.priceVisibility !== input.priceVisibility;
       const { id: _id, ...rest } = input as ArtworkInput & { artistId?: string; reviewedAt?: string };
       delete rest.artistId;
       delete rest.reviewedAt;
-      Object.assign(existing, rest, { updatedAt: now });
+      Object.assign(existing, rest, v6.fields, { updatedAt: now });
+      for (const k of v6.cleared) delete existing[k];
       if (visibilityChanged) {
         this.audit(viewer, 'artwork.visibility', 'artwork', existing.id, {
           visibility: existing.visibility,
@@ -625,10 +660,12 @@ export class MockDataSource implements DataSource {
       this.commit();
       return projectArtwork(existing, a, this.resolve(viewer))!;
     }
+    const v6 = cleanArtworkV6(input);
     const { id: _ignored, ...rest } = input as ArtworkInput & { artistId?: string; reviewedAt?: string };
     delete rest.artistId;
     delete rest.reviewedAt;
-    const created: Artwork = { ...rest, id: this.makeId('aw'), artistId: a.id, createdAt: now, updatedAt: now };
+    const created: Artwork = { ...rest, ...v6.fields, id: this.makeId('aw'), artistId: a.id, createdAt: now, updatedAt: now };
+    for (const k of v6.cleared) delete created[k];
     this.state.artworks.push(created);
     this.audit(viewer, 'artwork.create', 'artwork', created.id);
     this.commit();
@@ -1182,6 +1219,8 @@ export class MockDataSource implements DataSource {
       clean.published = existing?.published ?? false;
       clean.sample = existing?.sample ?? false;
     }
+    // An editor that does not send lookingFor (older client) keeps what is stored.
+    if (existing?.lookingFor && !Object.prototype.hasOwnProperty.call(input, 'lookingFor')) clean.lookingFor = clone(existing.lookingFor);
     if (existing) this.checkCallLocks(existing, clean);
     this.checkProgrammeRefs(clean);
     const saved = this.upsertProgramme(v, this.state.openCalls, 'open_call', 'call', input.id, clean);
@@ -1870,6 +1909,167 @@ export function validateArtwork(input: ArtworkInput): void {
   }
 }
 
+/* ---------- v6: tags, uses, edition, location, keywords ---------- */
+
+export const MAX_KEYWORDS = 20;
+export const MAX_KEYWORD_LENGTH = 40;
+const MAX_EDITION = 100_000;
+
+type V6Field = 'tagIds' | 'uses' | 'edition' | 'location' | 'tags';
+
+/**
+ * Normalise the v6 fields of an artwork save (server-equivalent; the SQL checks mirror
+ * these). A field the client leaves out keeps its stored value on update, so an older
+ * client never wipes tags, uses, an edition or a location it does not know about.
+ * Returns the fields to set and the optional fields to clear.
+ */
+export function cleanArtworkV6(input: ArtworkInput, existing?: Artwork): { fields: Pick<Artwork, 'tagIds' | 'uses' | 'tags'> & Partial<Pick<Artwork, 'edition' | 'location'>>; cleared: ('edition' | 'location')[] } {
+  const has = (k: V6Field) => Object.prototype.hasOwnProperty.call(input, k);
+  // Tags: stable ids from the library, primary medium mirrored, capped per category.
+  let rawIds: readonly string[];
+  if (input.tagIds !== undefined) {
+    if (!Array.isArray(input.tagIds) || input.tagIds.some((x) => typeof x !== 'string')) throw new ValidationError('Tags must be a list.', 'tags');
+    rawIds = input.tagIds;
+  } else if (existing) {
+    // Medium changed without new tags: the old primary medium was only a mirror, so drop it.
+    const oldMirror = mediumTagId(existing.medium);
+    rawIds = (existing.tagIds ?? []).filter((id) => existing.medium === input.medium || id !== oldMirror);
+  } else rawIds = [];
+  const { tagIds, problem } = normalizeTagIds(rawIds, input.medium);
+  if (problem) throw new ValidationError(problem.message, problem.field);
+
+  const fields: ReturnType<typeof cleanArtworkV6>['fields'] = {
+    tagIds,
+    uses: input.uses !== undefined ? cleanUses(input.uses) : existing?.uses ? { ...existing.uses } : { ...NO_USES },
+    tags: cleanKeywords(input.tags),
+  };
+  const cleared: ('edition' | 'location')[] = [];
+  if (has('edition') || !existing) {
+    const e = cleanEdition(input.edition);
+    if (e) fields.edition = e;
+    else cleared.push('edition');
+  }
+  if (has('location') || !existing) {
+    const l = cleanLocation(input.location);
+    if (l) fields.location = l;
+    else cleared.push('location');
+  }
+  return { fields, cleared };
+}
+
+function cleanUses(v: unknown): ArtworkUses {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new ValidationError('Choose what the work is available for.', 'uses');
+  const o = v as Record<string, unknown>;
+  const out: ArtworkUses = { ...NO_USES };
+  for (const k of USE_KEYS) {
+    const x = o[k];
+    if (x === undefined) continue;
+    if (typeof x !== 'boolean') throw new ValidationError('Choose what the work is available for.', 'uses');
+    out[k] = x;
+  }
+  return out;
+}
+
+/** Free-text keywords: trimmed, empties dropped, de-duplicated ignoring case, at most 20 of at most 40 characters. */
+export function cleanKeywords(v: unknown): string[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new ValidationError('Keywords must be a list of words.', 'tags');
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of v as string[]) {
+    const t = raw.trim().replace(/\s+/g, ' ');
+    if (!t || seen.has(t.toLowerCase())) continue;
+    if (t.length > MAX_KEYWORD_LENGTH) throw new ValidationError(`Keep each keyword under ${MAX_KEYWORD_LENGTH} characters.`, 'tags');
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  if (out.length > MAX_KEYWORDS) throw new ValidationError(`Up to ${MAX_KEYWORDS} keywords.`, 'tags');
+  return out;
+}
+
+/**
+ * Edition: a known type; number and size are whole numbers of at least 1 and the
+ * number cannot exceed the size. A unique work carries neither; an open edition has
+ * no size; a limited edition needs its size.
+ */
+export function cleanEdition(v: unknown): Edition | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('Choose an edition type.', 'edition');
+  const e = v as Partial<Record<keyof Edition, unknown>>;
+  const type = e.type as Edition['type'];
+  if (!EDITION_TYPES.includes(type)) throw new ValidationError('Choose an edition type.', 'edition');
+  const whole = (x: unknown, label: string): number | undefined => {
+    if (x === undefined || x === null || x === '') return undefined;
+    if (typeof x !== 'number' || !Number.isInteger(x) || x < 1 || x > MAX_EDITION) throw new ValidationError(`${label} must be a whole number of 1 or more.`, 'edition');
+    return x;
+  };
+  if (type === 'unique') return { type };
+  const number = whole(e.number, 'The edition number');
+  const size = type === 'open' ? undefined : whole(e.size, 'The edition size');
+  if (type === 'limited' && size === undefined) throw new ValidationError('Enter how many are in the edition.', 'edition');
+  if (number !== undefined && size !== undefined && number > size) throw new ValidationError('The edition number cannot be higher than the edition size.', 'edition');
+  return compact({ type, number, size });
+}
+
+/** Where the work is, when it is not with the artist. Region and country are required once any part is given. */
+export function cleanLocation(v: unknown): Region | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('Enter where the work is.', 'location');
+  const l = v as Partial<Record<keyof Region, unknown>>;
+  const city = optStr(l.city, 'location', 120, 'City');
+  const region = optStr(l.region, 'location', 120, 'Region');
+  const country = optStr(l.country, 'location', 120, 'Country');
+  if (!city && !region && !country) return undefined;
+  if (!region || !country) throw new ValidationError('Add the region and country where the work is.', 'location');
+  const precision: Region['precision'] = l.precision === 'city' || l.precision === 'region' || l.precision === 'country' ? l.precision : city ? 'city' : 'region';
+  return compact({ city, region, country, precision });
+}
+
+/**
+ * An organiser's "looking for": unknown keys dropped, tags must be library ids an
+ * artist can pick (MVP, filter categories) filed under their own category, uses must
+ * be known; then validateCriteria. Empty criteria are stored as none.
+ */
+export function cleanCriteria(v: unknown): CallCriteria | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('The criteria are not valid.', 'lookingFor');
+  const c = v as Partial<Record<keyof CallCriteria, unknown>>;
+  const out: CallCriteria = {};
+  if (c.tags !== undefined && c.tags !== null) {
+    if (typeof c.tags !== 'object' || Array.isArray(c.tags)) throw new ValidationError('Tags must be a list.', 'lookingFor');
+    const tags: Record<string, string[]> = {};
+    for (const [cat, list] of Object.entries(c.tags as Record<string, unknown>)) {
+      if (!Array.isArray(list) || list.some((x) => typeof x !== 'string')) throw new ValidationError('Tags must be a list.', 'lookingFor');
+      const ids = [...new Set((list as string[]).map((x) => x.trim()))];
+      for (const id of ids) {
+        const t = tagDef(id);
+        if (!t || t.phase !== 'mvp' || !t.artistSelectable || !(ARTIST_TAG_CATEGORIES as readonly string[]).includes(t.category)) throw new ValidationError('One of the tags is not in Kofi’s library.', 'lookingFor');
+        if (categoryOf(id) !== cat) throw new ValidationError(`Each tag must belong to its category (${cat}).`, 'lookingFor');
+      }
+      if (ids.length) tags[cat] = ids;
+    }
+    if (Object.keys(tags).length) out.tags = tags;
+  }
+  if (c.uses !== undefined && c.uses !== null) {
+    if (!Array.isArray(c.uses) || c.uses.some((u) => !USE_KEYS.includes(u as (typeof USE_KEYS)[number]))) throw new ValidationError('Choose what the work must be available for.', 'lookingFor.uses');
+    const uses = USE_KEYS.filter((k) => (c.uses as string[]).includes(k));
+    if (uses.length) out.uses = uses;
+  }
+  const region = optStr(c.region, 'lookingFor.region', 1000, 'Region');
+  if (region) out.region = region;
+  for (const k of ['maxLongestEdgeCm', 'minLongestEdgeCm'] as const) {
+    const x = c[k];
+    if (x === undefined || x === null || x === '') continue;
+    if (typeof x !== 'number') throw new ValidationError('Enter a size in centimetres.', `lookingFor.${k}`);
+    out[k] = x;
+  }
+  const note = optStr(c.note, 'lookingFor.note', 10_000, 'Note');
+  if (note) out.note = note;
+  const problem = validateCriteria(out);
+  if (problem) throw new ValidationError(problem.message, problem.field);
+  return Object.keys(out).length ? out : undefined;
+}
+
 /* ---------- persisted-state migration ---------- */
 
 /**
@@ -1881,7 +2081,57 @@ export function validateArtwork(input: ArtworkInput): void {
  *   anything that points at an artist or work the user has since deleted.
  */
 export function migrateState(parsed: Partial<MockState>): MockState {
-  return migrateIntake(migrateProgramme(parsed));
+  return migrateTaxonomy(migrateIntake(migrateProgramme(parsed)));
+}
+
+/**
+ * v5 → v6 (idempotent; runs once, then `schema` is set). Every work keeps its old
+ * `tags` as keywords and gets `tagIds` = its medium. Seeded works (by id) get the
+ * seed's classification instead: tags, the demo artist's uses and edition, as the
+ * Supabase live patch does. Any other work gets NO_USES: an opt-in is never guessed.
+ * The two seeded calls get their criteria where they have none.
+ */
+function migrateTaxonomy(out: MockState): MockState {
+  if ((out.schema ?? 0) >= MOCK_SCHEMA) return out;
+  // The seed's own primary medium per work (a seed may carry a second medium tag, e.g. ceramics on an installation).
+  const seedMediumById = new Map<string, string>();
+  for (const s of buildSeed().artworks) seedMediumById.set(s.id, mediumTagId(s.medium));
+  for (const a of out.artworks ?? []) {
+    const seed = SEED_CLASSIFICATION[a.id];
+    if (!Array.isArray(a.tags)) a.tags = [];
+    a.tags = migrateKeywords(a.tags);
+    if (!Array.isArray(a.tagIds)) {
+      // The seed's ids minus its primary medium mirror, so a medium the user changed is respected.
+      // Secondary medium tags in the seed are kept; only the mirror of the seed's own medium is replaced.
+      const seedMedium = seedMediumById.get(a.id);
+      const ids = seed ? seed.tagIds.filter((id) => id !== seedMedium || mediumTagId(a.medium) === seedMedium) : [];
+      a.tagIds = normalizeTagIds(ids, a.medium).tagIds;
+    }
+    if (!a.uses || typeof a.uses !== 'object') a.uses = { ...(seed?.uses ?? NO_USES) };
+    if (!a.edition && seed?.edition) a.edition = { ...seed.edition };
+  }
+  for (const c of out.openCalls ?? []) {
+    if (c.lookingFor === undefined) {
+      const crit = criteriaFor(c.id);
+      if (crit) c.lookingFor = crit;
+    }
+  }
+  out.schema = MOCK_SCHEMA;
+  return out;
+}
+
+/** Old free-text tags become keywords without failing a load: trimmed, de-duplicated, clipped to the limits. */
+function migrateKeywords(tags: unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    if (typeof raw !== 'string') continue;
+    const t = raw.trim().replace(/\s+/g, ' ').slice(0, MAX_KEYWORD_LENGTH).trim();
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  return out.slice(0, MAX_KEYWORDS);
 }
 
 function migrateProgramme(parsed: Partial<MockState>): MockState {
@@ -2144,6 +2394,7 @@ export function cleanOpenCall(input: ProgrammeInput<OpenCall>, fallbackKind?: Ca
     kind,
     organizerInstitutionId: optStr(input.organizerInstitutionId, 'organizerInstitutionId', 100, 'Organiser'),
     terms: callTerms(input.terms),
+    lookingFor: cleanCriteria(input.lookingFor),
   });
   const problem = validateCallTerms(out);
   if (problem) throw new ValidationError(problem.message, problem.field);

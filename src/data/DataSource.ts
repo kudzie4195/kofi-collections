@@ -36,6 +36,7 @@ import type {
 } from '@/domain/types';
 import type { BuyerInquiryInput } from '@/domain/programme';
 import type { LotInput, SaleInput } from '@/domain/sales';
+import type { MatchResult } from '@/domain/matching';
 
 /** Thrown by data sources when the viewer is not allowed to do something. */
 export class ForbiddenError extends Error {
@@ -104,8 +105,11 @@ export type ArtistPatch = Partial<
   >
 >;
 
-export type ArtworkInput = Omit<Artwork, 'id' | 'artistId' | 'createdAt' | 'updatedAt' | 'reviewedAt'> & {
+export type ArtworkInput = Omit<Artwork, 'id' | 'artistId' | 'createdAt' | 'updatedAt' | 'reviewedAt' | 'tagIds' | 'uses'> & {
   id?: string;
+  /** v6: optional on input; the data layer normalises (normalizeTagIds) and defaults (NO_USES). */
+  tagIds?: string[];
+  uses?: Artwork['uses'];
 };
 
 export type DocumentInput = Omit<ArtDocument, 'id' | 'artistId' | 'createdAt' | 'fileRef'> & {
@@ -192,6 +196,14 @@ export interface DataSource {
   importProfile(viewer: Viewer, url: string): Promise<ProfileImport>;
   recordImport(viewer: Viewer, record: ProfileImportRecord): Promise<ArtistView>;
   checkMyLinks(viewer: Viewer, artistId?: string): Promise<ArtistLink[]>;
+
+  /* ---- matching (v6) ----
+   * listMatchingWorks: works the viewer may already see (same projection as
+   * listArtworks) ranked against the call's effective criteria. Callers: the
+   * call's organiser (partner), Kofi admins, and the artist for their own works
+   * (then only their works are returned). Never reveals a work the viewer could
+   * not open on its own. ForbiddenError for everyone else. */
+  listMatchingWorks(viewer: Viewer, callId: string): Promise<{ work: ArtworkView; match: MatchResult }[]>;
 
   /* ---- artist self-service ---- */
   getMyArtist(viewer: Viewer): Promise<ArtistView | undefined>;

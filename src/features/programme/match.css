@@ -1,0 +1,419 @@
+/* v6 calls + matching: "Looking for" fields (both call editors), the public
+   "What they're looking for" block, fit lines (apply, Opportunities) and the
+   "Works that fit" list (partner desk, admin call editor).
+   Kofi Noir: hairlines, tracked labels, gold for "fits", no boxes. Loads before
+   global.css, so kit overrides use two classes. */
+
+/* ---------------- editor fields ---------------- */
+.lf-fields__lede {
+  max-width: 62ch;
+}
+.lf-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.lf-fieldset > legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+.lf-ticks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-5);
+}
+.lf-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+.lf-tick input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+.lf-sizehint {
+  margin-top: calc(-1 * var(--space-2));
+}
+.lf-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+/* ---------------- public block ---------------- */
+.lf-block {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--green);
+  min-width: 0;
+}
+.lf-block__title {
+  font-family: var(--font-label);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--green);
+}
+.lf-block__lede {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  max-width: 60ch;
+}
+.lf-block__rows {
+  display: grid;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.lf-block__rows > div {
+  display: grid;
+  grid-template-columns: minmax(104px, 30%) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 12px;
+  border-top: 1px solid var(--line);
+}
+.lf-block__rows dt {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding-top: 6px;
+  overflow-wrap: anywhere;
+}
+.lf-block__rows dd {
+  margin: 0;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+  align-self: center;
+}
+.lf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius-pill);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+.lf-block__note {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.lf-block__notelabel {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.lf-block__note blockquote {
+  margin: 0;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--green);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1.35;
+  color: var(--cream);
+}
+
+/* ---------------- fit pill + reasons ---------------- */
+.fit-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.fit-pill[data-fits] {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: var(--black);
+}
+.sto-legend-dot {
+  display: inline-block;
+  margin-inline: 3px 6px;
+  vertical-align: 1px;
+  background: var(--gold);
+  border-color: var(--gold);
+}
+.fit-reasons {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.fit-reasons li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.fit-reasons__mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.fit-reasons__mark svg {
+  width: 13px;
+  height: 13px;
+}
+.fit-reasons li[data-ok] .fit-reasons__mark {
+  color: var(--gold);
+}
+.fit-reasons li[data-ok] {
+  color: var(--cream);
+}
+.fit-reasons__text {
+  overflow-wrap: anywhere;
+}
+
+/* ---------------- apply page: per-work fit line ---------------- */
+.sta-fitnote {
+  margin-top: calc(-1 * var(--space-2));
+}
+.fit-line {
+  width: 100%;
+  min-width: 0;
+}
+.fit-line > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.fit-line > summary::-webkit-details-marker {
+  display: none;
+}
+.fit-line > summary:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.fit-line__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--text-3);
+  flex: none;
+}
+.fit-line[data-fits] .fit-line__dot {
+  background: var(--gold);
+  border-color: var(--gold);
+}
+.fit-line[data-fits] > summary {
+  color: var(--cream);
+}
+.fit-line__why {
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line);
+}
+.fit-line[open] .fit-line__why {
+  color: var(--gold);
+}
+.fit-line .fit-reasons {
+  padding-top: 6px;
+  font-size: var(--fs-xs);
+}
+
+/* ---------------- Opportunities ---------------- */
+.sto-match {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sto-match[data-fits] {
+  color: var(--gold);
+}
+
+/* ---------------- Works that fit ---------------- */
+.pg-matches {
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--line);
+}
+.ml-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+}
+.ml-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.ml-count {
+  font-variant-numeric: tabular-nums;
+}
+.ml-lede {
+  max-width: 64ch;
+}
+.ml-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+}
+.ml-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.ml-row__thumb {
+  display: block;
+  width: 72px;
+  aspect-ratio: 4 / 5;
+  background: var(--surface-2);
+  outline: 1px solid var(--line);
+}
+.ml-row[data-fits] .ml-row__thumb {
+  outline-color: var(--gold);
+}
+.ml-row__thumb img,
+.ml-row__thumb span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ml-row__body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  align-content: start;
+}
+.ml-row__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px var(--space-3);
+}
+.ml-row__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+  color: var(--cream);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ml-row__title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--gold);
+}
+.ml-row__meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.ml-row .fit-reasons {
+  margin-top: 4px;
+}
+@media (min-width: 900px) {
+  .ml-row {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+  .ml-row__thumb {
+    width: 96px;
+  }
+  .lf-fields .lf-ticks {
+    gap: 0 var(--space-6);
+  }
+}
+
+/* chosen criteria tags while the picker is closed */
+.lf-chosen {
+  display: grid;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.lf-chosen > div {
+  display: grid;
+  grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 8px;
+  border-top: 1px solid var(--line);
+}
+.lf-chosen dt {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding-top: 2px;
+}
+.lf-chosen dd {
+  margin: 0;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+}

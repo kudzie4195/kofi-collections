@@ -1,4 +1,5 @@
-import type { ArtworkStatus, ArtworkView, CareerStage, Medium, Unit } from './types';
+import type { ArtworkStatus, ArtworkView, CareerStage, EditionType, Medium, Orientation, Unit, UseKey } from './types';
+import { FILTER_TAG_CATEGORIES, categoryOf } from './taxonomy';
 import { longestEdge, toUnit } from './units';
 
 export type SortKey = 'newest' | 'oldest' | 'title' | 'size-asc' | 'size-desc' | 'price-asc' | 'price-desc';
@@ -26,6 +27,16 @@ export interface ArtworkFilters {
   /** When true, works whose price is withheld/undisclosed stay in results even with a budget set. */
   includeUndisclosedPrice?: boolean;
   years?: { from?: number; to?: number };
+  /**
+   * Controlled tags, keyed by category id (workbook: "OR within a category; AND
+   * between different categories"). Example: { style: ['style.abstract','style.minimalism'],
+   * social_impact: ['social_impact.education_access'] } = (abstract OR minimalism) AND education.
+   */
+  tags?: Record<string, string[]>;
+  orientations?: Orientation[];
+  editionTypes?: EditionType[];
+  /** The work must allow at least one of these uses. */
+  uses?: UseKey[];
   sort?: SortKey;
 }
 
@@ -44,7 +55,57 @@ export function countActiveFilters(f: ArtworkFilters): number {
   if (f.publicArtExperience) n++;
   if (f.budgetMax !== undefined || f.budgetMin !== undefined) n++;
   if (f.years?.from !== undefined || f.years?.to !== undefined) n++;
+  for (const list of Object.values(f.tags ?? {})) if (list.length) n++;
+  if (f.orientations?.length) n++;
+  if (f.editionTypes?.length) n++;
+  if (f.uses?.length) n++;
   return n;
+}
+
+/** Every selected tag id, flat (for chips). */
+export function selectedTagIds(f: ArtworkFilters): string[] {
+  return Object.values(f.tags ?? {}).flat();
+}
+
+/** Toggle one tag id in the right category bucket; empty buckets are removed. */
+export function toggleTag(f: ArtworkFilters, id: string): ArtworkFilters {
+  const cat = categoryOf(id);
+  const tags = { ...(f.tags ?? {}) };
+  const list = tags[cat] ?? [];
+  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+  if (next.length) tags[cat] = next;
+  else delete tags[cat];
+  const out: ArtworkFilters = { ...f };
+  if (Object.keys(tags).length) out.tags = tags;
+  else delete out.tags;
+  return out;
+}
+
+/** OR within a category, AND across categories. Empty/unknown categories are ignored. */
+export function matchesTags(tagIds: readonly string[], wanted: Record<string, string[]> | undefined): boolean {
+  if (!wanted) return true;
+  for (const [cat, list] of Object.entries(wanted)) {
+    const ids = list.filter((id) => categoryOf(id) === cat);
+    if (!ids.length) continue;
+    if (!ids.some((id) => tagIds.includes(id))) return false;
+  }
+  return true;
+}
+
+/**
+ * Facet counts for the filter UI: for each tag id, how many of `items` would match if
+ * that tag were added to the current filters — so the counts respect AND across
+ * categories but ignore the tag's own category (standard faceted-search behaviour).
+ */
+export function tagFacets(items: ArtworkView[], f: ArtworkFilters): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const cat of FILTER_TAG_CATEGORIES) {
+    const without: ArtworkFilters = { ...f, tags: { ...(f.tags ?? {}) } };
+    delete without.tags![cat];
+    const pool = items.filter((a) => matchesFilters(a, without));
+    for (const a of pool) for (const id of a.tagIds) if (categoryOf(id) === cat) counts[id] = (counts[id] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function norm(s: string): string {
@@ -63,6 +124,7 @@ export function matchesFilters(a: ArtworkView, f: ArtworkFilters): boolean {
       a.description,
       ...a.materials,
       ...a.tags,
+      ...a.tagIds.map((id) => id.split('.').pop()?.replace(/_/g, ' ') ?? ''),
       String(a.year),
     ]
       .join(' ')
@@ -109,6 +171,11 @@ export function matchesFilters(a: ArtworkView, f: ArtworkFilters): boolean {
     if (f.years.from !== undefined && a.year < f.years.from) return false;
     if (f.years.to !== undefined && a.year > f.years.to) return false;
   }
+
+  if (!matchesTags(a.tagIds, f.tags)) return false;
+  if (f.orientations?.length && !f.orientations.includes(a.orientation)) return false;
+  if (f.editionTypes?.length && (!a.edition || !f.editionTypes.includes(a.edition.type))) return false;
+  if (f.uses?.length && !f.uses.some((u) => a.uses[u])) return false;
 
   return true;
 }

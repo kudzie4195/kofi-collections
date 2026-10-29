@@ -4,6 +4,7 @@ import type {
   Artist,
   Artwork,
   AuditEvent,
+  CallCriteria,
   BuyerInquiry,
   Curator,
   DemoIdentity,
@@ -19,8 +20,9 @@ import type {
   Venue,
 } from '@/domain/types';
 import type { ArtistLink, LinkVerification, ProfileImportRecord } from '@/domain/types';
-import { CONSENT_VERSION } from '@/domain/types';
+import { CONSENT_VERSION, NO_USES } from '@/domain/types';
 import { normalizeLink } from '@/domain/intake';
+import { normalizeTagIds } from '@/domain/taxonomy';
 import { placeholderArt } from './placeholderArt';
 import { SAMPLE_LINKS, SEED_TOKENS } from './importFixtures';
 import bundledArt from 'virtual:bundled-art';
@@ -116,7 +118,13 @@ export interface MockState {
   /* ---- intake (added in v5; older persisted states are migrated on load) ---- */
   /** Artists who signed up on this device. Their identities join the demo picker. */
   accounts: MockAccount[];
+  /* ---- v6 ---- */
+  /** Data version. Absent on states saved before v6; migrateState brings them to MOCK_SCHEMA. */
+  schema?: number;
 }
+
+/** Current mock data version (v6: tag ids, uses, editions, locations, call criteria). */
+export const MOCK_SCHEMA = 6;
 
 /**
  * A mock-mode sign-up. There is no password check in mock mode (the picker signs
@@ -158,6 +166,100 @@ export const BUNDLED_ART = new Set(['mara1', 'mara2', 'mara3', 'tobias1', 'june1
 function img(seed: string, medium: Artwork['medium'], alt: string, isPrimary = true): Artwork['images'][number] {
   const src = BUNDLED_ART.has(seed) ? (bundledArt[`${seed}.jpg`] ?? `/art/${seed}.jpg`) : placeholderArt(seed, medium);
   return { id: `img_${seed}`, src, alt, isPrimary, metadataStripped: true };
+}
+
+/**
+ * v6 classification of the demo works, as their (fictional) artists would tag them:
+ * stable ids from the workbook library, sparse and descriptive. Social Impact is the
+ * work's stated focus, chosen by the artist, never a claim about the artist. Uses are
+ * the artist's opt-ins and are separate from sale status (the bridge study is not for
+ * sale but may be exhibited). Migration (migrateState) and the Supabase live patch
+ * apply the same table by work id.
+ */
+export const SEED_CLASSIFICATION: Record<string, Pick<Artwork, 'tagIds' | 'uses'> & Pick<Partial<Artwork>, 'edition'>> = {
+  aw_mara_1: {
+    tagIds: ['medium.painting', 'style.expressionism', 'style.figurative', 'subject.urban_life', 'theme.memory', 'material.oil', 'palette.warm'],
+    uses: { auction: true, exhibition: true, licensing: false, commission: false },
+  },
+  aw_mara_2: {
+    tagIds: ['medium.painting', 'style.figurative', 'subject.people', 'subject.urban_life', 'theme.memory', 'material.oil', 'palette.cool'],
+    uses: { auction: true, exhibition: true, licensing: false, commission: false },
+  },
+  aw_mara_3: {
+    tagIds: ['medium.drawing', 'style.figurative', 'subject.architecture', 'subject.urban_life', 'material.charcoal', 'material.paper'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+  },
+  aw_tobias_1: {
+    tagIds: ['medium.ceramics', 'medium.installation', 'style.contemporary', 'theme.community', 'material.clay', 'display_format.freestanding'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+  },
+  aw_tobias_2: {
+    tagIds: ['medium.ceramics', 'style.minimalism', 'theme.transformation', 'material.clay', 'palette.earth_tones'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+  },
+  aw_tobias_3: {
+    tagIds: ['medium.sculpture', 'style.abstract', 'social_impact.community_building', 'material.bronze', 'display_format.freestanding'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: true },
+  },
+  aw_june_1: {
+    tagIds: ['medium.textile', 'style.contemporary', 'theme.heritage', 'social_impact.cultural_preservation', 'material.fabric', 'display_format.wall_mounted'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+  },
+  aw_june_2: {
+    tagIds: ['medium.textile', 'style.abstract', 'theme.heritage', 'social_impact.cultural_preservation', 'material.fabric', 'palette.vibrant'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+  },
+  aw_june_3: {
+    tagIds: ['medium.mixed_media', 'theme.heritage', 'material.fabric', 'material.found_objects'],
+    uses: { auction: false, exhibition: false, licensing: false, commission: false },
+  },
+  aw_deshawn_1: {
+    tagIds: ['medium.photography', 'style.realism', 'subject.people', 'subject.urban_life', 'theme.community', 'social_impact.workforce_development'],
+    uses: { auction: true, exhibition: false, licensing: true, commission: false },
+    edition: { type: 'limited', number: 2, size: 5 },
+  },
+  aw_deshawn_2: {
+    // medium.video is an app addition, so it sorts after the workbook's tags.
+    tagIds: ['subject.urban_life', 'subject.culture', 'theme.community', 'display_format.digital_display', 'medium.video'],
+    uses: { auction: false, exhibition: false, licensing: true, commission: false },
+  },
+  aw_priya_1: {
+    tagIds: ['medium.printmaking', 'medium.digital_art', 'style.abstract', 'material.ink', 'material.paper', 'palette.cool'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+    edition: { type: 'limited', size: 20 },
+  },
+  aw_priya_2: {
+    tagIds: ['medium.printmaking', 'medium.digital_art', 'style.abstract', 'material.ink', 'material.paper', 'palette.multicolored'],
+    uses: { auction: false, exhibition: true, licensing: false, commission: false },
+    edition: { type: 'limited', size: 20 },
+  },
+};
+
+/** What the two seeded calls are looking for (also applied by migrateState and the live patch where unset). */
+export const SEED_CALL_CRITERIA: Record<string, CallCriteria> = {
+  call_cma_auction: {
+    tags: { theme: ['theme.community', 'theme.memory'] },
+    uses: ['auction'],
+    region: 'Pennsylvania',
+    note: 'Work about the city at night and the people who keep it running.',
+  },
+  call_night_weather: {
+    tags: { theme: ['theme.memory'], subject: ['subject.urban_life'] },
+    uses: ['exhibition'],
+  },
+};
+
+export function criteriaFor(callId: string): CallCriteria | undefined {
+  const c = SEED_CALL_CRITERIA[callId];
+  return c ? (JSON.parse(JSON.stringify(c)) as CallCriteria) : undefined;
+}
+
+function withClassification(a: Omit<Artwork, 'tagIds' | 'uses'>): Artwork {
+  const c = SEED_CLASSIFICATION[a.id];
+  // Library order, primary medium mirrored: exactly what saveArtwork would store.
+  const out: Artwork = { ...a, tagIds: normalizeTagIds(c?.tagIds ?? [], a.medium).tagIds, uses: { ...(c?.uses ?? NO_USES) } };
+  if (c?.edition) out.edition = { ...c.edition };
+  return out;
 }
 
 export function buildSeed(): MockState {
@@ -274,7 +376,7 @@ export function buildSeed(): MockState {
     },
   ];
 
-  const artworks: Artwork[] = [
+  const rawArtworks: Omit<Artwork, 'tagIds' | 'uses'>[] = [
     {
       id: 'aw_mara_1',
       artistId: 'art_mara',
@@ -529,6 +631,7 @@ export function buildSeed(): MockState {
       updatedAt: d(5),
     },
   ];
+  const artworks: Artwork[] = rawArtworks.map((a) => withClassification(a));
 
   const institutions: Institution[] = [
     { id: 'inst_cma', name: 'Carnegie Museum of Art', type: 'museum', website: 'https://example.org/cma', city: 'Pittsburgh', country: 'United States' },
@@ -657,7 +760,7 @@ export function buildSeed(): MockState {
     if (v5) Object.assign(a, v5);
   }
 
-  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit, ...buildProgrammeSeed(), accounts: [] };
+  return { artists, artworks, institutions, curators, shortlists, inquiries, documents, documentPayloads, audit, ...buildProgrammeSeed(), accounts: [], schema: MOCK_SCHEMA };
 }
 
 export const DEMO_IDENTITIES: DemoIdentity[] = [
@@ -845,6 +948,7 @@ export function buildProgrammeSeed(): ProgrammeState {
       fee: 'No entry fee',
       award: 'A solo wall in Kofi’s spring 2027 programme and a $1,500 studio grant (sample)',
       exhibitionId: 'ex_night_weather',
+      lookingFor: criteriaFor('call_night_weather'),
       createdAt: '2026-09-20T14:00:00.000Z',
       updatedAt: '2026-10-01T14:00:00.000Z',
     },
@@ -918,6 +1022,7 @@ export function buildProgrammeSeed(): ProgrammeState {
         currency: 'USD',
         paymentNote: 'Artists are paid within 30 days of the auction.',
       },
+      lookingFor: criteriaFor('call_cma_auction'),
       createdAt: '2026-08-10T14:00:00.000Z',
       updatedAt: '2026-08-14T14:00:00.000Z',
     },

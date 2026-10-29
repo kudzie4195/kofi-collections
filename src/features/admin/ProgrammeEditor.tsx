@@ -21,7 +21,9 @@ import {
 import { Button, Confirm, EmptyState, ErrorState, Icon, Input, LinkButton, Notice, Select, Skeleton, Textarea, Toggle, TopBar } from '@/ui';
 import { useUnsavedGuard, focusFirstError } from '@/features/studio/shared';
 import { isoToLocalInput, kofiZoneLabel, localInputToIso } from './datetime';
-import { ArtworkPicker, ImageField, MediumChips } from './ProgrammeFields';
+import { ArtworkPicker, BLANK_CRITERIA, criteriaErrors, CriteriaFields, criteriaToForm, formToCriteria, ImageField, isCriteriaKey, MediumChips, type CriteriaForm } from './ProgrammeFields';
+import { MatchList } from '@/features/curator/MatchList';
+import { matchCopy } from '@/features/programme/matchCopy';
 import { formToTerms, LockedTerms, TermsFields, termsToForm, type TermsForm } from './TermsFields';
 import { Badge } from './AdminProgramme';
 import { isProgrammeKind, KIND_LABEL, KIND_SINGULAR, publicPath, type AnyProgrammeItem, type ProgrammeKind } from './programmeShared';
@@ -58,6 +60,8 @@ interface Form {
   /** Non-auction calls may publish terms too; auctions always do. */
   hasTerms: boolean;
   terms: TermsForm;
+  /** v6: the call's "Looking for" criteria as typed. */
+  criteria: CriteriaForm;
   eventKind: EventKind;
   startsAt: string;
   endsAt: string;
@@ -101,6 +105,7 @@ function blankForm(kind: ProgrammeKind): Form {
     organizerId: '',
     hasTerms: false,
     terms: termsToForm(DEFAULT_TERMS),
+    criteria: { ...BLANK_CRITERIA, tagIds: [], uses: [] },
     eventKind: 'talk',
     startsAt: '',
     endsAt: '',
@@ -148,6 +153,7 @@ function fromItem(kind: ProgrammeKind, item: AnyProgrammeItem): Form {
         organizerId: c.organizerInstitutionId ?? '',
         hasTerms: !!c.terms,
         terms: termsToForm(c.terms ?? DEFAULT_TERMS),
+        criteria: criteriaToForm(c.lookingFor),
       };
     }
     case 'events': {
@@ -210,26 +216,30 @@ function toInput(kind: ProgrammeKind, f: Form, id: string | undefined, lockedTer
         curatedBy: opt(f.curatedBy),
       });
     case 'calls':
-      return compact<ProgrammeInput<OpenCall>>({
-        ...common,
-        partner: opt(f.partner),
-        summary: f.summary.trim(),
-        body: f.body.trim(),
-        eligibility: f.eligibility.trim(),
-        mediums: f.mediums,
-        opensOn: f.opensOn,
-        deadline: opt(f.deadline),
-        maxWorks: Number(f.maxWorks),
-        fee: f.fee.trim(),
-        award: opt(f.award),
-        image: imageOf(f),
-        externalUrl: opt(f.externalUrl),
-        exhibitionId: opt(f.exhibitionId),
-        kind: f.callKind,
-        organizerInstitutionId: opt(f.organizerId),
-        // A sale froze the terms: send them back exactly as stored.
-        terms: lockedTerms ?? (usesTerms(f) ? formToTerms(f.terms) : undefined),
-      });
+      return {
+        ...compact<ProgrammeInput<OpenCall>>({
+          ...common,
+          partner: opt(f.partner),
+          summary: f.summary.trim(),
+          body: f.body.trim(),
+          eligibility: f.eligibility.trim(),
+          mediums: f.mediums,
+          opensOn: f.opensOn,
+          deadline: opt(f.deadline),
+          maxWorks: Number(f.maxWorks),
+          fee: f.fee.trim(),
+          award: opt(f.award),
+          image: imageOf(f),
+          externalUrl: opt(f.externalUrl),
+          exhibitionId: opt(f.exhibitionId),
+          kind: f.callKind,
+          organizerInstitutionId: opt(f.organizerId),
+          // A sale froze the terms: send them back exactly as stored.
+          terms: lockedTerms ?? (usesTerms(f) ? formToTerms(f.terms) : undefined),
+        }),
+        // Sent even when empty (own key, value undefined) so clearing the section removes the stored criteria.
+        lookingFor: formToCriteria(f.criteria),
+      };
     case 'events':
       return compact<ProgrammeInput<ProgrammeEvent>>({
         ...common,
@@ -270,6 +280,7 @@ function clientErrors(kind: ProgrammeKind, f: Form, termsLocked = false): Errors
       const p = validateTerms(formToTerms(f.terms));
       if (p) e[p.field] = p.message;
     }
+    Object.assign(e, criteriaErrors(f.criteria));
   }
   if (kind === 'events' && !localInputToIso(f.startsAt)) e.startsAt = 'Choose when the event starts.';
   if (kind === 'stories' && !f.publishedOn) e.publishedOn = 'Choose a publication date.';
@@ -328,6 +339,8 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** Bumped on every save so "Works that fit" re-ranks against the saved criteria. */
+  const [savedTick, setSavedTick] = useState(0);
 
   useEffect(() => {
     if (form || !q.data) return;
@@ -400,6 +413,11 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
     setForm((cur) => (cur ? { ...cur, terms: { ...cur.terms, [k]: v } } : cur));
     if (errors[k] || errors.terms || errors.general) setErrors((e) => ({ ...e, [k]: undefined, terms: undefined, general: undefined, ...(k.endsWith('SharePct') ? { artistSharePct: undefined } : {}) }));
   };
+  const setCriteria = (v: CriteriaForm) => {
+    setForm((cur) => (cur ? { ...cur, criteria: v } : cur));
+    if (Object.keys(errors).some((k) => isCriteriaKey(k) && errors[k]) || errors.general)
+      setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !isCriteriaKey(k) && k !== 'general')));
+  };
   const setKind = (k: CallKind) => {
     setForm((cur) => (cur ? { ...cur, callKind: k, hasTerms: k === 'auction' ? true : cur.hasTerms } : cur));
     if (errors.kind || errors.terms || errors.general) setErrors((e) => ({ ...e, kind: undefined, terms: undefined, general: undefined }));
@@ -437,6 +455,7 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
       const next = fromItem(kind, saved);
       setForm(next);
       setBaseline(JSON.stringify(next));
+      setSavedTick((t) => t + 1);
       toast.push(`${saved.published ? 'Published' : 'Saved draft of'} “${saved.title}”`, 'success');
       if (isNew) {
         guard.allowNext();
@@ -609,6 +628,12 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
           )}
 
           {kind === 'calls' && (
+            <Section title={matchCopy.editor.title}>
+              <CriteriaFields value={f.criteria} onChange={setCriteria} errors={errors} />
+            </Section>
+          )}
+
+          {kind === 'calls' && (
             <Section title="Terms">
               {lockedTerms ? (
                 <LockedTerms terms={lockedTerms} reason={lockReason} />
@@ -745,6 +770,21 @@ function ProgrammeEditor({ kind, id }: { kind: ProgrammeKind; id?: string }) {
           <p className="tiny muted">How the card reads in lists on the public site.</p>
         </aside>
       </div>
+
+      {kind === 'calls' && (
+        <section className="pg-matches" aria-labelledby="pg-matches-title">
+          {id ? (
+            <MatchList callId={id} headingId="pg-matches-title" version={savedTick} />
+          ) : (
+            <>
+              <h2 className="section-title" id="pg-matches-title">
+                {matchCopy.list.title}
+              </h2>
+              <p className="small muted">{matchCopy.list.saveFirst}</p>
+            </>
+          )}
+        </section>
+      )}
 
       <Confirm
         open={confirmDelete}

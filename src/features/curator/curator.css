@@ -893,16 +893,26 @@ fieldset.pc-terms {
   }
 }
 
-/* Partner call desk tabs: two labels, one row at every width. Three-class selector so the
-   result does not depend on which feature stylesheet loads last (admin.css sets max-content). */
+/* Partner call desk tabs: up to three labels, one row at every width. Three-class selector so
+   the result does not depend on which feature stylesheet loads last (admin.css sets max-content).
+   Labels wrap to a second line rather than truncate: "Applications (3)" must stay readable at 375. */
 .cu-split__main .pg-tabs .segmented {
   min-width: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
 }
 .cu-split__main .pg-tabs .segmented__btn {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  padding: 6px 6px;
+}
+@media (max-width: 420px) {
+  .cu-split__main .pg-tabs .segmented__btn {
+    letter-spacing: 0.06em;
+    padding: 6px 4px;
+  }
 }

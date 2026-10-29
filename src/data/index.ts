@@ -1,13 +1,13 @@
 import type { DataSource } from './DataSource';
-import { MockDataSource } from './mock/MockDataSource';
 
 let instance: DataSource | undefined;
 let pending: Promise<DataSource> | undefined;
 
 /**
  * Resolve the app's data source once. Mock by default; Supabase when
- * VITE_DATA_MODE=supabase and credentials are present (lazy-loaded so the
- * on-device demo bundle doesn't pay for supabase-js).
+ * VITE_DATA_MODE=supabase and credentials are present. Both sources are
+ * lazy-loaded: the on-device demo never pays for supabase-js, and the
+ * Supabase build never ships the demo fixtures and seed.
  */
 export function loadDataSource(): Promise<DataSource> {
   if (instance) return Promise.resolve(instance);
@@ -25,7 +25,8 @@ export function loadDataSource(): Promise<DataSource> {
       }
       console.warn('[kofi] VITE_DATA_MODE=supabase but URL/key missing — falling back to mock data.');
     }
-    const ds: DataSource = new MockDataSource();
+    const mock = await import('./mock/MockDataSource');
+    const ds: DataSource = new mock.MockDataSource();
     instance = ds;
     return ds;
   })();

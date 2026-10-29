@@ -7,6 +7,9 @@ import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
 import { deadlineLabel, formatDay, formatInstantDay } from '@/features/programme/format';
 import { TermsBlock } from '@/features/programme/terms';
+import { effectiveCriteria, matchWork, type MatchResult } from '@/domain/matching';
+import { FitReasons, LookingForBlock } from '@/features/programme/LookingFor';
+import { matchCopy } from '@/features/programme/matchCopy';
 import { Button, EmptyState, ErrorState, Icon, LinkButton, Notice, Skeleton, TopBar, VisibilityBadge, WallLabel } from '@/ui';
 import { capitalize, focusFirstError } from './shared';
 
@@ -158,6 +161,12 @@ function ApplyForm({ call, artist, works, apps }: { call: OpenCall; artist: Arti
   const atMax = selected.length >= call.maxWorks;
   const chosen = selected.map((id) => works.find((w) => w.id === id)).filter((w): w is ArtworkView => !!w);
   const len = statement.trim().length;
+  // Explainable fit per work (domain/matching). Advice only: every visible work stays selectable.
+  const matches = useMemo(() => {
+    const criteria = effectiveCriteria(call);
+    return new Map(works.map((w) => [w.id, matchWork(w, criteria)]));
+  }, [call, works]);
+  const asks = works.length ? (matches.get(works[0]!.id)?.of ?? 0) : 0;
 
   const toggle = (w: ArtworkView) => {
     if (w.visibility === 'private') return;
@@ -192,6 +201,7 @@ function ApplyForm({ call, artist, works, apps }: { call: OpenCall; artist: Arti
         <h2 className="h1 sta-title">{call.title}</h2>
         <span className="rule" aria-hidden="true" />
         <CallFacts call={call} />
+        <LookingForBlock call={call} headingLevel={3} id="sta-lf-title" />
         <Link to={`/calls/${call.id}`} className="small sta-readcall">
           Read the full call <Icon.ArrowRight aria-hidden="true" />
         </Link>
@@ -233,13 +243,14 @@ function ApplyForm({ call, artist, works, apps }: { call: OpenCall; artist: Arti
           <p className="small muted">
             Pick up to {call.maxWorks} from your studio. They’re attached in the order you choose them.
           </p>
+          {works.length > 0 && <p className="small muted sta-fitnote">{asks > 0 ? matchCopy.fit.stillYours : matchCopy.fit.none}</p>}
           {works.length === 0 ? (
             <EmptyState title="Your studio has no works yet" body="Add a work first, then come back to apply." actions={<LinkButton to="/studio/work/new">Add a work</LinkButton>} />
           ) : (
             <ul className="sta-works" aria-label="Your works" data-invalid={errors.artworkIds ? 'true' : undefined} tabIndex={errors.artworkIds ? -1 : undefined}>
               {works.map((w) => (
                 <li key={w.id}>
-                  <WorkPick work={w} order={selected.indexOf(w.id)} atMax={atMax} onToggle={() => toggle(w)} describedBy={counterId} />
+                  <WorkPick work={w} order={selected.indexOf(w.id)} atMax={atMax} onToggle={() => toggle(w)} describedBy={counterId} match={matches.get(w.id)} />
                 </li>
               ))}
             </ul>
@@ -383,7 +394,7 @@ export function CallFacts({ call }: { call: OpenCall }) {
   );
 }
 
-function WorkPick({ work, order, atMax, onToggle, describedBy }: { work: ArtworkView; order: number; atMax: boolean; onToggle: () => void; describedBy: string }) {
+function WorkPick({ work, order, atMax, onToggle, describedBy, match }: { work: ArtworkView; order: number; atMax: boolean; onToggle: () => void; describedBy: string; match?: MatchResult }) {
   const img = work.images.find((i) => i.isPrimary) ?? work.images[0];
   const on = order >= 0;
   const isPrivate = work.visibility === 'private';
@@ -418,6 +429,18 @@ function WorkPick({ work, order, atMax, onToggle, describedBy }: { work: Artwork
       </button>
       <div className="sta-pick__foot">
         <VisibilityBadge level={work.visibility} />
+        {match && match.of > 0 && (
+          <details className="fit-line" data-fits={match.fits || undefined}>
+            <summary aria-label={`${matchCopy.fit.line(match.met, match.of)}. ${matchCopy.fit.whyFor(work.title)}`}>
+              <span className="fit-line__dot" aria-hidden="true" />
+              <span className="fit-line__text">{matchCopy.fit.line(match.met, match.of)}</span>
+              <span className="fit-line__why" aria-hidden="true">
+                {matchCopy.fit.why}
+              </span>
+            </summary>
+            <FitReasons reasons={match.reasons} />
+          </details>
+        )}
         {isPrivate && (
           <p className="tiny sta-pick__why" id={reasonId}>
             Set to Only me — change visibility to attach.{' '}

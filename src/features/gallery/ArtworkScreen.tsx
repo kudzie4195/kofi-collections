@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
+import { FILTER_TAG_CATEGORIES, SOCIAL_IMPACT_BOUNDARY, categoryLabel, groupTagIds, tagDef, tagLabel } from '@/domain/taxonomy';
 import type { ArtworkView, Unit } from '@/domain/types';
+import { EDITION_LABEL, ORIENTATION_LABEL, USE_KEYS, USE_LABEL } from '@/domain/types';
 import { formatDimensions, formatPrice } from '@/domain/units';
 import { useQuery, useViewer } from '@/state/session';
 import { useToast } from '@/state/toast';
-import { Avatar, Button, EmptyState, ErrorState, FictionalFooter, Icon, LinkButton, SaveButton, Skeleton, Tag, TopBar, VisibilityBadge, WallLabel } from '@/ui';
+import { Avatar, Button, EmptyState, ErrorState, FictionalFooter, Icon, LinkButton, SaveButton, Skeleton, TopBar, VisibilityBadge, WallLabel } from '@/ui';
 import { CollectorInquirySheet } from '@/features/programme/CollectorInquirySheet';
 import { ViewInRoomSheet } from '@/features/programme/ViewInRoomSheet';
 import { useSaved } from '@/features/programme/saved';
 import { formatDateRange } from '@/features/programme/format';
 import { exhibitionPhase } from '@/domain/programme';
+import { FILTER_COPY as C } from './filterCopy';
 import { cap, isVerifiedCurator, useLoad } from './helpers';
+import { worksTagHref } from './params';
 import { IntroSheet } from './IntroSheet';
 import { CuratorAccessNotice } from './notices';
 import { ShortlistSheet } from './ShortlistSheet';
@@ -175,23 +179,26 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
               {work.dimensions.depth !== undefined ? ' × depth' : ''}
             </span>
           </dd>
-          <dt>Status</dt>
-          <dd>{cap(work.status)}</dd>
-          <dt>Rights</dt>
-          <dd>{work.rightsNote || <span className="muted">No note</span>}</dd>
-          {work.tags.length > 0 && (
+          <dt>{C.orientationLabel}</dt>
+          <dd>{ORIENTATION_LABEL[work.orientation]}</dd>
+          {work.edition && (
             <>
-              <dt>Tags</dt>
+              <dt>{C.editionLabel}</dt>
               <dd>
-                <span className="chips">
-                  {work.tags.map((t) => (
-                    <Tag key={t}>{t}</Tag>
-                  ))}
-                </span>
+                {EDITION_LABEL[work.edition.type]}
+                {work.edition.number !== undefined && work.edition.size !== undefined && <span className="muted">, {C.editionNumber(work.edition.number, work.edition.size)}</span>}
               </dd>
             </>
           )}
+          <dt>Status</dt>
+          <dd>{cap(work.status)}</dd>
+          <dt>{C.usesLabel}</dt>
+          <dd>{USE_KEYS.some((u) => work.uses[u]) ? USE_KEYS.filter((u) => work.uses[u]).map((u) => USE_LABEL[u]).join(', ') : <span className="muted">{C.usesNone}</span>}</dd>
+          <dt>Rights</dt>
+          <dd>{work.rightsNote || <span className="muted">No note</span>}</dd>
         </dl>
+
+        <WorkTags work={work} />
 
         {askPrimary && (
           <div className="sticky-actions kg-actions">
@@ -291,5 +298,49 @@ function ArtworkDetail({ work }: { work: ArtworkView }) {
         </>
       )}
     </article>
+  );
+}
+
+/** The artist's controlled tags as grouped chip rows; each chip opens Works filtered by that tag. Keywords sit quietly underneath. */
+export function WorkTags({ work }: { work: Pick<ArtworkView, 'tagIds' | 'tags'> }) {
+  const grouped = groupTagIds(work.tagIds);
+  const order = [...FILTER_TAG_CATEGORIES, ...Object.keys(grouped).filter((c) => !(FILTER_TAG_CATEGORIES as readonly string[]).includes(c))];
+  const rows = order.filter((c) => grouped[c]?.length);
+  if (!rows.length && !work.tags.length) return null;
+  return (
+    <section className="kg-wtags" aria-labelledby="kg-wtags-title">
+      <h2 id="kg-wtags-title" className="eyebrow kg-wtags__title">
+        {C.tagsTitle}
+      </h2>
+      {rows.map((cat) => {
+        const social = cat === 'social_impact';
+        return (
+          <div key={cat} className="kg-wtags__row" data-category={cat} title={social ? SOCIAL_IMPACT_BOUNDARY : undefined}>
+            <h3 className="kg-wtags__cat" id={`kg-wtags-${cat}`}>
+              {categoryLabel(cat)}
+            </h3>
+            {social && <p className="small muted kg-wtags__lede">{C.socialImpactLede}</p>}
+            <ul className="chips kg-wtags__chips" aria-labelledby={`kg-wtags-${cat}`}>
+              {grouped[cat]!.map((id) => (
+                <li key={id}>
+                  <Link
+                    to={worksTagHref(id)}
+                    className="chip chip--small kg-wtag"
+                    title={social ? [tagDef(id)?.definition, SOCIAL_IMPACT_BOUNDARY].filter(Boolean).join(' ') : C.tagLinkTitle(tagLabel(id))}
+                  >
+                    {tagLabel(id)}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+      {work.tags.length > 0 && (
+        <p className="small muted kg-wtags__keywords">
+          <span className="kg-wtags__kwlabel">{C.keywordsLabel}</span> {work.tags.join(', ')}
+        </p>
+      )}
+    </section>
   );
 }

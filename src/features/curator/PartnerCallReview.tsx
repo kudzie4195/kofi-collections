@@ -7,12 +7,14 @@ import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, deadlineLabel, format
 import { TermsBlock } from '@/features/programme/terms';
 import { EmptyState, Icon, LinkButton, Segmented, Skeleton, StatusDot } from '@/ui';
 import { LotsPanel } from './LotsPanel';
+import { MatchList } from './MatchList';
+import { matchCopy } from '@/features/programme/matchCopy';
 import { isPartnerCurator, PartnerError, PartnerGate, PartnerShell, PhaseBadge, PublishBadge } from './partnerShared';
 import '@/features/admin/programme.css';
 import '@/features/admin/admin.css';
 import './curator.css';
 
-type Tab = 'applications' | 'lots';
+type Tab = 'applications' | 'fit' | 'lots';
 const RANK: Record<ApplicationStatus, number> = { submitted: 0, shortlisted: 1, accepted: 2, declined: 3, withdrawn: 4 };
 
 export function PartnerCallReview() {
@@ -33,7 +35,8 @@ export function PartnerCallReview() {
   const curator = q.data?.curator;
   const call = q.data?.call;
   const isAuction = call?.kind === 'auction';
-  const tab: Tab = isAuction && params.get('tab') === 'lots' ? 'lots' : 'applications';
+  const raw = params.get('tab');
+  const tab: Tab = isAuction && raw === 'lots' ? 'lots' : raw === 'fit' ? 'fit' : 'applications';
   const setTab = (t: Tab) => {
     const p = new URLSearchParams(params);
     if (t === 'applications') p.delete('tab');
@@ -122,20 +125,23 @@ export function PartnerCallReview() {
         </aside>
 
         <div className="cu-split__main stack--lg">
-          {isAuction && (
-            <div className="seg-wrap pg-tabs">
-              <Segmented
-                label="Show"
-                value={tab}
-                onChange={setTab}
-                options={[
-                  { value: 'applications', label: `Applications (${apps.length})` },
-                  { value: 'lots', label: `Lots (${q.data.lots.length})` },
-                ]}
-              />
-            </div>
-          )}
-          {tab === 'lots' ? (
+          <div className="seg-wrap pg-tabs">
+            <Segmented
+              label="Show"
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: 'applications', label: `Applications (${apps.length})` },
+                { value: 'fit', label: matchCopy.list.tabPlain },
+                ...(isAuction ? [{ value: 'lots' as const, label: `Lots (${q.data.lots.length})` }] : []),
+              ]}
+            />
+          </div>
+          {tab === 'fit' ? (
+            <section aria-labelledby="pc-fit-title">
+              <MatchList callId={call.id} headingId="pc-fit-title" />
+            </section>
+          ) : tab === 'lots' ? (
             <LotsPanel call={call} lots={q.data.lots} apps={q.data.apps} partnerName={curator.institution.name} />
           ) : (
             <section className="stack" aria-labelledby="pc-apps-title">

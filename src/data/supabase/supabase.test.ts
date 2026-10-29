@@ -41,6 +41,11 @@ import { CONSENT_VERSION } from '@/domain/types';
 import { toLotRow, toPayoutRow, lotInputToJson, type LotViewRow, type PayoutViewRow } from './mapping';
 import { buildReport } from '@/domain/reports';
 import { projectLotForArtist } from '@/domain/sales';
+import { NO_USES } from '@/domain/types';
+import { projectArtwork } from '@/domain/visibility';
+import { effectiveCriteria, rankWorks } from '@/domain/matching';
+import { toArtwork } from './mapping';
+import { usesSearchRpc } from './SupabaseDataSource';
 
 describe('mapPgError', () => {
   it('maps privilege and RLS failures to ForbiddenError with plain language', () => {
@@ -917,5 +922,227 @@ describe('intake (0010)', () => {
     const links = await admin.ds.checkMyLinks(admin.viewer, DEMO_UUIDS.art_june);
     expect(links).toHaveLength(1);
     expect(admin.calls.find((c) => c.path === '/functions/v1/profile-import')?.body).toMatchObject({ artistId: DEMO_UUIDS.art_june, verify: true });
+  });
+});
+
+/* ------------------------------------------------------------- taxonomy -- */
+
+describe('taxonomy (0011)', () => {
+  const seed = buildSeed();
+  const U = (id: string) => demoUuid(id) ?? id;
+  const row = (over: Partial<ArtworkViewRow> = {}): ArtworkViewRow => ({
+    id: DEMO_UUIDS.aw_mara_1, artist_id: DEMO_UUIDS.art_mara, title: 'Doubling', year: 2025, medium: 'painting', materials: ['oil'],
+    height: 152, width: 122, depth: 4, unit: 'cm', description: '', status: 'available', rights_note: '', price_amount: null, price_currency: null,
+    price_withheld: true, price_visibility: 'institutions', visibility: 'public', tags: ['night'], reviewed_at: null,
+    created_at: '2026-07-23T12:00:00Z', updated_at: '2026-08-29T12:00:00Z', artist_working_name: 'Mara Oyelaran', artist_career_stage: 'mid-career',
+    artist_experience_commissions: false, artist_experience_public_art: false, artist_experience_residencies: false, artist_experience_institutional_shows: false,
+    artist_experience_years_practicing: null, artist_status: 'approved', artist_visibility: 'public', artist_region_label: 'Pittsburgh, Pennsylvania',
+    can_edit: false, images: [], ...over,
+  });
+
+  it('maps tag ids, uses, edition, orientation and the location label; the stored location only when the view sent it (owner / Kofi)', () => {
+    const v = toArtworkView(row({
+      tag_ids: ['medium.painting', 'style.abstract'], uses: { auction: true, exhibition: false, licensing: false, commission: false },
+      edition: { type: 'limited', number: 2, size: 5 }, orientation: 'portrait', location_label: 'Pennsylvania, United States',
+      location: { city: 'Erie', region: 'Pennsylvania', country: 'United States', precision: 'city' },
+    }));
+    expect(v).toMatchObject({ tagIds: ['medium.painting', 'style.abstract'], uses: { auction: true, exhibition: false, licensing: false, commission: false },
+      edition: { type: 'limited', number: 2, size: 5 }, orientation: 'portrait', locationLabel: 'Pennsylvania, United States',
+      location: { city: 'Erie', region: 'Pennsylvania', country: 'United States', precision: 'city' } });
+    const pub = toArtworkView(row({ tag_ids: ['medium.painting'], uses: null, edition: null, location: null, location_label: 'Pennsylvania, United States' }));
+    expect(pub).not.toHaveProperty('location');
+    expect(pub).not.toHaveProperty('edition');
+    expect(pub.uses).toEqual(NO_USES);
+    // a row from before 0011 (no v6 columns): derived like projectArtwork; a 4 cm stretcher keeps a painting 2D
+    const old = toArtworkView(row());
+    expect(old).toMatchObject({ tagIds: [], uses: NO_USES, orientation: 'portrait', locationLabel: 'Pittsburgh, Pennsylvania' });
+  });
+
+  it('every seeded work maps to the same v6 fields projectArtwork gives its owner', () => {
+    const artists = new Map(seed.artists.map((a) => [a.id, a]));
+    for (const w of seed.artworks) {
+      const owner = { role: 'artist' as const, userId: artists.get(w.artistId)!.userId, artistId: w.artistId };
+      const p = projectArtwork(w, artists.get(w.artistId), owner)!;
+      const v = toArtworkView(row({
+        id: U(w.id), medium: w.medium, height: w.dimensions.height, width: w.dimensions.width, depth: w.dimensions.depth ?? null, unit: w.dimensions.unit,
+        tag_ids: w.tagIds, uses: w.uses, edition: w.edition ?? null, location: w.location ?? null, location_label: p.locationLabel,
+      }));
+      expect({ tagIds: v.tagIds, uses: v.uses, edition: v.edition, orientation: v.orientation, locationLabel: v.locationLabel, location: v.location }, w.id)
+        .toEqual({ tagIds: p.tagIds, uses: p.uses, edition: p.edition, orientation: p.orientation, locationLabel: p.locationLabel, location: p.location });
+    }
+  });
+
+  it('save_artwork JSON: tagIds / uses only when given; edition / location sent (null = clear) only when the key is present', () => {
+    const base = seed.artworks[0]!;
+    const { id: _i, artistId: _a, createdAt: _c, updatedAt: _u, reviewedAt: _r, tagIds: _t, uses: _s, edition: _e, location: _l, ...input } = base;
+    const bare = artworkInputToJson(input);
+    expect(Object.keys(bare)).not.toEqual(expect.arrayContaining(['tagIds']));
+    for (const k of ['tagIds', 'uses', 'edition', 'location']) expect(bare).not.toHaveProperty(k);
+    const full = artworkInputToJson({ ...input, tagIds: ['style.abstract'], uses: { ...NO_USES, exhibition: true }, edition: undefined, location: { region: 'Ontario', country: 'Canada', precision: 'region' } });
+    expect(full).toMatchObject({ tagIds: ['style.abstract'], uses: { ...NO_USES, exhibition: true }, edition: null, location: { region: 'Ontario', country: 'Canada', precision: 'region' } });
+  });
+
+  it('the owner export maps the v6 columns back to Artwork', () => {
+    const w = toArtwork({
+      id: 'w', artist_id: 'a', title: 'T', year: 2026, medium: 'photography', materials: ['paper'], height: 24, width: 36, depth: null, unit: 'in',
+      description: '', status: 'available', rights_note: '', price_amount: null, price_currency: null, price_visibility: 'public', visibility: 'public',
+      tags: [], reviewed_at: null, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
+      tag_ids: ['medium.photography'], uses: { auction: true, exhibition: false, licensing: true, commission: false }, edition: { type: 'limited', number: 2, size: 5 },
+      location: { region: 'Pennsylvania', country: 'United States' },
+    });
+    expect(w).toMatchObject({ tagIds: ['medium.photography'], uses: { auction: true, licensing: true }, edition: { type: 'limited', number: 2, size: 5 },
+      location: { region: 'Pennsylvania', country: 'United States', precision: 'region' } });
+  });
+
+  it('call criteria round-trip; an empty one is written as NULL', () => {
+    const cma = seed.openCalls.find((c) => c.id === 'call_cma_auction')!;
+    const { id: _i, createdAt: _c, updatedAt: _u, ...authored } = cma;
+    const r = openCallToRow(authored);
+    expect(r.looking_for).toEqual(cma.lookingFor);
+    expect(toOpenCall({ id: U(cma.id), created_at: cma.createdAt, updated_at: cma.updatedAt, ...r } as unknown as OpenCallRow).lookingFor).toEqual(cma.lookingFor);
+    expect(openCallToRow({ ...authored, lookingFor: {} }).looking_for).toBeNull();
+    expect(openCallToRow({ ...authored, lookingFor: undefined }).looking_for).toBeNull();
+  });
+
+  it('only tag / orientation / edition / uses filters go to search_artworks', () => {
+    expect(usesSearchRpc({})).toBe(false);
+    expect(usesSearchRpc({ query: 'x', mediums: ['painting'], tags: { style: [] } })).toBe(false);
+    expect(usesSearchRpc({ tags: { style: ['style.abstract'] } })).toBe(true);
+    expect(usesSearchRpc({ orientations: ['portrait'] })).toBe(true);
+    expect(usesSearchRpc({ editionTypes: ['limited'] })).toBe(true);
+    expect(usesSearchRpc({ uses: ['exhibition'] })).toBe(true);
+  });
+
+  function stub(routes: Record<string, (body: unknown) => { status: number; body: unknown }>) {
+    const calls: { path: string; method: string; body: unknown }[] = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      let body: unknown = undefined;
+      try {
+        body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      } catch {
+        body = init?.body;
+      }
+      calls.push({ path: url.pathname, method: (init?.method ?? 'GET').toUpperCase(), body });
+      const r = routes[url.pathname]?.(body) ?? { status: 200, body: [] };
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { calls, fetchImpl: fetchImpl as typeof fetch };
+  }
+  const make = (fetchImpl: typeof fetch) =>
+    createSupabaseDataSource('http://127.0.0.1:1', 'test-anon-key', {
+      demoAutoSignIn: false,
+      clientOptions: { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetchImpl } },
+    });
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = (sub: string) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, role: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+  const userJson = (id: string) => ({ id, aud: 'authenticated', role: 'authenticated', email: 'x@example.com', identities: [{ id: 'i' }], app_metadata: {}, user_metadata: {}, created_at: '2026-10-22T12:00:00Z' });
+  const visitor = SUPABASE_DEMO_IDENTITIES.find((d) => d.viewer.role === 'public')!.viewer;
+
+  async function as(role: 'artist' | 'curator', routes: Parameters<typeof stub>[0]) {
+    const uid = role === 'artist' ? DEMO_UUIDS.user_mara : DEMO_UUIDS.user_lena;
+    const s = stub({
+      '/auth/v1/user': () => ({ status: 200, body: userJson(uid) }),
+      '/rest/v1/rpc/whoami': () => ({ status: 200, body: [{ user_id: uid, role, display_name: 'x', artist_id: role === 'artist' ? DEMO_UUIDS.art_mara : null,
+        curator_id: role === 'curator' ? DEMO_UUIDS.cur_lena : null, curator_verified: role === 'curator' }] }),
+      '/rest/v1/rpc/my_verified_institution_id': () => ({ status: 200, body: DEMO_UUIDS.inst_cma }),
+      ...routes,
+    });
+    const ds = make(s.fetchImpl);
+    await (ds as unknown as { client: { auth: { setSession: (x: { access_token: string; refresh_token: string }) => Promise<unknown> } } }).client.auth.setSession({ access_token: jwt(uid), refresh_token: 'r' });
+    const viewer = role === 'artist'
+      ? { role: 'artist' as const, userId: uid, displayName: 'Mara', artistId: DEMO_UUIDS.art_mara }
+      : { role: 'curator' as const, userId: uid, displayName: 'Lena', curatorId: DEMO_UUIDS.cur_lena, curatorVerified: true };
+    return { ds, viewer, calls: s.calls };
+  }
+
+  it('listArtworks sends v6 filters to search_artworks as the caller and re-sorts like sortArtworks', async () => {
+    const rows = [row({ id: 'b', title: 'B', year: 2020, tag_ids: ['medium.painting'] }), row({ id: 'a', title: 'A', year: 2024, tag_ids: ['medium.painting'] })];
+    const s = stub({ '/rest/v1/rpc/search_artworks': () => ({ status: 200, body: { rows, total: 2, facets: { 'medium.painting': 2 } } }) });
+    const ds = make(s.fetchImpl);
+    const f = { tags: { medium: ['medium.painting'] }, sort: 'newest' as const };
+    const out = await ds.listArtworks(visitor, f);
+    expect(out.map((w) => w.id)).toEqual(['a', 'b']);
+    const call = s.calls.find((c) => c.path === '/rest/v1/rpc/search_artworks')!;
+    expect(call.body).toEqual({ p_filters: f, p_limit: null, p_offset: 0 });
+    await ds.listArtworks(visitor, { query: 'rain' });
+    expect(s.calls.map((c) => c.path)).toEqual(['/rest/v1/rpc/search_artworks', '/rest/v1/artworks_visible']);
+  });
+
+  it('listMatchingWorks: visitors refused without a network call; the organiser gets match_works ranked with rankWorks(effectiveCriteria)', async () => {
+    const v = stub({});
+    await expect(make(v.fetchImpl).listMatchingWorks(visitor, DEMO_UUIDS.call_cma_auction)).rejects.toEqual(new ForbiddenError('Only the call’s organiser can see which works fit.'));
+    expect(v.calls).toHaveLength(0);
+
+    const cma = seed.openCalls.find((c) => c.id === 'call_cma_auction')!;
+    const { id: _i, createdAt: _c, updatedAt: _u, ...authored } = cma;
+    const callRow = { id: DEMO_UUIDS.call_cma_auction, created_at: cma.createdAt, updated_at: cma.updatedAt, ...openCallToRow(authored) };
+    const fits = row({ id: 'fits', tag_ids: ['medium.painting', 'theme.memory'], uses: { auction: true, exhibition: true, licensing: false, commission: false }, location_label: 'Pittsburgh, Pennsylvania' });
+    const not = row({ id: 'not', tag_ids: ['medium.painting'], uses: null, location_label: 'Ontario, Canada', created_at: '2026-10-01T00:00:00Z' });
+    const { ds, viewer, calls } = await as('curator', {
+      '/rest/v1/open_calls_visible': () => ({ status: 200, body: callRow }),
+      '/rest/v1/rpc/match_works': () => ({ status: 200, body: [not, fits] }),
+    });
+    const ranked = await ds.listMatchingWorks(viewer, DEMO_UUIDS.call_cma_auction);
+    expect(ranked.map((r) => [r.work.id, r.match.met, r.match.of, r.match.fits])).toEqual([['fits', 3, 3, true], ['not', 0, 3, false]]);
+    expect(ranked).toEqual(rankWorks([not, fits].map((r) => toArtworkView(r)), effectiveCriteria(toOpenCall(callRow as unknown as OpenCallRow))));
+    expect(calls.find((c) => c.path === '/rest/v1/rpc/match_works')!.body).toEqual({ p_call: DEMO_UUIDS.call_cma_auction });
+  });
+
+  it('listMatchingWorks: an artist ranks their own non-draft works for a call they can see', async () => {
+    const callRow = { ...openCallToRow({ ...seed.openCalls.find((c) => c.id === 'call_night_weather')!, lookingFor: { uses: ['exhibition'] } }), id: DEMO_UUIDS.call_night_weather, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' };
+    const { ds, viewer, calls } = await as('artist', {
+      '/rest/v1/open_calls_visible': () => ({ status: 200, body: callRow }),
+      '/rest/v1/artworks_visible': () => ({ status: 200, body: [row({ id: 'mine', can_edit: true, uses: { auction: false, exhibition: true, licensing: false, commission: false } })] }),
+    });
+    const out = await ds.listMatchingWorks(viewer, DEMO_UUIDS.call_night_weather);
+    expect(out.map((r) => [r.work.id, r.match.fits])).toEqual([['mine', true]]);
+    expect(calls.some((c) => c.path === '/rest/v1/rpc/match_works')).toBe(false);
+    const q = calls.filter((c) => c.path === '/rest/v1/artworks_visible');
+    expect(q).toHaveLength(1);
+  });
+
+  it('saveArtwork refuses the mock’s v6 problems before any network call', async () => {
+    const { ds, viewer, calls } = await as('artist', {});
+    const before = calls.length;
+    const base = seed.artworks[0]!;
+    const { id: _i, artistId: _a, createdAt: _c, updatedAt: _u, reviewedAt: _r, ...input } = base;
+    await expect(ds.saveArtwork(viewer, { ...input, edition: { type: 'limited', number: 6, size: 5 } })).rejects.toEqual(
+      new ValidationError('The edition number cannot be higher than the edition size.', 'edition'));
+    await expect(ds.saveArtwork(viewer, { ...input, location: { city: 'Erie', region: '', country: '', precision: 'city' } })).rejects.toEqual(
+      new ValidationError('Add the region and country where the work is.', 'location'));
+    const si = seed.artworks.length ? ['social_impact.education_access', 'social_impact.youth_empowerment', 'social_impact.community_building', 'social_impact.cultural_preservation', 'social_impact.workforce_development'] : [];
+    await expect(ds.saveArtwork(viewer, { ...input, tagIds: si })).rejects.toEqual(new ValidationError('Pick up to 4 social impact tags.', 'tags.social_impact'));
+    expect(calls.slice(before).filter((c) => c.path.startsWith('/rest/v1/') && c.path !== '/rest/v1/rpc/whoami')).toHaveLength(0);
+  });
+
+  it('saveOpenCall: lookingFor key present (even undefined) is written, absent on an update leaves the column alone', async () => {
+    const nw = seed.openCalls.find((c) => c.id === 'call_night_weather')!;
+    const callRow = { ...openCallToRow(nw), id: DEMO_UUIDS.call_night_weather, created_at: nw.createdAt, updated_at: nw.updatedAt };
+    const patches: unknown[] = [];
+    const admin = await (async () => {
+      const uid = DEMO_UUIDS.user_quincy;
+      const s = stub({
+        '/auth/v1/user': () => ({ status: 200, body: userJson(uid) }),
+        '/rest/v1/rpc/whoami': () => ({ status: 200, body: [{ user_id: uid, role: 'admin', display_name: 'Quincy', artist_id: null, curator_id: null, curator_verified: false }] }),
+        '/rest/v1/open_calls_visible': () => ({ status: 200, body: callRow }),
+        '/rest/v1/open_calls': (body) => {
+          if (body) patches.push(body);
+          return { status: 200, body: [{ id: DEMO_UUIDS.call_night_weather, image: null }] };
+        },
+      });
+      const ds = make(s.fetchImpl);
+      await (ds as unknown as { client: { auth: { setSession: (x: { access_token: string; refresh_token: string }) => Promise<unknown> } } }).client.auth.setSession({ access_token: jwt(uid), refresh_token: 'r' });
+      return { ds, viewer: { role: 'admin' as const, userId: uid, displayName: 'Quincy' } };
+    })();
+    const { createdAt: _c, updatedAt: _u, lookingFor: _l, ...rest } = nw;
+    const input = { ...rest, id: DEMO_UUIDS.call_night_weather, exhibitionId: undefined };
+    await admin.ds.saveOpenCall(admin.viewer, input);
+    await admin.ds.saveOpenCall(admin.viewer, { ...input, lookingFor: undefined });
+    await admin.ds.saveOpenCall(admin.viewer, { ...input, lookingFor: { uses: ['exhibition'] } });
+    expect(patches).toHaveLength(3);
+    expect(patches[0]).not.toHaveProperty('looking_for');
+    expect(patches[1]).toHaveProperty('looking_for', null);
+    expect(patches[2]).toHaveProperty('looking_for', { uses: ['exhibition'] });
   });
 });

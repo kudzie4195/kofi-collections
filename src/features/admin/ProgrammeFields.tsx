@@ -3,13 +3,18 @@
  * picker and an image field (from an attached work, or an upload re-encoded
  * through the studio's image intake so EXIF/GPS never reaches storage).
  */
-import { useId, useMemo, useRef, useState } from 'react';
-import type { ArtworkView, Medium, ProgrammeImage } from '@/domain/types';
-import { MEDIUMS } from '@/domain/types';
+import { memo, useId, useMemo, useRef, useState } from 'react';
+import type { ArtworkView, CallCriteria, Medium, ProgrammeImage, UseKey } from '@/domain/types';
+import { MEDIUMS, USE_KEYS, USE_LABEL } from '@/domain/types';
+import { categoryLabel, categoryOf, groupTagIds, tagLabel, type ArtistTagCategory } from '@/domain/taxonomy';
+import { validateCriteria } from '@/domain/matching';
 import { prepareImage } from '@/native/images';
 import { errorMessage } from '@/state/toast';
-import { Button, Chip, Icon, Input, VisibilityBadge } from '@/ui';
+import { Button, Chip, Icon, Input, Textarea, VisibilityBadge } from '@/ui';
 import { Group, capitalize } from '@/features/studio/shared';
+import { TagPicker } from '@/features/studio/TagPicker';
+import { matchCopy } from '@/features/programme/matchCopy';
+import '@/features/programme/match.css';
 
 /** Uploaded programme images are kept small enough for any device's storage. */
 export const MAX_PROGRAMME_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -236,5 +241,170 @@ export function ImageField({
         </p>
       )}
     </Group>
+  );
+}
+
+/* ---------------- "Looking for" (v6 call criteria) ---------------- */
+
+/** Tag categories an organiser can ask for, in form order. */
+export const CRITERIA_CATEGORIES: readonly ArtistTagCategory[] = ['style', 'subject', 'theme', 'social_impact', 'material', 'medium'];
+
+/** The criteria as typed: sizes stay strings so a half-typed number is never lost. */
+export interface CriteriaForm {
+  tagIds: string[];
+  uses: UseKey[];
+  region: string;
+  minCm: string;
+  maxCm: string;
+  note: string;
+}
+
+export const BLANK_CRITERIA: CriteriaForm = { tagIds: [], uses: [], region: '', minCm: '', maxCm: '', note: '' };
+
+export function criteriaToForm(c: CallCriteria | undefined): CriteriaForm {
+  if (!c) return { ...BLANK_CRITERIA, tagIds: [], uses: [] };
+  const tagIds = Object.entries(c.tags ?? {}).flatMap(([cat, ids]) => ids.filter((id) => categoryOf(id) === cat));
+  return {
+    tagIds,
+    uses: USE_KEYS.filter((k) => c.uses?.includes(k)),
+    region: c.region ?? '',
+    minCm: c.minLongestEdgeCm === undefined ? '' : String(c.minLongestEdgeCm),
+    maxCm: c.maxLongestEdgeCm === undefined ? '' : String(c.maxLongestEdgeCm),
+    note: c.note ?? '',
+  };
+}
+
+/** '' → undefined; anything else a number (NaN when not one, so validateCriteria names the field). */
+function cmOf(s: string): number | undefined {
+  const t = s.trim().replace(',', '.');
+  return t ? Number(t) : undefined;
+}
+
+/** The form as CallCriteria, or undefined when it asks nothing (an empty section saves as no criteria). */
+export function formToCriteria(f: CriteriaForm): CallCriteria | undefined {
+  const c: CallCriteria = {};
+  const grouped = groupTagIds(f.tagIds);
+  const tags: Record<string, string[]> = {};
+  for (const cat of CRITERIA_CATEGORIES) if (grouped[cat]?.length) tags[cat] = grouped[cat]!;
+  if (Object.keys(tags).length) c.tags = tags;
+  const uses = USE_KEYS.filter((k) => f.uses.includes(k));
+  if (uses.length) c.uses = uses;
+  if (f.region.trim()) c.region = f.region.trim();
+  const min = cmOf(f.minCm);
+  const max = cmOf(f.maxCm);
+  if (min !== undefined) c.minLongestEdgeCm = min;
+  if (max !== undefined) c.maxLongestEdgeCm = max;
+  if (f.note.trim()) c.note = f.note.trim();
+  return Object.keys(c).length ? c : undefined;
+}
+
+/** How many separate asks the criteria make (one per tag category, uses, region, size). */
+export function countAsks(c: CallCriteria | undefined): number {
+  if (!c) return 0;
+  const cats = Object.values(c.tags ?? {}).filter((l) => l.length).length;
+  return cats + (c.uses?.length ? 1 : 0) + (c.region?.trim() ? 1 : 0) + (c.minLongestEdgeCm !== undefined || c.maxLongestEdgeCm !== undefined ? 1 : 0);
+}
+
+/** validateCriteria over the form, as an editor error record ({ 'lookingFor.region': '…' }). */
+export function criteriaErrors(f: CriteriaForm): Record<string, string> {
+  const c = formToCriteria(f);
+  const p = c ? validateCriteria(c) : undefined;
+  return p ? { [p.field]: p.message } : {};
+}
+
+/** True for an error key this section shows. */
+export const isCriteriaKey = (k: string) => k === 'lookingFor' || k.startsWith('lookingFor.');
+
+type CriteriaFieldsProps = { value: CriteriaForm; onChange: (v: CriteriaForm) => void; errors: Record<string, string | undefined> };
+
+/**
+ * Memoised: the tag picker renders ~170 chips, so typing elsewhere in a call form must
+ * not re-render it. `onChange` is ignored in the comparison: editors pass a fresh closure
+ * each render whose only captured state is `errors`, which is compared.
+ */
+export const CriteriaFields = memo(CriteriaFieldsInner, (a, b) => a.value === b.value && criteriaErrorsEqual(a.errors, b.errors));
+
+function criteriaErrorsEqual(a: CriteriaFieldsProps['errors'], b: CriteriaFieldsProps['errors']): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => isCriteriaKey(k) || k === 'general'));
+  for (const k of keys) if (a[k] !== b[k]) return false;
+  return true;
+}
+
+function CriteriaFieldsInner({ value, onChange, errors }: CriteriaFieldsProps) {
+  const c = matchCopy.editor;
+  const uid = useId();
+  const asks = countAsks(formToCriteria(value));
+  const set = <K extends keyof CriteriaForm>(k: K, v: CriteriaForm[K]) => onChange({ ...value, [k]: v });
+  const toggleUse = (k: UseKey) => set('uses', value.uses.includes(k) ? value.uses.filter((x) => x !== k) : [...value.uses, k]);
+  const empty = !formToCriteria(value);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const grouped = groupTagIds(value.tagIds);
+  const chosen = CRITERIA_CATEGORIES.filter((cat) => grouped[cat]?.length).map((cat) => [cat, grouped[cat]!] as const);
+  return (
+    <div className="stack lf-fields" data-testid="looking-for">
+      <p className="small muted lf-fields__lede">{c.lede}</p>
+      <Group label={c.tagsLabel} hint={c.tagsHint} error={errors.lookingFor}>
+        {/* The picker is ~170 chips: closed by default so the call form stays light; the chosen tags show as a summary. */}
+        {tagsOpen ? (
+          <>
+            <TagPicker mode="criteria" categories={CRITERIA_CATEGORIES} value={value.tagIds} onChange={(ids) => set('tagIds', ids)} label={c.tagsLabel} />
+            <span className="tiny muted">{c.mediumHint}</span>
+          </>
+        ) : chosen.length ? (
+          <dl className="lf-chosen">
+            {chosen.map(([cat, ids]) => (
+              <div key={cat}>
+                <dt>{categoryLabel(cat)}</dt>
+                <dd>{ids.map(tagLabel).join(', ')}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <span className="small muted">{c.tagsNone}</span>
+        )}
+        <div>
+          <Button tone="secondary" size="sm" aria-expanded={tagsOpen} onClick={() => setTagsOpen((o) => !o)}>
+            {tagsOpen ? c.tagsDone : c.tagsEdit}
+          </Button>
+        </div>
+      </Group>
+      <fieldset className="lf-fieldset" aria-describedby={`${uid}-uses`} data-invalid={errors['lookingFor.uses'] ? 'true' : undefined} tabIndex={errors['lookingFor.uses'] ? -1 : undefined}>
+        <legend className="field__label">{c.usesLabel}</legend>
+        <div className="lf-ticks">
+          {USE_KEYS.map((k) => (
+            <label key={k} className="lf-tick">
+              <input type="checkbox" checked={value.uses.includes(k)} onChange={() => toggleUse(k)} />
+              <span>{USE_LABEL[k]}</span>
+            </label>
+          ))}
+        </div>
+        {errors['lookingFor.uses'] ? (
+          <span className="field__error" role="alert" id={`${uid}-uses`}>
+            {errors['lookingFor.uses']}
+          </span>
+        ) : (
+          <span className="field__hint" id={`${uid}-uses`}>
+            {c.usesHint}
+          </span>
+        )}
+      </fieldset>
+      <Input label={c.region} hint={c.regionHint} value={value.region} error={errors['lookingFor.region']} onChange={(e) => set('region', e.target.value)} />
+      <div className="pg-two">
+        <Input label={c.minCm} type="number" inputMode="decimal" min={0} step="any" value={value.minCm} error={errors['lookingFor.minLongestEdgeCm']} onChange={(e) => set('minCm', e.target.value)} />
+        <Input label={c.maxCm} type="number" inputMode="decimal" min={0} step="any" value={value.maxCm} error={errors['lookingFor.maxLongestEdgeCm']} onChange={(e) => set('maxCm', e.target.value)} />
+      </div>
+      <span className="tiny muted lf-sizehint">{c.sizeHint}</span>
+      <Textarea label={c.note} hint={c.noteHint} rows={2} value={value.note} error={errors['lookingFor.note']} onChange={(e) => set('note', e.target.value)} />
+      <div className="lf-summary">
+        <span className="small muted" aria-live="polite">
+          {asks === 0 ? c.summaryNone : c.summarySome(asks)}
+        </span>
+        {!empty && (
+          <Button tone="ghost" size="sm" onClick={() => onChange({ ...BLANK_CRITERIA, tagIds: [], uses: [] })}>
+            {c.clear}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { ArtworkFilters } from '@/domain/filters';
-import { applyFilters, countActiveFilters, materialFacets, sizePreset } from '@/domain/filters';
-import type { ArtworkView, Medium, Unit } from '@/domain/types';
-import { ARTWORK_STATUSES, CAREER_STAGES, MEDIUMS } from '@/domain/types';
+import { applyFilters, countActiveFilters, materialFacets, sizePreset, tagFacets, toggleTag } from '@/domain/filters';
+import { FILTER_TAG_CATEGORIES, SOCIAL_IMPACT_BOUNDARY, categoryLabel, mediumFromTagId, selectableTags, tagDef } from '@/domain/taxonomy';
+import type { ArtworkView, EditionType, Orientation, Unit, UseKey } from '@/domain/types';
+import { ARTWORK_STATUSES, CAREER_STAGES, EDITION_LABEL, EDITION_TYPES, ORIENTATIONS, ORIENTATION_LABEL, USE_KEYS, USE_LABEL } from '@/domain/types';
 import { Button, Chip, Input, Segmented, Sheet, Toggle } from '@/ui';
+import { FILTER_COPY as C } from './filterCopy';
 import { cap, NumberField, plural } from './helpers';
 import { clearedFilters, compact, toggleIn, withUnit } from './params';
 
 const SIZE_PRESETS_IN = [24, 40, 60];
 const MATERIALS_SHOWN = 10;
+/** Tag chips shown per group before "Show all". */
+export const TAGS_SHOWN = 8;
 
 export interface FilterSheetProps {
   open: boolean;
@@ -44,12 +48,22 @@ export function FilterSheet({ open, onClose, filters, works, onApply }: FilterSh
   const resultCount = useMemo(() => applyFilters(works, draft).length, [works, draft]);
   const active = countActiveFilters(draft);
 
-  const mediumCounts = useMemo(() => {
-    const m = new Map<Medium, number>();
-    for (const w of works) m.set(w.medium, (m.get(w.medium) ?? 0) + 1);
-    return m;
-  }, [works]);
-  const mediums = MEDIUMS.filter((m) => mediumCounts.has(m) || draft.mediums?.includes(m));
+  const facetCounts = useMemo(() => tagFacets(works, draft), [works, draft]);
+  // Tags used anywhere in the collection. Stable while the draft changes, so collapsed groups don't reshuffle under a tap.
+  const inUse = useMemo(() => new Set(works.flatMap((w) => w.tagIds)), [works]);
+  // Counts for the structured groups: how many works a tap would give, ignoring that group's own picks.
+  const fieldCounts = useMemo(() => {
+    const count = <K extends string>(patch: Partial<ArtworkFilters>, keys: (w: ArtworkView) => K[]) => {
+      const m = new Map<K, number>();
+      for (const w of applyFilters(works, { ...draft, ...patch })) for (const k of keys(w)) m.set(k, (m.get(k) ?? 0) + 1);
+      return m;
+    };
+    return {
+      orient: count<Orientation>({ orientations: undefined }, (w) => [w.orientation]),
+      edition: count<EditionType>({ editionTypes: undefined }, (w) => (w.edition ? [w.edition.type] : [])),
+      uses: count<UseKey>({ uses: undefined }, (w) => USE_KEYS.filter((u) => w.uses[u])),
+    };
+  }, [works, draft]);
 
   const facets = useMemo(() => materialFacets(works), [works]);
   const selectedMaterials = draft.materials ?? [];
@@ -94,21 +108,36 @@ export function FilterSheet({ open, onClose, filters, works, onApply }: FilterSh
         </>
       }
     >
-      <div className="filter-section">
-        <h3 className="filter-section__title">Medium</h3>
-        <div className="chips">
-          {mediums.map((m) => (
-            <Chip key={m} medium={m} on={draft.mediums?.includes(m) ?? false} count={mediumCounts.get(m) ?? 0} onClick={() => set({ mediums: toggleIn(draft.mediums, m) })}>
-              {cap(m)}
-            </Chip>
-          ))}
-        </div>
-      </div>
+      <p className="small muted kg-ftags-lede">{C.tagsLede}</p>
+      {FILTER_TAG_CATEGORIES.map((cat) => (
+        <TagFilterGroup key={cat} category={cat} selected={draft.tags?.[cat] ?? []} counts={facetCounts} inUse={inUse} onToggle={(id) => setDraft((d) => compact(toggleTag(d, id)))} />
+      ))}
+
+      <FieldGroup
+        title={C.orientationTitle}
+        lede={C.orientationLede}
+        options={ORIENTATIONS.map((o) => ({ value: o, label: ORIENTATION_LABEL[o], count: fieldCounts.orient.get(o) ?? 0 }))}
+        selected={draft.orientations}
+        onToggle={(o) => set({ orientations: toggleIn(draft.orientations, o) })}
+      />
+      <FieldGroup
+        title={C.editionTitle}
+        options={EDITION_TYPES.map((e) => ({ value: e, label: EDITION_LABEL[e], count: fieldCounts.edition.get(e) ?? 0 }))}
+        selected={draft.editionTypes}
+        onToggle={(e) => set({ editionTypes: toggleIn(draft.editionTypes, e) })}
+      />
+      <FieldGroup
+        title={C.usesTitle}
+        lede={C.usesLede}
+        options={USE_KEYS.map((u) => ({ value: u, label: USE_LABEL[u], count: fieldCounts.uses.get(u) ?? 0 }))}
+        selected={draft.uses}
+        onToggle={(u) => set({ uses: toggleIn(draft.uses, u) })}
+      />
 
       <div className="filter-section">
-        <h3 className="filter-section__title">Materials</h3>
+        <h3 className="filter-section__title">{C.materialsTitle}</h3>
         <p className="small muted" style={{ marginBottom: 8 }}>
-          Matches any material you pick.
+          {C.materialsLede}
         </p>
         <div className="chips">
           {shownFacets.map((f) => (
@@ -272,4 +301,107 @@ function compactYears(from: number | undefined, to: number | undefined): { from?
   if (from !== undefined) y.from = from;
   if (to !== undefined) y.to = to;
   return y;
+}
+
+/** One controlled-tag category as a chip group with facet counts. Zero-count chips stay, muted. */
+function TagFilterGroup({
+  category,
+  selected,
+  counts,
+  inUse,
+  onToggle,
+}: {
+  category: string;
+  selected: string[];
+  counts: Record<string, number>;
+  inUse: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  const headId = useId();
+  const [all, setAll] = useState(false);
+  const tags = selectableTags(category);
+  // Collapsed: up to TAGS_SHOWN, tags the collection uses first, topped up in library order; picks always show.
+  // Display order stays the library's either way.
+  const collapsed = useMemo(() => {
+    const keep = new Set(tags.filter((t) => inUse.has(t.id)).slice(0, TAGS_SHOWN).map((t) => t.id));
+    for (const t of tags) if (keep.size < TAGS_SHOWN) keep.add(t.id);
+    return keep;
+  }, [tags, inUse]);
+  const shown = all ? tags : tags.filter((t) => collapsed.has(t.id) || selected.includes(t.id));
+  const social = category === 'social_impact';
+  return (
+    <div className="filter-section kg-ftags" data-category={category}>
+      <h3 className="filter-section__title" id={headId}>
+        {categoryLabel(category)}
+        {selected.length > 0 && <span className="kg-ftags__n"> · {selected.length}</span>}
+      </h3>
+      {social && (
+        <p className="small muted kg-ftags__lede" title={SOCIAL_IMPACT_BOUNDARY}>
+          {C.socialImpactLede}
+        </p>
+      )}
+      <div className="chips" role="group" aria-labelledby={headId}>
+        {shown.map((t) => {
+          const n = counts[t.id] ?? 0;
+          const on = selected.includes(t.id);
+          const medium = mediumFromTagId(t.id);
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={`chip chip--small kg-fchip${medium ? ' chip--medium' : ''}${n === 0 && !on ? ' kg-fchip--zero' : ''}`}
+              aria-pressed={on}
+              data-tag={t.id}
+              data-medium={medium}
+              title={social ? `${tagDef(t.id)?.definition ?? ''} ${SOCIAL_IMPACT_BOUNDARY}`.trim() : tagDef(t.id)?.definition || undefined}
+              onClick={() => onToggle(t.id)}
+            >
+              {t.label}
+              <span className="chip__count">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      {tags.length > TAGS_SHOWN && (
+        <Button tone="ghost" size="sm" className="kg-ftags__more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? C.showFewer : C.showAll(tags.length)}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** A structured field (orientation, edition, uses) as chips with counts. */
+function FieldGroup<T extends string>({
+  title,
+  lede,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  lede?: string;
+  options: { value: T; label: string; count: number }[];
+  selected: T[] | undefined;
+  onToggle: (v: T) => void;
+}) {
+  const headId = useId();
+  return (
+    <div className="filter-section">
+      <h3 className="filter-section__title" id={headId}>
+        {title}
+      </h3>
+      {lede && <p className="small muted kg-ftags__lede">{lede}</p>}
+      <div className="chips" role="group" aria-labelledby={headId}>
+        {options.map((o) => {
+          const on = selected?.includes(o.value) ?? false;
+          return (
+            <Chip key={o.value} small on={on} count={o.count} className={`chip chip--small kg-fchip${o.count === 0 && !on ? ' kg-fchip--zero' : ''}`} onClick={() => onToggle(o.value)}>
+              {o.label}
+            </Chip>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

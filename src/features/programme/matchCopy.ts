@@ -1,0 +1,75 @@
+/**
+ * v6 strings for calls and matching: the "Looking for" section in both call
+ * editors, the public "What they're looking for" block, the fit lines on the
+ * apply page and Opportunities, and the "Works that fit" list. Measured by
+ * scratchpad/harness/copy-gate.mjs. Reason sentences are NOT here: they come
+ * from domain/matching verbatim so every screen says the same thing.
+ */
+export const matchCopy = {
+  editor: {
+    title: 'Looking for',
+    lede: 'Say what kind of work fits this call. Artists see it on the call page. Each work then shows how many of these asks it meets, and why.',
+    tagsLabel: 'Tags',
+    tagsHint: 'A work fits a category when it carries any one of the tags you pick there. It has to fit every category you use.',
+    tagsNone: 'No tags chosen.',
+    tagsEdit: 'Choose tags',
+    tagsDone: 'Done choosing',
+    mediumHint: 'Medium here only narrows the match. Leave it empty to use the call’s mediums.',
+    usesLabel: 'Available for',
+    usesHint: 'The artist has to allow at least one of these. Leave all empty to skip it.',
+    region: 'Region',
+    regionHint: 'Matched against where the work is, e.g. “Pennsylvania”. Optional.',
+    minCm: 'Smallest longest edge (cm)',
+    maxCm: 'Largest longest edge (cm)',
+    sizeHint: 'Optional. Works are compared by their longest edge, so a 24 inch canvas counts as about 61 cm whichever unit the artist used.',
+    note: 'Note to artists',
+    noteHint: 'Plain words shown next to the criteria. Optional.',
+    summaryNone: 'Nothing yet. Every work counts as a fit.',
+    summarySome: (n: number) => (n === 1 ? '1 ask so far.' : `${n} asks so far.`),
+    clear: 'Clear criteria',
+  },
+  publicBlock: {
+    title: 'What they’re looking for',
+    lede: 'Written by the organiser. Your works can still apply if they miss some of it.',
+    uses: 'Available for',
+    region: 'Where the work is',
+    size: 'Size',
+    note: 'From the organiser',
+    sizeBoth: (min: number, max: number) => `Longest edge ${min}–${max} cm`,
+    sizeMax: (max: number) => `Longest edge up to ${max} cm`,
+    sizeMin: (min: number) => `Longest edge at least ${min} cm`,
+  },
+  fit: {
+    line: (met: number, of: number) => `Fits ${met} of ${of}`,
+    pill: (met: number, of: number) => (met === of ? `Fits ${met} of ${of}` : `${met} of ${of}`),
+    all: 'Fits every ask.',
+    why: 'Why',
+    whyFor: (title: string) => `Why ${title} fits or not`,
+    none: 'This call has no criteria, so any work fits.',
+    stillYours: 'It is your call. Works that miss an ask can still be sent.',
+    met: 'Met',
+    missed: 'Missed',
+  },
+  opportunities: {
+    count: (n: number, total: number) => (total === 0 ? 'No works in your studio yet' : n === 1 ? '1 of your works fits' : `${n} of your works fit`),
+    noCriteria: 'No criteria yet',
+    legend: 'How many of your works meet everything the call asks for.',
+  },
+  list: {
+    eyebrow: 'Matching',
+    title: 'Works that fit',
+    lede: 'Ranked against the saved criteria, best fit first, and limited to works you could already open from the Works page or an artist’s profile.',
+    fitsOnly: 'Fits only',
+    fitsOnlyHint: 'Hide works that miss an ask.',
+    count: (shown: number, total: number) => `${shown} of ${total} works`,
+    emptyTitle: 'No works to show',
+    emptyBody: 'No work you can see meets every ask. Turn off “Fits only” to see near misses.',
+    emptyAll: 'There are no works you can see yet.',
+    noCriteria: 'This call asks nothing yet, so every work fits. Add criteria under Looking for.',
+    by: (artist: string) => `by ${artist}`,
+    open: (title: string) => `Open ${title}`,
+    saveFirst: 'Save the call to see which works fit.',
+    tab: (n: number) => `Works that fit (${n})`,
+    tabPlain: 'Works that fit',
+  },
+};

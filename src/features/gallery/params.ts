@@ -5,8 +5,10 @@
  */
 import type { ArtworkFilters, SortKey } from '@/domain/filters';
 import { EMPTY_FILTERS, sizePreset } from '@/domain/filters';
-import type { ArtworkStatus, CareerStage, Medium, Unit } from '@/domain/types';
-import { ARTWORK_STATUSES, CAREER_STAGES, MEDIUMS } from '@/domain/types';
+import { FILTER_TAG_CATEGORIES, groupTagIds, mediumTagId, tagDef } from '@/domain/taxonomy';
+import type { ArtworkView } from '@/domain/types';
+import type { ArtworkStatus, CareerStage, EditionType, Medium, Orientation, Unit, UseKey } from '@/domain/types';
+import { ARTWORK_STATUSES, CAREER_STAGES, EDITION_TYPES, MEDIUMS, ORIENTATIONS, USE_KEYS } from '@/domain/types';
 
 export const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'newest', label: 'Newest first' },
@@ -37,8 +39,27 @@ const K = {
   undisclosed: 'undisclosed',
   yearFrom: 'yfrom',
   yearTo: 'yto',
+  tags: 'tags',
+  orient: 'orient',
+  edition: 'edition',
+  uses: 'uses',
   sort: 'sort',
 } as const;
+
+/** Comma lists (`tags=style.abstract,theme.joy`); repeated params are accepted too. */
+function list(sp: URLSearchParams, key: string): string[] {
+  return sp
+    .getAll(key)
+    .flatMap((v) => v.split(','))
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** Only MVP, artist-selectable tags in a filter category may filter (workbook rule: Phase 2/3 tags never appear in filters). */
+export function isFilterTag(id: string): boolean {
+  const t = tagDef(id);
+  return !!t && t.phase === 'mvp' && t.artistSelectable && (FILTER_TAG_CATEGORIES as readonly string[]).includes(t.category);
+}
 
 function num(v: string | null): number | undefined {
   if (v === null || v.trim() === '') return undefined;
@@ -56,8 +77,10 @@ export function filtersFromParams(sp: URLSearchParams): ArtworkFilters {
   const f: ArtworkFilters = { ...EMPTY_FILTERS };
   const q = sp.get(K.query);
   if (q) f.query = q;
-  const mediums = oneOf<Medium>(sp.getAll(K.medium), MEDIUMS);
-  if (mediums.length) f.mediums = mediums;
+  // v6: medium is a tag group. Old links (`medium=painting`) still work and land on the same tag.
+  const legacyMediums = oneOf<Medium>(sp.getAll(K.medium), MEDIUMS).map(mediumTagId);
+  const tagIds = [...new Set([...legacyMediums, ...list(sp, K.tags).filter(isFilterTag)])];
+  if (tagIds.length) f.tags = groupTagIds(tagIds);
   const materials = sp
     .getAll(K.material)
     .map((m) => m.trim())
@@ -91,6 +114,12 @@ export function filtersFromParams(sp: URLSearchParams): ArtworkFilters {
     if (yfrom !== undefined) f.years.from = yfrom;
     if (yto !== undefined) f.years.to = yto;
   }
+  const orient = oneOf<Orientation>(list(sp, K.orient), ORIENTATIONS);
+  if (orient.length) f.orientations = orient;
+  const editions = oneOf<EditionType>(list(sp, K.edition), EDITION_TYPES);
+  if (editions.length) f.editionTypes = editions;
+  const uses = oneOf<UseKey>(list(sp, K.uses), USE_KEYS);
+  if (uses.length) f.uses = uses;
   const sort = sp.get(K.sort);
   f.sort = sort && (SORT_KEYS as string[]).includes(sort) ? (sort as SortKey) : 'newest';
   return f;
@@ -115,8 +144,32 @@ export function paramsFromFilters(f: ArtworkFilters): URLSearchParams {
   if (f.includeUndisclosedPrice) sp.set(K.undisclosed, '1');
   if (f.years?.from !== undefined) sp.set(K.yearFrom, String(f.years.from));
   if (f.years?.to !== undefined) sp.set(K.yearTo, String(f.years.to));
+  const tagIds = Object.values(groupTagIds(Object.values(f.tags ?? {}).flat())).flat();
+  if (tagIds.length) sp.set(K.tags, tagIds.join(','));
+  if (f.orientations?.length) sp.set(K.orient, f.orientations.join(','));
+  if (f.editionTypes?.length) sp.set(K.edition, f.editionTypes.join(','));
+  if (f.uses?.length) sp.set(K.uses, f.uses.join(','));
   if (f.sort && f.sort !== 'newest') sp.set(K.sort, f.sort);
   return sp;
+}
+
+/** The query string for `filters`, with commas left readable (`tags=style.abstract,theme.memory`). */
+export function searchFromFilters(f: ArtworkFilters): string {
+  return paramsFromFilters(f).toString().replace(/%2C/gi, ',');
+}
+
+/**
+ * Every work carries its primary medium as a medium.* tag. Records saved before v6 may not
+ * yet, so the gallery mirrors it on read and the Medium group always finds them.
+ */
+export function withMediumTag(w: ArtworkView): ArtworkView {
+  const id = mediumTagId(w.medium);
+  return w.tagIds.includes(id) ? w : { ...w, tagIds: [id, ...w.tagIds] };
+}
+
+/** Link to Works filtered by one tag (artwork page chips). */
+export function worksTagHref(id: string): string {
+  return `/works?${K.tags}=${encodeURIComponent(id)}`;
 }
 
 /** Filters with everything cleared except the viewer's display choices (unit, sort). */

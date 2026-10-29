@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, Icon, LinkButton, SiteFooter, Skeleton, StatusD
 import { CallCard, DeadlineBadge, PageHead, SampleTag, useToday } from './shared';
 import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, CALL_PHASE_LABEL, formatDay, paragraphs } from './format';
 import { TermsBlock } from './terms';
+import { LookingForBlock } from './LookingFor';
 
 export function CallsScreen() {
   const today = useToday();
@@ -179,6 +180,7 @@ export function CallScreen() {
                 </div>
               ))}
             </dl>
+            <LookingForBlock call={call} />
             {call.terms && <TermsBlock terms={call.terms} partnerName={call.partner} />}
             <div className="kp-prose">
               {paragraphs(call.body).map((p, i) =>

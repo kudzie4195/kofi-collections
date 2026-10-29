@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { MockDataSource } from '@/data/mock/MockDataSource';
 import { identity, renderAt } from './testUtils';
 import { shortlistToText } from './shortlistText';
+import { NO_USES } from '@/domain/types';
 
 afterEach(() => {
   cleanup();
@@ -160,6 +161,10 @@ describe('shortlistToText', () => {
             rightsNote: '',
             priceWithheld: true,
             tags: [],
+            tagIds: [],
+            uses: NO_USES,
+            orientation: 'landscape',
+            locationLabel: '',
             visibility: 'public',
             priceVisibility: 'institutions',
             canEdit: false,

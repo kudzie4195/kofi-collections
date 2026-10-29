@@ -1,0 +1,286 @@
+/* Tag chips + TagPicker (v6). Shared: the gallery filters import this file for `.tagchip`.
+   Kofi Noir: hairline pills, tracked uppercase labels, cream fill when pressed.
+   Standalone class names (not `.chip`) so load order against global.css does not matter. */
+
+.tagchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
+}
+@media (hover: hover) {
+  .tagchip:hover {
+    border-color: var(--text-2);
+    color: var(--text);
+  }
+}
+.tagchip:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.tagchip[aria-pressed='true'] {
+  background: var(--cream);
+  border-color: var(--cream);
+  color: var(--black);
+}
+.tagchip__count {
+  opacity: 0.55;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+/* Locked primary medium: pressed, with a gold ring and a star mark. */
+.tagchip--locked,
+.tagchip--locked[aria-pressed='true'] {
+  cursor: default;
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+.tagchip--locked::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold-deep, var(--gold));
+}
+/* Removable active-filter chip (gallery): label + × */
+.tagchip--remove::after {
+  content: '×';
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* ---------- picker ---------- */
+.tagpicker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.tagpicker--compact {
+  gap: var(--space-5);
+}
+.tagpicker__searchrow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.tagpicker__searchrow .input {
+  flex: 1;
+  min-width: 0;
+}
+.tagpicker__clear,
+.tagsection__more {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  color: var(--text-2);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong, var(--line));
+  text-underline-offset: 4px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.tagpicker__clear:hover,
+.tagsection__more:hover {
+  color: var(--text);
+}
+
+.tagsection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.tagpicker > .tagsection:first-child,
+.tagpicker__search + .tagsection {
+  border-top: 0;
+  padding-top: 0;
+}
+.tagsection__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.tagsection__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+  color: var(--text);
+}
+.tagpicker--compact .tagsection__title {
+  font-size: var(--fs-md);
+}
+.tagsection__count {
+  flex: none;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tagsection__lede {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.tagsection__lede p {
+  margin: 0;
+}
+.tagsection__boundary {
+  margin-top: var(--space-1) !important;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.tagsection[data-category='social_impact'] .tagsection__title::after {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 2px;
+  margin-top: 6px;
+  background: var(--green);
+}
+
+/* "Show all" collapses long categories on phones only. */
+.tagsection__more {
+  display: none;
+}
+@media (max-width: 899.98px) {
+  .tagsection__more {
+    display: inline-block;
+  }
+  .tagsection:not([data-expanded='true']) .tagchip--extra {
+    display: none;
+  }
+}
+
+.tagsection__defs > summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--text-2);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+.tagsection__defs > summary:hover {
+  color: var(--text);
+}
+.tagsection__defs dl {
+  margin: var(--space-3) 0 0;
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 900px) {
+  .tagsection__defs dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-6);
+  }
+}
+.tagsection__def dt {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.tagsection__def dd {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ---------- "Available for" switches (UsesField; studio editor + join step four) ---------- */
+.uses__help {
+  margin-top: -2px;
+}
+.uses__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+@media (min-width: 560px) {
+  .uses__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-5);
+  }
+}
+.uses--compact .uses__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+
+/* ---------- join step four: the optional tags block ---------- */
+.kj-tags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+.kj-tags__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.kj-tags__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-xl);
+}
+.kj-tags__optional {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Chips that are links (studio nudge, artwork page tag rows) */
+a.tagchip {
+  text-decoration: none;
+}
+
+/* Compact picker (join step four): collapse long categories at every width to keep the step short. */
+.tagpicker--compact .tagsection__more {
+  display: inline-block;
+}
+.tagpicker--compact .tagsection:not([data-expanded='true']) .tagchip--extra {
+  display: none;
+}

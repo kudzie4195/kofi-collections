@@ -1,6 +1,9 @@
 import { Link } from 'react-router-dom';
-import type { ApplicationRow, Medium, OpenCall } from '@/domain/types';
+import type { ApplicationRow, ArtworkView, Medium, OpenCall } from '@/domain/types';
 import { callPhase } from '@/domain/programme';
+import { effectiveCriteria, matchWork } from '@/domain/matching';
+import { matchCopy } from '@/features/programme/matchCopy';
+import '@/features/programme/match.css';
 import { useQuery } from '@/state/session';
 import { APPLICATION_STATUS_DOT, APPLICATION_STATUS_LABEL, CALL_PHASE_LABEL, deadlineLabel } from '@/features/programme/format';
 import { EmptyState, ErrorState, Icon, LinkButton, Skeleton, StatusDot, Tag, TopBar } from '@/ui';
@@ -9,6 +12,24 @@ import { capitalize } from './shared';
 /** A call fits when it takes any medium, or shares one with the artist. */
 export function fitsMediums(call: Pick<OpenCall, 'mediums'>, mine: Medium[]): boolean {
   return call.mediums.length === 0 || call.mediums.some((m) => mine.includes(m));
+}
+
+/**
+ * How many of the artist's works meet everything a call asks (domain/matching, run
+ * locally on the artist's own works). `asks` is 0 when the call asks nothing.
+ * "Only me" works are left out: they can't be attached to an application.
+ */
+export function worksThatFit(call: Pick<OpenCall, 'kind' | 'mediums' | 'lookingFor'>, works: ArtworkView[]): { fit: number; total: number; asks: number } {
+  const criteria = effectiveCriteria(call);
+  const usable = works.filter((w) => w.visibility !== 'private');
+  const results = usable.map((w) => matchWork(w, criteria));
+  const asks =
+    results[0]?.of ??
+    Object.entries(criteria.tags ?? {}).filter(([cat, ids]) => ids.some((id) => id.startsWith(`${cat}.`))).length +
+      (criteria.uses?.length ? 1 : 0) +
+      (criteria.region?.trim() ? 1 : 0) +
+      (criteria.minLongestEdgeCm !== undefined || criteria.maxLongestEdgeCm !== undefined ? 1 : 0);
+  return { fit: results.filter((m) => m.fits).length, total: usable.length, asks };
 }
 
 /** The application that counts for a call (anything but a withdrawn one wins). */
@@ -20,7 +41,8 @@ export function currentApplication(apps: ApplicationRow[], callId: string): Appl
 export function Opportunities() {
   const q = useQuery(async (ds, v) => {
     const [calls, artist, apps] = await Promise.all([ds.listOpenCalls(v), ds.getMyArtist(v), ds.listMyApplications(v).catch(() => [] as ApplicationRow[])]);
-    return { calls: calls.filter((c) => callPhase(c) !== 'closed'), mediums: artist?.mediums ?? [], apps };
+    const works = artist ? await ds.listArtistArtworks(v, artist.id).catch(() => [] as ArtworkView[]) : [];
+    return { calls: calls.filter((c) => callPhase(c) !== 'closed'), mediums: artist?.mediums ?? [], apps, works };
   });
 
   return (
@@ -42,6 +64,10 @@ export function Opportunities() {
                   <Icon.Sparkle />
                 </span>{' '}
                 Fits your mediums: the call takes any medium, or one you work in.
+              </li>
+              <li>
+                <span className="fit-line__dot sto-legend-dot" aria-hidden="true" />{' '}
+                {matchCopy.opportunities.legend}
               </li>
               <li>Kofi calls never charge an entry fee.</li>
             </ul>
@@ -68,7 +94,7 @@ export function Opportunities() {
               <ul className="sto-calls" aria-label="Open and upcoming calls">
                 {q.data.calls.map((c) => (
                   <li key={c.id}>
-                    <CallCard call={c} mine={q.data!.mediums} app={currentApplication(q.data!.apps, c.id)} />
+                    <CallCard call={c} mine={q.data!.mediums} app={currentApplication(q.data!.apps, c.id)} works={q.data!.works} />
                   </li>
                 ))}
               </ul>
@@ -80,8 +106,9 @@ export function Opportunities() {
   );
 }
 
-function CallCard({ call, mine, app }: { call: OpenCall; mine: Medium[]; app?: ApplicationRow }) {
+function CallCard({ call, mine, app, works }: { call: OpenCall; mine: Medium[]; app?: ApplicationRow; works: ArtworkView[] }) {
   const phase = callPhase(call);
+  const fit = worksThatFit(call, works);
   const fits = fitsMediums(call, mine);
   const applied = app && app.status !== 'withdrawn';
   return (
@@ -118,6 +145,9 @@ function CallCard({ call, mine, app }: { call: OpenCall; mine: Medium[]; app?: A
         ) : (
           <span className="sto-nofit small muted">Outside your listed mediums</span>
         )}
+        <span className="sto-match" data-fits={fit.asks > 0 && fit.fit > 0 ? 'true' : undefined} data-testid="works-fit">
+          {fit.asks === 0 ? matchCopy.opportunities.noCriteria : matchCopy.opportunities.count(fit.fit, fit.total)}
+        </span>
         {applied && (
           <span className="status-pill sto-pill">
             <StatusDot status={APPLICATION_STATUS_DOT[app.status]} />

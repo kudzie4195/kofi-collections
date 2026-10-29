@@ -452,3 +452,49 @@ Then deploy the function (above). Generated: parts by `node supabase/scripts/spl
 - Mock mode cannot fetch: fixtures stand in for pages. Supabase mode reads real pages, so Instagram / Facebook may or may not serve their og tags to a server, and LinkedIn almost never does — the import then says so and keeps the handle.
 - When the function is not deployed, imports fall back to the handle and `checkMyLinks` reports the checker offline (mock: unknown links become `unreachable`).
 - New artist ids are UUIDs; the sign-up returns no `DemoIdentity`.
+
+## 12. Taxonomy, filters and call matching (0011)
+
+`supabase/migrations/0011_taxonomy.sql` adds Kofi's controlled tag library (from the workbook, `src/domain/taxonomy.data.ts`), the v6 artwork fields, the Works search in SQL and "Works that fit" for calls. Everything is in schema `kofi`.
+
+### Objects (all in `kofi`)
+
+| Object | What |
+|---|---|
+| `tag_categories`, `tags` | The library: 25 categories, 172 workbook tags + 2 app additions (`medium.performance`, `medium.video`). `tags` = stable `id` (`category.slug`), `label`, `definition`, `artist_selectable`, `phase`, `app_addition`, governance `deprecated_at` + `aliases`. Everyone reads; Kofi admins insert / update (RLS), nobody deletes through the API (deprecate). A relabel keeps the old label as an alias (`tags_guard`); ids never change. Seeded by `scripts/generate-taxonomy.mjs`; re-running inserts missing tags only, so a governance edit is never undone. |
+| `artworks.tag_ids` | `text[]`, GIN-indexed. `artworks_taxonomy` normalises every write exactly like `normalizeTagIds()`: unknown / non-selectable / non-MVP / deprecated ids dropped, medium mirrored, library order; more than 6 per category (4 Social Impact) → `Pick up to N … tags.` (`tags.<category>`). Existing works got their medium as their tag (no audit, `updated_at` kept). |
+| `artworks.uses`, `edition`, `location` | `uses` = the four booleans (default all false, separate from `status`); `edition` and `location` cleaned like the mock's `cleanEdition` / `cleanLocation` (same messages, field `edition` / `location`). `location` is **not** selectable by the API roles. |
+| `open_calls.looking_for` | `CallCriteria` jsonb, cleaned / validated like `cleanCriteria` + `validateCriteria` (`open_calls_criteria_guard`); empty → NULL. Partners write it on their own drafts (0009's guard still applies). |
+| `artworks_visible` | + `tag_ids`, `uses`, `edition`, `orientation` (`orientationOf()`), `location_label` (the work's location at the **artist's** precision, else the artist's region), `location` (owner / Kofi only). `open_calls_visible` + `looking_for`. `call_application_works()` returns the same widened row. |
+| `search_artworks(p_filters, p_limit, p_offset)` | `ArtworkFilters` in SQL over the caller's own `artworks_visible` rows with `listArtworks`' discovery rules → `{rows, total, facets}` (facets = `tagFacets()`). anon + authenticated. |
+| `match_works(p_call)` | The call's partner or Kofi: their discovery rows, unranked (the client ranks with `rankWorks(effectiveCriteria(call))`). Others: the 0009 messages. |
+| `save_artwork()` | 0005's RPC + `tagIds` / `uses` / `edition` / `location` / cleaned keywords. A key the client leaves out keeps the stored value. |
+
+Private prices: every new read runs as the caller over the redacted view, so a withheld price is never in rows, totals, facets, the budget filter or matching.
+
+### Applying 0011 to the shared production project
+
+Needs 0000–0010 (live). Run in order, each file on its own:
+
+| # | File | Bytes | What |
+|---|---|---|---|
+| 1 | `supabase/apply/0011_part1.sql` | 14 172 | prerequisites, pure helpers (dimensions, orientation, uses, keywords, edition, location) |
+| 2 | `supabase/apply/0011_part2.sql` | 13 614 | criteria helpers, `tag_categories` + `tags` (tables, guard, RLS, grants) |
+| 3 | `supabase/apply/0011_part3.sql` | 23 607 | library seed: categories + tags 1–n (generated) |
+| 4 | `supabase/apply/0011_part4.sql` | 8 592 | library seed: the remaining tags (generated) |
+| 5 | `supabase/apply/0011_part5.sql` | 7 345 | `artworks` / `open_calls` columns + CHECKs + GIN index, `normalize_tag_ids`, `artworks_taxonomy`, `open_calls_criteria_guard`, backfill (medium tag) |
+| 6 | `supabase/apply/0011_part6.sql` | 12 261 | `artwork_location`, `artworks_visible`, `open_calls_visible`, `call_application_works`, `artwork_filter_ok` |
+| 7 | `supabase/apply/0011_part7.sql` | 12 551 | `search_artworks`, `match_works`, `save_artwork`, privileges, records `0011_taxonomy`, reloads PostgREST |
+| 8 | `supabase/apply/0011_live_patch.sql` | 17 851 | demo works by fixed id: the seed's tag ids where a work still has only its medium tag, uses where still all false, edition / location where NULL; the two calls' `looking_for` where NULL; adds the columns to `kofi.demo_artworks` / `kofi.demo_open_calls` and fills them so *Reset demo data* keeps them. No audit rows |
+
+Generated: the tag block by `node supabase/scripts/generate-taxonomy.mjs`, parts by `node supabase/scripts/split-0011.mjs`, the patch by `node supabase/scripts/generate-seed.mjs`. Every file is one transaction and safe to re-run; 0011 does **not** undo 0009 / 0010 (it appends to their views and widens `call_application_works()`). **Never re-run 0003 or 0009 after 0011** (their older view / function would not match); if it happens, run 0011 again. A fresh project runs 0000–0011 and then the seeds (`seed_content.sql` now needs 0011). Live sign-up stays off.
+
+### Verification
+
+- `supabase/tests/taxonomy_test.sql` (run on both databases): the library seed; `orientation_of` / `longest_edge` / `normalize_tag_ids` = the TypeScript cases; `kofi.tags` RLS; the workbook P0 tests — relabel keeps search by id, (Painting OR Drawing) AND Education Access with facets, 24 in ≈ 60.96 cm, a visitor never gets a withheld price (rows, total, facets, budget oracle, matching, base columns), not for sale + exhibition, an institution / another artist / Kofi cannot edit a work, 3+ values in a category; every v6 save rule with the mock's messages; location label at the artist's precision; discovery rules, paging, sort; `match_works` per caller; `looking_for` guard (partner draft vs published / other call, Kofi, anon); widened reviewer rows; isolation. `run-local.sh` applies 0011 twice, and on the live path applies the parts twice + the live patch twice, checks works / calls equal the seed, no audit rows, 0010's intake state unchanged, and that a reset keeps both.
+- `SupabaseDataSource` end to end against PostgREST (`e2e v6`): tagged save (normalised, keywords, edition, location, keep / clear semantics), `search_artworks` = `applyFilters` for ten filter sets, facets = `tagFacets`, withheld price absent from the raw RPC response, `listMatchingWorks` = `rankWorks` over the partner's own Works list, artist and Kofi paths, criteria save / keep / clear.
+
+### Known differences from mock mode
+
+- Search runs in SQL only when a tag / orientation / edition / uses filter is set; the client re-sorts with `sortArtworks`, so the order is the mock's.
+- The first problem reported for criteria with errors in two tag categories may differ (jsonb does not keep key order).

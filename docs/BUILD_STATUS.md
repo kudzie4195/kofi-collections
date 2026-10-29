@@ -1,6 +1,32 @@
 # BUILD_STATUS — Kofi Collections
 
-Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-20.
+Format from the starter guide §06: working / mocked / blocked / known risk / next task. Updated 2026-10-29.
+
+## v6 — classification and filter taxonomy from Kofi's workbook, call criteria and matching (2026-10-29)
+
+Built from `Kofi_Collections_Artwork_Filter_Taxonomy_v1.0_2026-10-27.xlsx` (checked in under `docs/source/`). The workbook is the source of truth: `scripts/taxonomy-from-xlsx.py` generates `src/domain/taxonomy.data.ts` (25 categories, 172 tags with stable ids, labels and definitions verbatim, release phase per tag, the Social Impact boundary text, 14 acceptance tests). Two medium tags the demo works already used (Performance, Video) are added and flagged `appAddition` for Kofi to keep or drop.
+
+- **Tagging a work** (`/studio/work/new`, `/studio/work/:id`, and the one-work step of `/join`): eight chip groups (medium, style, subject, theme, social impact, material, palette, display format), MVP tags only, up to 6 per group and 4 for Social Impact, the main medium mirrored and locked, "What these mean" definitions per group, keywords as free text. Social Impact shows the workbook's boundary sentence. Nothing is suggested or inferred from text or images; the only automatic tag is the medium mirror.
+- **Structured fields**: *Available for* (auction, exhibition, licensing, commission; all off by default and never guessed from price or for-sale), *Edition* (unique, limited n/N, open, artist's proof), *Where the work is* (owner and Kofi only; the public sees the artist's region label), *Orientation* derived from dimensions (depth counts as 3D only at ≥ a fifth of the shorter edge, so a stretched canvas stays 2D).
+- **Filters on Works**: tags as chips with live counts, any-of inside a group and all groups combined, plus orientation, edition and available-for; active-chip bar with remove and Clear all; URL carries ids (`?tags=style.abstract,theme.memory`), never labels; size filters convert between cm and inches.
+- **Calls**: a call states what it is looking for in the same tag language (plus uses, region, a note). Partner desk → *Works that fit*: works ranked by asks met, each with a plain reason ("Artistic Style: Abstract or Minimalism. This work is tagged Abstract."). Matching reads only the work's tags, uses, location label and dimensions; a partner only ever sees works they could already open. Artists see "N of your works fit" on Opportunities and the fit line on Apply.
+- **On-device data**: `schema: 6` migration keeps keywords, mirrors the medium, applies the seed's classification to the demo works, leaves uses off for the user's own works.
+- **Supabase**: migration `0011_taxonomy` (`kofi.tag_categories`, `kofi.tags` with aliases and `deprecated_at`, artworks `tag_ids / uses / edition / location` with a normalising trigger, `open_calls.looking_for`, RPCs `search_artworks` {rows, total, facets} and `match_works`, views keep `location` owner-only). Apply as `apply/0011_part1..7.sql` then `apply/0011_live_patch.sql` (tags the 13 fictional demo works by uuid; real artists' works get their medium tag only). **0010 must be applied before 0011. Never re-run 0003 or 0009 after 0011.**
+
+| Check (v6) | Result |
+|---|---|
+| typecheck / unit + screen tests / build / cap sync | clean / 595 / clean (main chunk 435 kB; mock and Supabase data sources both lazy) / ok |
+| Browser smoke: 159 routes × (375, 900, 1280, 375 dark) | 636 / 636 (+ touched routes re-smoked after review fixes) |
+| Taxonomy flow at 390 px (Mara tags a work → visitor filters, chips, URL → Quincy sets Looking for → Lena's Works that fit → Mara's fit lines) | 24 / 24 |
+| Earlier flows and focus gates (v5, v4, v3, demo; focus v5/v4/v3) | 30 · 20 · 16 · 18 · 21 · 61 · 17, all pass |
+| 375 px checks: partner desk three tabs on one row and readable; filter sheet and work editor without overflow | pass (screenshots in the run folder) |
+| Copy gate on every copy file (7) | 7 / 7 |
+| SQL suite (RLS, RPCs, programme, sales, intake, taxonomy incl. relabel, OR/AND, private-price and Only-me probes; isolation; live path twice) | PASS, see `supabase/tests/LAST_RUN.log` |
+| PostgREST harness (v4 113 + v5 27 + v6 27) | 167 / 167 |
+| Workbook diff (reviewer's own openpyxl script vs `taxonomy.data.ts`) | 0 differences over 172 rows; exactly the 2 flagged additions |
+| Independent review (fresh Fable reviewer: recomputed every anchored criterion, 300-work scale probe, keyboard walks, live-patch probe) | FIX THEN SHIP → 5 catches fixed and re-verified (migration dropped a second medium tag; focus lost after removing a chip; one copy claim; boundary text tooltip-only on the public page; live patch bumped `updated_at`) |
+
+Known limits (v6): no pagination or virtualisation in the Works grid, the filter sheet, Works that fit or the partner review list (300 extra works: ~0.5 s per chip toggle on desktop; nothing breaks, but a 100+ applicant call will scroll, not snap — the Supabase RPC already takes limit/offset and server facets; the client does not use them yet); Phase 2 curatorial tags, Phase 3 impact evidence and keyword moderation are in the data, hidden, not built; CSV import writes keywords only, no tag column; matching ships although the workbook files it under Phase 3; the Location filter on Works still means the artist's region, while matching uses the work's own location.
 
 ## v5 — artist-first home, intake, link import and self-verification (2026-10-22)
 

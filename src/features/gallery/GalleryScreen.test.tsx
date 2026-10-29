@@ -50,7 +50,7 @@ describe('Works gallery (/works)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(titlesInGrid()).toEqual(['Small Weather No. 4']);
     const where = screen.getByTestId('where').textContent ?? '';
-    expect(where).toContain('medium=painting');
+    expect(where).toContain('tags=medium.painting');
     expect(where).toContain('unit=in');
     expect(where).toContain('max=40');
   });
@@ -76,11 +76,12 @@ describe('Works gallery (/works)', () => {
   });
 
   it('the live count in the sheet tracks the draft and "Clear all" resets it', async () => {
+    // An old medium link lands on the medium tag, which also finds work that lists ceramics as a second medium (Crowd).
     renderAt('/works?medium=ceramics');
     await screen.findByText('Lean II');
     fireEvent.click(screen.getByRole('button', { name: /^filters/i }));
     const sheet = screen.getByRole('dialog', { name: /filters/i });
-    expect(within(sheet).getByRole('button', { name: 'Show 1 work' })).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: 'Show 2 works' })).toBeInTheDocument();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Clear all' }));
     expect(within(sheet).getByRole('button', { name: 'Show 9 works' })).toBeInTheDocument();
     // Free-text material

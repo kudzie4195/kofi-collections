@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the migrations (0008, 0009 and 0010 each twice to prove they are re-runnable),
+# Runs the migrations (0008, 0009, 0010 and 0011 each twice to prove they are re-runnable),
 # the seed (auth once, content twice, then the additive programme + sales seeds)
 # and the RLS / RPC / programme / sales / schema-isolation assertions against a
 # THROWAWAY plain-Postgres database, with supabase/tests/shim.sql standing in
@@ -43,6 +43,9 @@ set +e
   echo "== migrations/0010_intake.sql (twice — must be idempotent)"
   run -q -f "$root/migrations/0010_intake.sql"
   run -q -f "$root/migrations/0010_intake.sql"
+  echo "== migrations/0011_taxonomy.sql (twice — must be idempotent)"
+  run -q -f "$root/migrations/0011_taxonomy.sql"
+  run -q -f "$root/migrations/0011_taxonomy.sql"
   echo "== seed_auth.sql"
   run -q -f "$root/seed_auth.sql"
   echo "== seed_content.sql (first run)"
@@ -74,8 +77,12 @@ set +e
   run -f "$here/sales_test.sql"
   echo "== tests/intake_test.sql"
   run -f "$here/intake_test.sql"
+  echo "== tests/taxonomy_test.sql"
+  run -f "$here/taxonomy_test.sql"
   echo "== tests/isolation_test.sql"
   run -f "$here/isolation_test.sql"
+  expected_taxonomy="$(run -At -c "select jsonb_build_object('works', (select jsonb_agg(jsonb_build_object('id', id, 'tag_ids', tag_ids, 'uses', uses, 'edition', edition, 'location', location) order by id) from kofi.artworks),
+                                                          'calls', (select jsonb_agg(jsonb_build_object('id', id, 'looking_for', looking_for) order by id) from kofi.open_calls))")"
   expected_intake="$(run -At -c "select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists")"
 
   # ---- live path: 0008 and 0009 applied as the pasted parts; the live project's
@@ -84,7 +91,7 @@ set +e
   pdb="${db}_parts"
   runp() { psql -X -v ON_ERROR_STOP=1 -d "$pdb" "$@"; }
   echo
-  echo "== LIVE PATH: $pdb = shim + 0000-0007 + apply/0008_part1..4 (x2) + apply/0009_part1..5 (x2), v4 seeds, apply/0010_part1..2 (x2) + 0010_live_patch (x2)"
+  echo "== LIVE PATH: $pdb = shim + 0000-0007 + apply/0008_part1..4 (x2) + apply/0009_part1..5 (x2), v4 seeds, apply/0010_part1..2 (x2) + 0010_live_patch (x2), apply/0011_part1..n (x2) + 0011_live_patch (x2)"
   psql -X -q -d postgres -c "drop database if exists $pdb" -c "create database $pdb"
   runp -q -f "$here/shim.sql"
   for f in "$root"/migrations/000[0-7]_*.sql; do runp -q -f "$f"; done
@@ -151,13 +158,49 @@ begin
   raise notice 'ok: live path — 0010 parts 1..2 (twice) + 0010_live_patch.sql (twice) give the seed''s tokens, typed links and imports, without audit rows; the reset snapshot keeps them';
 end $$;
 SQL
-  runp -q -c "drop table kofi_test.baseline_audit; drop table kofi_test.expected_intake"
+  runp -q -c "drop table kofi_test.baseline_audit"
+  echo "== 0011 on the live path: apply/0011_part1..n (x2), then apply/0011_live_patch.sql (x2)"
+  for pass in 1 2; do for f in "$root"/apply/0011_part*.sql; do echo "== $(basename "$f") (pass $pass)"; runp -q -f "$f"; done; done
+  runp -q -c "create table kofi_test.baseline_audit as select count(*) as n from kofi.audit_events"
+  for pass in 1 2; do runp -q -f "$root/apply/0011_live_patch.sql"; done
+  runp -At -v expected="$expected_taxonomy" <<'SQL'
+create table kofi_test.expected_taxonomy as select :'expected'::jsonb as v;
+create or replace function kofi_test.taxonomy_state() returns jsonb language sql as $f$
+  select jsonb_build_object('works', (select jsonb_agg(jsonb_build_object('id', id, 'tag_ids', tag_ids, 'uses', uses, 'edition', edition, 'location', location) order by id) from kofi.artworks),
+                            'calls', (select jsonb_agg(jsonb_build_object('id', id, 'looking_for', looking_for) order by id) from kofi.open_calls))
+$f$;
+do $$
+begin
+  if kofi_test.taxonomy_state() is distinct from (select v from kofi_test.expected_taxonomy) then
+    raise exception 'FAIL: 0011 parts + 0011_live_patch.sql did not bring the demo works and calls to the seed (tags, uses, editions, criteria)';
+  end if;
+  if (select count(*) from kofi.audit_events) <> (select n from kofi_test.baseline_audit) then
+    raise exception 'FAIL: 0011_live_patch.sql wrote audit rows';
+  end if;
+  if (select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists)
+     is distinct from (select v from kofi_test.expected_intake) then
+    raise exception 'FAIL: 0011 changed the 0010 intake state (tokens, typed links, imports)';
+  end if;
+  perform kofi.kofi_demo_reset();
+  if kofi_test.taxonomy_state() is distinct from (select v from kofi_test.expected_taxonomy) then
+    raise exception 'FAIL: after 0011_live_patch.sql, Reset demo data should restore the same tags, uses, editions and criteria';
+  end if;
+  if (select jsonb_agg(jsonb_build_object('id', id, 'token', verification_token, 'links', links, 'imports', imports) order by id) from kofi.artists)
+     is distinct from (select v from kofi_test.expected_intake) then
+    raise exception 'FAIL: after 0011, Reset demo data should still restore the 0010 codes, links and imports';
+  end if;
+  raise notice 'ok: live path — 0011 parts (twice) + 0011_live_patch.sql (twice) give the seed''s tags, uses, editions and call criteria without audit rows; 0010 intake state unchanged; the reset snapshot keeps both';
+end $$;
+SQL
+  runp -q -c "drop table kofi_test.baseline_audit; drop table kofi_test.expected_intake; drop table kofi_test.expected_taxonomy; drop function kofi_test.taxonomy_state()"
   echo "== tests/programme_test.sql (live-path database)"
   runp -f "$here/programme_test.sql"
   echo "== tests/sales_test.sql (live-path database)"
   runp -f "$here/sales_test.sql"
   echo "== tests/intake_test.sql (live-path database)"
   runp -f "$here/intake_test.sql"
+  echo "== tests/taxonomy_test.sql (live-path database)"
+  runp -f "$here/taxonomy_test.sql"
   echo "== tests/isolation_test.sql (live-path database)"
   runp -f "$here/isolation_test.sql"
   psql -X -q -d postgres -c "drop database if exists $pdb"

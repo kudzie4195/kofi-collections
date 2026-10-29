@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react';
-import type { ArtistView, ArtworkImage, ArtworkView, Medium, Unit, Visibility } from '@/domain/types';
-import { MEDIUMS, VISIBILITIES, VISIBILITY_LABEL } from '@/domain/types';
+import type { ArtistView, ArtworkImage, ArtworkUses, ArtworkView, Medium, Unit, Visibility } from '@/domain/types';
+import { MEDIUMS, NO_USES, VISIBILITIES, VISIBILITY_LABEL } from '@/domain/types';
+import { mediumTagId } from '@/domain/taxonomy';
+import { TagPicker } from '@/features/studio/TagPicker';
+import { UsesField } from '@/features/studio/UsesField';
+import { QUICK_TAG_COPY } from '@/features/studio/tagCopy';
 import type { ArtworkInput } from '@/data/DataSource';
 import { ValidationError } from '@/data/DataSource';
 import { prepareImage } from '@/native/images';
@@ -25,7 +29,14 @@ interface QuickForm {
   currency: string;
   priceVisibility: Visibility;
   visibility: Visibility;
+  /** Optional controlled tags (primary medium excluded: the data layer mirrors it). */
+  tagIds: string[];
+  /** All off by default: the artist opts in. */
+  uses: ArtworkUses;
 }
+
+/** The short picker for step four: the four categories a newcomer can answer at a glance. */
+const QUICK_CATEGORIES = ['medium', 'style', 'subject', 'social_impact'] as const;
 
 function blank(artist: ArtistView): QuickForm {
   const country = artist.region?.country ?? '';
@@ -41,13 +52,15 @@ function blank(artist: ArtistView): QuickForm {
     currency: country === 'Canada' ? 'CAD' : 'USD',
     priceVisibility: 'institutions',
     visibility: 'public',
+    tagIds: [],
+    uses: { ...NO_USES },
   };
 }
 
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
 const cap = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 
-type Errors = Partial<Record<'title' | 'year' | 'materials' | 'size' | 'price' | 'photo', string>>;
+type Errors = Partial<Record<'title' | 'year' | 'materials' | 'size' | 'price' | 'photo' | 'tags', string>>;
 
 /**
  * Only a photo, a title and a medium are required here. Year and materials are optional:
@@ -91,12 +104,14 @@ function toInput(f: QuickForm, artist: ArtistView): ArtworkInput {
     priceVisibility: f.priceVisibility,
     visibility: f.visibility,
     tags: [],
+    tagIds: f.tagIds.filter((t) => t !== mediumTagId(f.medium)),
+    uses: f.uses,
   };
   if (f.amount.trim()) input.price = { amount: num(f.amount), currency: f.currency };
   return input;
 }
 
-const FIELD_OF: Record<string, keyof Errors> = { title: 'title', year: 'year', materials: 'materials', dimensions: 'size', price: 'price', images: 'photo' };
+const FIELD_OF: Record<string, keyof Errors> = { title: 'title', year: 'year', materials: 'materials', dimensions: 'size', price: 'price', images: 'photo', tags: 'tags', uses: 'tags' };
 
 /** The compact add-a-work card of step four. Saves through saveArtwork; WorkEditor stays the full editor. */
 export function QuickWork({ artist, onSaved, onCancel }: { artist: ArtistView; onSaved: (w: ArtworkView) => void; onCancel?: () => void }) {
@@ -141,7 +156,8 @@ export function QuickWork({ artist, onSaved, onCancel }: { artist: ArtistView; o
       setF(blank(artist));
       onSaved(w);
     } catch (err) {
-      if (err instanceof ValidationError && err.field && FIELD_OF[err.field]) setErrors({ [FIELD_OF[err.field]!]: err.message });
+      const key = err instanceof ValidationError && err.field ? (err.field.startsWith('tags.') ? 'tags' : FIELD_OF[err.field]) : undefined;
+      if (key) setErrors({ [key]: err instanceof Error ? err.message : '' });
       else toast.push(errorMessage(err), 'error');
     } finally {
       setBusy(false);
@@ -199,7 +215,7 @@ export function QuickWork({ artist, onSaved, onCancel }: { artist: ArtistView; o
       <Input label={c.titleLabel} hint={c.titleHint} value={f.title} error={errors.title} onChange={(e) => (set('title', e.target.value), clear('title'))} />
       <div className="kj-row2">
         <Input label={c.year} hint={c.yearHint} inputMode="numeric" value={f.year} error={errors.year} onChange={(e) => (set('year', e.target.value.replace(/[^\d]/g, '')), clear('year'))} />
-        <Select label={c.medium} value={f.medium} onChange={(e) => set('medium', e.target.value as Medium)}>
+        <Select label={c.medium} value={f.medium} onChange={(e) => setF((x) => ({ ...x, medium: e.target.value as Medium, tagIds: x.tagIds.filter((t) => t !== mediumTagId(e.target.value as Medium)) }))}>
           {MEDIUMS.map((m) => (
             <option key={m} value={m}>
               {cap(m)}
@@ -255,6 +271,23 @@ export function QuickWork({ artist, onSaved, onCancel }: { artist: ArtistView; o
           </option>
         ))}
       </Select>
+
+      <section className="kj-tags" aria-labelledby="kj-tags-title" data-invalid={errors.tags ? 'true' : undefined} tabIndex={errors.tags ? -1 : undefined}>
+        <div className="kj-tags__head">
+          <h3 id="kj-tags-title" className="kj-tags__title">
+            {QUICK_TAG_COPY.title}
+          </h3>
+          <span className="kj-tags__optional">{QUICK_TAG_COPY.optional}</span>
+        </div>
+        <p className="field__hint">{QUICK_TAG_COPY.hint}</p>
+        <TagPicker value={f.tagIds} onChange={(ids) => (set('tagIds', ids), clear('tags'))} categories={QUICK_CATEGORIES} lockedMedium={f.medium} mode="work" compact label={QUICK_TAG_COPY.title} />
+        {errors.tags && (
+          <span className="field__error" role="alert">
+            {errors.tags}
+          </span>
+        )}
+      </section>
+      <UsesField value={f.uses} onChange={(v) => set('uses', v)} compact />
 
       <div className="kj-actions">
         <Button type="submit" loading={busy} disabled={preparing}>

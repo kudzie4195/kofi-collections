@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import type { ArtistView, ArtworkImage, ArtworkStatus, ArtworkView, Medium, Unit, Viewer, Visibility } from '@/domain/types';
-import { ARTWORK_STATUSES, MEDIUMS, PUBLIC_VIEWER } from '@/domain/types';
-import { canSee } from '@/domain/visibility';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import type { ArtistView, ArtworkImage, ArtworkStatus, ArtworkUses, ArtworkView, Edition, EditionType, Medium, Region, Unit, Viewer, Visibility } from '@/domain/types';
+import { ARTWORK_STATUSES, EDITION_LABEL, EDITION_TYPES, MEDIUMS, NO_USES, ORIENTATION_LABEL, PUBLIC_VIEWER } from '@/domain/types';
+import { mediumTagId, orientationOf } from '@/domain/taxonomy';
+import { canSee, regionLabel } from '@/domain/visibility';
 import { formatDimensions } from '@/domain/units';
 import type { ArtworkInput } from '@/data/DataSource';
 import { prepareImage } from '@/native/images';
@@ -30,6 +31,9 @@ import {
   WallLabel,
 } from '@/ui';
 import { ChipInput, Group, StudioVisibilityPicker, capitalize, fieldErrorFrom, focusFirstError, useUnsavedGuard } from './shared';
+import { TagPicker } from './TagPicker';
+import { UsesField } from './UsesField';
+import { EDITION_COPY, LOCATION_COPY, ORIENTATION_COPY, TAG_COPY, WORK_PANEL_COPY } from './tagCopy';
 
 /* ---------- constants ---------- */
 
@@ -78,8 +82,25 @@ interface WorkForm {
   currency: string;
   priceVisibility: Visibility;
   visibility: Visibility;
+  /** Free-text keywords (Artwork.tags). */
   tags: string[];
+  /** Controlled tag ids, without the primary medium's tag (the data layer mirrors it). */
+  tagIds: string[];
+  uses: ArtworkUses;
+  editionType: EditionType | '';
+  editionNumber: string;
+  editionSize: string;
+  locCity: string;
+  locRegion: string;
+  locCountry: string;
+  /** True once the artist edits the location: only then is `location` sent (omitting it keeps the stored one). */
+  locTouched: boolean;
   images: ArtworkImage[];
+}
+
+/** The owner's raw location, when the projection carries it (ArtworkView has only locationLabel today). */
+function viewLocation(w: ArtworkView): Region | undefined {
+  return (w as ArtworkView & { location?: Region }).location;
 }
 
 function fromView(w: ArtworkView): WorkForm {
@@ -101,6 +122,15 @@ function fromView(w: ArtworkView): WorkForm {
     priceVisibility: w.priceVisibility,
     visibility: w.visibility,
     tags: [...w.tags],
+    tagIds: w.tagIds.filter((t) => t !== mediumTagId(w.medium)),
+    uses: { ...NO_USES, ...w.uses },
+    editionType: w.edition?.type ?? '',
+    editionNumber: w.edition?.number !== undefined ? String(w.edition.number) : '',
+    editionSize: w.edition?.size !== undefined ? String(w.edition.size) : '',
+    locCity: viewLocation(w)?.city ?? '',
+    locRegion: viewLocation(w)?.region ?? '',
+    locCountry: viewLocation(w)?.country ?? '',
+    locTouched: false,
     images: w.images.map((i) => ({ ...i })),
   };
 }
@@ -124,6 +154,15 @@ function blankForm(artist: ArtistView | undefined): WorkForm {
     priceVisibility: 'institutions',
     visibility: 'private',
     tags: [],
+    tagIds: [],
+    uses: { ...NO_USES },
+    editionType: '',
+    editionNumber: '',
+    editionSize: '',
+    locCity: '',
+    locRegion: '',
+    locCountry: '',
+    locTouched: false,
     images: [],
   };
 }
@@ -134,6 +173,25 @@ function dimsOf(f: WorkForm) {
   const d = { height: num(f.height), width: num(f.width), unit: f.unit } as ArtworkInput['dimensions'];
   if (f.depth.trim() !== '') d.depth = num(f.depth);
   return d;
+}
+
+const takesNumber = (t: EditionType | '') => t === 'limited' || t === 'artist_proof';
+
+function editionOf(f: WorkForm): Edition | undefined {
+  if (!f.editionType) return undefined;
+  const e: Edition = { type: f.editionType };
+  if (takesNumber(f.editionType)) {
+    if (f.editionNumber.trim()) e.number = num(f.editionNumber);
+    if (f.editionSize.trim()) e.size = num(f.editionSize);
+  }
+  return e;
+}
+
+function locationOf(f: WorkForm): Region | undefined {
+  if (!f.locRegion.trim() && !f.locCountry.trim() && !f.locCity.trim()) return undefined;
+  const r: Region = { region: f.locRegion.trim(), country: f.locCountry.trim(), precision: 'region' };
+  if (f.locCity.trim()) r.city = f.locCity.trim();
+  return r;
 }
 
 function toInput(f: WorkForm, id?: string): ArtworkInput {
@@ -150,7 +208,11 @@ function toInput(f: WorkForm, id?: string): ArtworkInput {
     priceVisibility: f.priceVisibility,
     visibility: f.visibility,
     tags: f.tags,
+    tagIds: f.tagIds.filter((t) => t !== mediumTagId(f.medium)),
+    uses: f.uses,
+    edition: editionOf(f),
   };
+  if (f.locTouched) input.location = locationOf(f);
   if (!f.noPrice) input.price = { amount: num(f.amount), currency: f.currency };
   if (id) input.id = id;
   return input;
@@ -175,6 +237,15 @@ function validate(f: WorkForm): Errors {
     if (!(a >= 0)) e.price = 'Enter a price, or turn on “No price”.';
   }
   if (f.visibility === 'public' && f.images.length === 0) e.images = 'Add at least one image before publishing.';
+  if (takesNumber(f.editionType)) {
+    const n = f.editionNumber.trim() ? num(f.editionNumber) : undefined;
+    const sz = f.editionSize.trim() ? num(f.editionSize) : undefined;
+    const whole = (x: number | undefined) => x === undefined || (Number.isInteger(x) && x >= 1);
+    if (!whole(n) || !whole(sz)) e.edition = EDITION_COPY.wholeNumbers;
+    else if (f.editionType === 'limited' && sz === undefined) e.edition = EDITION_COPY.sizeNeeded;
+    else if (n !== undefined && sz !== undefined && n > sz) e.edition = EDITION_COPY.numberTooHigh;
+  }
+  if (f.locTouched && (f.locRegion.trim() || f.locCountry.trim() || f.locCity.trim()) && (!f.locRegion.trim() || !f.locCountry.trim())) e.location = LOCATION_COPY.needBoth;
   return e;
 }
 
@@ -278,15 +349,31 @@ export function WorkEditor({ id }: { id?: string }) {
       rightsNote: form.rightsNote,
       priceWithheld: !!price && !priceVisible,
       tags: form.tags,
+      tagIds: [mediumTagId(form.medium), ...form.tagIds],
+      uses: form.uses,
+      orientation: orientationOf(safeDims, form.medium),
+      locationLabel: locationOf(form)?.region && locationOf(form)?.country ? regionLabel(locationOf(form)!) : (q.data?.work?.locationLabel ?? artist?.regionLabel ?? ''),
       visibility: form.visibility,
       priceVisibility: form.priceVisibility,
       canEdit: true,
       createdAt: '',
       updatedAt: '',
     };
+    const edition = editionOf(form);
+    if (edition) view.edition = edition;
     if (priceVisible && price) view.price = price;
     return view;
-  }, [form, previewAs, q.data?.artist, id]);
+  }, [form, previewAs, q.data?.artist, q.data?.work, id]);
+
+  /* Deep link from the studio nudge: /studio/work/:id?section=tags scrolls to the tags. */
+  const loc = useLocation();
+  const wantSection = new URLSearchParams(loc.search).get('section');
+  const formReady = !!form;
+  useEffect(() => {
+    if (!formReady || wantSection !== 'tags') return;
+    const el = document.getElementById('work-tags');
+    el?.scrollIntoView?.({ block: 'start' });
+  }, [formReady, wantSection]);
 
   /* ----- early states ----- */
   const title = isNew ? 'New work' : 'Edit work';
@@ -332,6 +419,25 @@ export function WorkEditor({ id }: { id?: string }) {
     setForm((cur) => (cur ? { ...cur, [k]: v } : cur));
     if (errors[errKey]) setErrors((e) => ({ ...e, [errKey]: '' }));
   };
+  const clearTagErrors = () => {
+    if (Object.keys(errors).some((k) => k === 'tags' || k.startsWith('tags.'))) setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'tags' && !k.startsWith('tags.'))));
+  };
+  const setTags = (ids: string[]) => {
+    setForm((cur) => (cur ? { ...cur, tagIds: ids } : cur));
+    clearTagErrors();
+  };
+  /** The old primary medium was only mirrored; the picker shows the new one as locked. */
+  const setMedium = (m: Medium) => {
+    setForm((cur) => (cur ? { ...cur, medium: m, tagIds: cur.tagIds.filter((t) => t !== mediumTagId(m)) } : cur));
+    clearTagErrors();
+  };
+  const setLoc = (k: 'locCity' | 'locRegion' | 'locCountry', v: string) => {
+    setForm((cur) => (cur ? { ...cur, [k]: v, locTouched: true } : cur));
+    if (errors.location) setErrors((e) => ({ ...e, location: '' }));
+  };
+  const tagProblems: Record<string, string> = {};
+  for (const [k, msg] of Object.entries(errors)) if (k.startsWith('tags.') && msg) tagProblems[k.slice(5)] = msg;
+  const tagError = !!errors.tags || Object.keys(tagProblems).length > 0;
 
   /* ----- images ----- */
   async function addFiles(list: FileList | File[]) {
@@ -581,7 +687,7 @@ export function WorkEditor({ id }: { id?: string }) {
               <Input label="Title" value={f.title} onChange={(e) => set('title', e.target.value)} error={errors.title} />
               <div className="grid-2">
                 <Input label="Year" inputMode="numeric" value={f.year} onChange={(e) => set('year', e.target.value.replace(/[^\d]/g, '').slice(0, 4))} error={errors.year} />
-                <Select label="Medium" value={f.medium} onChange={(e) => set('medium', e.target.value as Medium)}>
+                <Select label="Medium" value={f.medium} onChange={(e) => setMedium(e.target.value as Medium)}>
                   {MEDIUMS.map((m) => (
                     <option key={m} value={m}>
                       {capitalize(m)}
@@ -625,6 +731,10 @@ export function WorkEditor({ id }: { id?: string }) {
                     <Icon.Ruler aria-hidden="true" /> {conversion || `Converted to ${other} as you type`}
                   </p>
                 </div>
+                <p className="small st-orientation" data-testid="orientation">
+                  <span className="st-orientation__label">{ORIENTATION_COPY.label}</span>{' '}
+                  {dims.height > 0 && dims.width > 0 ? ORIENTATION_COPY.line(ORIENTATION_LABEL[orientationOf(dims, f.medium)]) : ORIENTATION_COPY.pending}
+                </p>
               </Group>
               <Textarea label="Description" value={f.description} onChange={(e) => set('description', e.target.value)} rows={4} hint="What it is, how it was made, anything a curator should know." />
               <Select label="Status" value={f.status} onChange={(e) => set('status', e.target.value as ArtworkStatus)}>
@@ -634,8 +744,62 @@ export function WorkEditor({ id }: { id?: string }) {
                   </option>
                 ))}
               </Select>
+              <Group label={EDITION_COPY.title} error={errors.edition} hint={takesNumber(f.editionType) ? EDITION_COPY.hint : undefined}>
+                <div className="st-edition">
+                  <label className="st-dim st-edition__type">
+                    <span>{EDITION_COPY.type}</span>
+                    <select className="select" value={f.editionType} aria-invalid={errors.edition ? true : undefined} onChange={(e) => set('editionType', e.target.value as EditionType | '', 'edition')}>
+                      <option value="">{EDITION_COPY.none}</option>
+                      {EDITION_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {EDITION_LABEL[t]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {takesNumber(f.editionType) && (
+                    <>
+                      <DimInput label={EDITION_COPY.number} value={f.editionNumber} onChange={(v) => set('editionNumber', v.replace(/\./g, ''), 'edition')} invalid={!!errors.edition} />
+                      <span aria-hidden="true" className="st-dims__x">
+                        /
+                      </span>
+                      <DimInput label={EDITION_COPY.size} value={f.editionSize} onChange={(v) => set('editionSize', v.replace(/\./g, ''), 'edition')} invalid={!!errors.edition} />
+                    </>
+                  )}
+                </div>
+              </Group>
               <Input label="Rights note" value={f.rightsNote} onChange={(e) => set('rightsNote', e.target.value)} hint="Shown with the work. You keep copyright — say how it may be reproduced." />
-              <ChipInput label="Tags" values={f.tags} onChange={(v) => set('tags', v)} hint="Optional. Themes curators might search for, like night or public art." placeholder="Add a tag" />
+            </div>
+          </Panel>
+
+          <div id="work-tags" className="st-anchor" data-invalid={tagError ? 'true' : undefined} tabIndex={tagError ? -1 : undefined}>
+            <Panel title={TAG_COPY.sectionTitle}>
+              <div className="stack">
+                <p className="small muted st-tags__intro">{TAG_COPY.intro}</p>
+                <TagPicker value={f.tagIds} onChange={(ids) => setTags(ids)} lockedMedium={f.medium} mode="work" problems={tagProblems} label={TAG_COPY.sectionTitle} />
+                {errors.tags && (
+                  <p className="field__error" role="alert">
+                    {errors.tags}
+                  </p>
+                )}
+                <ChipInput label={TAG_COPY.keywordsLabel} values={f.tags} onChange={(v) => set('tags', v)} hint={TAG_COPY.keywordsHint} placeholder={TAG_COPY.keywordsPlaceholder} />
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title={WORK_PANEL_COPY.usesAndPlace}>
+            <div className="stack">
+              <UsesField value={f.uses} onChange={(v) => set('uses', v)} />
+              <Group label={LOCATION_COPY.title} hint={LOCATION_COPY.hint} error={errors.location}>
+                {!f.locTouched && !f.locRegion && q.data?.work && q.data.work.locationLabel !== q.data.work.artistRegionLabel && (
+                  <p className="small muted">{WORK_PANEL_COPY.locationNow(q.data.work.locationLabel)}</p>
+                )}
+                <div className="st-location">
+                  <Input label={LOCATION_COPY.city} value={f.locCity} onChange={(e) => setLoc('locCity', e.target.value)} autoComplete="off" />
+                  <Input label={LOCATION_COPY.region} value={f.locRegion} onChange={(e) => setLoc('locRegion', e.target.value)} aria-invalid={errors.location && !f.locRegion.trim() ? true : undefined} autoComplete="off" />
+                  <Input label={LOCATION_COPY.country} value={f.locCountry} onChange={(e) => setLoc('locCountry', e.target.value)} aria-invalid={errors.location && !f.locCountry.trim() ? true : undefined} autoComplete="off" />
+                </div>
+              </Group>
             </div>
           </Panel>
 

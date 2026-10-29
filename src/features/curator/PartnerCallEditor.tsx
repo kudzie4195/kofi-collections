@@ -10,7 +10,8 @@ import { useQuery, useSession } from '@/state/session';
 import { errorMessage, useToast } from '@/state/toast';
 import { Button, EmptyState, Icon, Input, LinkButton, Notice, Select, Skeleton, Textarea } from '@/ui';
 import { focusFirstError, useUnsavedGuard } from '@/features/studio/shared';
-import { MediumChips } from '@/features/admin/ProgrammeFields';
+import { BLANK_CRITERIA, criteriaErrors, CriteriaFields, criteriaToForm, formToCriteria, isCriteriaKey, MediumChips, type CriteriaForm } from '@/features/admin/ProgrammeFields';
+import { matchCopy } from '@/features/programme/matchCopy';
 import { splitExample, termsSentence } from '@/features/programme/terms';
 import { isPartnerCurator, PartnerError, PartnerGate, PartnerShell } from './partnerShared';
 import '@/features/admin/programme.css';
@@ -40,6 +41,8 @@ interface Form {
   pct: Record<PctKey, string>;
   currency: string;
   paymentNote: string;
+  /** v6: "Looking for" criteria as typed. */
+  criteria: CriteriaForm;
 }
 type Errors = Record<string, string | undefined>;
 
@@ -65,6 +68,7 @@ function blankForm(): Form {
     pct: pctStrings(DEFAULT_TERMS),
     currency: DEFAULT_TERMS.currency,
     paymentNote: '',
+    criteria: { ...BLANK_CRITERIA, tagIds: [], uses: [] },
   };
 }
 
@@ -87,6 +91,7 @@ function fromCall(c: OpenCall): Form {
     pct: pctStrings(t),
     currency: t.currency,
     paymentNote: t.paymentNote ?? '',
+    criteria: criteriaToForm(c.lookingFor),
   };
 }
 
@@ -137,6 +142,8 @@ function toInput(f: Form, existing: OpenCall | undefined, institutionName: strin
   const ex = opt(f.exhibitionId);
   if (ex) input.exhibitionId = ex;
   if (existing?.image) input.image = existing.image;
+  // Always sent (undefined when the section is empty) so clearing it removes the stored criteria.
+  input.lookingFor = formToCriteria(f.criteria);
   if (f.kind === 'auction') input.terms = termsOf(f);
   else if (existing?.terms) input.terms = existing.terms; // terms of other kinds are kept as Kofi set them
   return input;
@@ -157,6 +164,7 @@ function clientErrors(f: Form): Errors {
     const p = validateTerms(termsOf(f));
     if (p) e[p.field] = p.message;
   }
+  Object.assign(e, criteriaErrors(f.criteria));
   return e;
 }
 
@@ -279,6 +287,11 @@ function EditorForm({ curator, call, exhibitions }: { curator: CuratorRow; call:
     // A sum error is reported on the artist share; clear it with any share edit.
     if (errors[k] || errors.artistSharePct || errors.terms || errors.general) setErrors((e) => ({ ...e, [k]: undefined, artistSharePct: undefined, terms: undefined, general: undefined }));
   };
+  const setCriteria = (v: CriteriaForm) => {
+    setForm((cur) => ({ ...cur, criteria: v }));
+    if (Object.keys(errors).some((k) => isCriteriaKey(k) && errors[k]) || errors.general)
+      setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !isCriteriaKey(k) && k !== 'general')));
+  };
   const err = (k: string) => errors[k];
   const terms = termsOf(f);
   const example = f.kind === 'auction' ? splitExample(terms) : undefined;
@@ -379,6 +392,10 @@ function EditorForm({ curator, call, exhibitions }: { curator: CuratorRow; call:
               error={err('externalUrl')}
               onChange={(e) => set('externalUrl', e.target.value)}
             />
+          </Section>
+
+          <Section title={matchCopy.editor.title}>
+            <CriteriaFields value={f.criteria} onChange={setCriteria} errors={errors} />
           </Section>
 
           <Section title="Text">
